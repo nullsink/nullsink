@@ -1,0 +1,14 @@
+{
+  "name": "nullsink-monorepo",
+  "private": true,
+  "type": "module",
+  "workspaces": ["core", "client"],
+  "scripts": {
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun --filter '*' test",
+    "build": "bun --filter '*' build",
+    "build:nsk": "bun --filter './core' build:nsk",
+    "lint": "cd core && scripts/lint.sh",
+    "dev": "bun --filter '*' dev"
+  }
+}

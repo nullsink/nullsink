@@ -1,0 +1,22 @@
+# Ignore every .env variant (incl. odd names like ".env copy.example") except the template.
+.env*
+!.env.example
+node_modules
+
+# Local/test SQLite DBs (balances.db, pending.db) and their WAL sidecars + backups.
+# The real ledgers live in the systemd StateDirectory, never in the repo.
+*.db
+*.db-wal
+*.db-shm
+*.bak.db
+
+# Compiled single-binary build artifacts (package.json `build`/`build:nsk` / the release workflow produce them).
+/nullsink-linux-x64
+/nsk-linux-x64
+/SHA256SUMS
+
+# Local agent working memory (notes, not project source).
+memory/
+
+# Operator scratch / point-in-time box state (stale internal notes, not project source; never published).
+.state/

@@ -1,0 +1,16 @@
+# One-shot health check, run by status-check.timer. Exits non-zero when the rail/app is unhealthy, which
+# trips OnFailure= below and pages Telegram. This timer is the PRIMARY monitor (state-independent: it
+# catches a stalled wallet, a hung app, or a dead Caddy on every tick regardless of unit state); the
+# OnFailure= hooks on the app/wallet units are a secondary, immediate page for a clean unit failure.
+[Unit]
+Description=nullsink rail + app health check (one-shot; run by status-check.timer)
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=oneshot
+# HEARTBEAT_URL (the dead-man's-switch ping target) lives in the app env file; `-` so a missing file is fine.
+EnvironmentFile=-/etc/nullsink.env
+# Root: needs to read /etc/monero-wallet-rpc.env and hit the localhost RPC + /healthz without permission
+# friction. It reads the billing DBs only for an integrity pragma — run AS the service user (sudo) so no
+# root-owned sidecars appear — checking page structure, never identity/row content. Privacy-safe.
+ExecStart=/opt/nullsink/deploy/status-check.sh

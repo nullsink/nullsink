@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0B0B0C" />
+    <!-- route:head:start -->
+    <!-- Per-route metadata: prerender.tsx replaces everything between these markers for each route at
+         build time (source of truth: src/routes.tsx). This default is the landing copy, and the
+         dev-server fallback since `bun run dev` doesn't prerender. The robots directive lives INSIDE the
+         markers so one page (the 404) can ship noindex; prerender's headFor re-emits it per route. -->
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+    <link rel="canonical" href="https://nullsink.is/" />
+    <title>nullsink: privacy-first LLM proxy</title>
+    <meta
+      name="description"
+      content="Privacy-first LLM proxy. Mint a prepaid key in your browser, pay with Monero, and use any Anthropic or OpenAI SDK. No account, no logs."
+    />
+    <meta property="og:title" content="nullsink: privacy-first LLM proxy" />
+    <meta
+      property="og:description"
+      content="Privacy-first LLM proxy. Mint a prepaid key in your browser, pay with Monero, and use any Anthropic or OpenAI SDK. No account, no logs."
+    />
+    <meta property="og:url" content="https://nullsink.is/" />
+    <meta name="twitter:title" content="nullsink: privacy-first LLM proxy" />
+    <meta
+      name="twitter:description"
+      content="Privacy-first LLM proxy. Mint a prepaid key in your browser, pay with Monero, and use any Anthropic or OpenAI SDK. No account, no logs."
+    />
+    <!-- route:head:end -->
+
+    <!-- Favicons. favicon.ico (48px) is the root icon that unfurlers (Slack) and Google probe by
+         convention; the SVG bakes in the void background + acid mark (no dark-mode handling needed);
+         apple-touch is for iOS. -->
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- Link preview (fires when pasted into chat). The og:image is an absolute, same-origin URL
+         (scrapers require absolute), which CSP keeps self-hosted. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="nullsink" />
+    <meta property="og:image" content="https://nullsink.is/og.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="nullsink" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="https://nullsink.is/og.png" />
+    <meta name="twitter:image:alt" content="nullsink" />
+
+    <!-- Structured data. application/ld+json is inert data (never executed), so CSP
+         `default-src 'self'` does not block it. Factual only: no offers/prices/ratings. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "Organization",
+            "@id": "https://nullsink.is/#org",
+            "name": "nullsink",
+            "url": "https://nullsink.is/",
+            "logo": "https://nullsink.is/apple-touch-icon.png",
+            "sameAs": ["https://github.com/nullsink"],
+            "description": "Privacy-first LLM proxy. Prepaid API credit bought with Monero. No account, no logs."
+          },
+          {
+            "@type": "WebSite",
+            "@id": "https://nullsink.is/#site",
+            "url": "https://nullsink.is/",
+            "name": "nullsink",
+            "inLanguage": "en",
+            "publisher": { "@id": "https://nullsink.is/#org" }
+          }
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <noscript>
+      This page mints your key in your browser. JavaScript is required; nothing
+      runs on our servers but the payment quote.
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

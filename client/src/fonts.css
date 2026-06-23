@@ -1,0 +1,35 @@
+/* IBM Plex Mono (latin, weights 300/400/600) — declared here instead of importing @fontsource's prebuilt
+ * CSS, because that CSS ships `font-display: swap`, which forces a fallback->web-font SWAP (the FOUT
+ * flicker) on every full-page load. `font-display: optional` instead gives the font a short (~100ms) block
+ * window and then NEVER swaps for that load: paired with the woff2 preload (prerender.tsx) the font is ready
+ * by first paint on any warm/cached load, so the page renders in Plex Mono from frame one with no swap and
+ * no reflow; on a cold miss it shows the fallback for that one load (still no flicker) and the font is
+ * cached for the next visit.
+ *
+ * Source files still come from the @fontsource package (kept as a dependency), so the binaries stay
+ * vendored rather than hand-copied; Vite hashes + self-hosts each one, keeping CSP `default-src 'self'`
+ * satisfied. woff2 only: every browser that can run this ESM page supports it, so the legacy .woff that
+ * @fontsource also ships is dead weight here. Keep these filenames matching prerender.tsx's preload glob
+ * (ibm-plex-mono-latin-<weight>-normal-*.woff2).
+ */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 300;
+  font-display: optional;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-300-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+}

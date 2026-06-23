@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "name": "anthropic-messages-buffered",
+    "provider": "anthropic",
+    "endpoint": "/v1/messages",
+    "model": "claude-haiku-4-5",
+    "stream": false,
+    "expectReasoning": false
+  },
+  "raw": "{\"model\":\"claude-haiku-4-5-20251001\",\"id\":\"msg_01Guy1fiSbQSBocgPhEyoMcP\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I'm ready to help with a concise response.\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,\"stop_details\":null,\"usage\":{\"input_tokens\":13,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":0},\"output_tokens\":14,\"service_tier\":\"standard\",\"inference_geo\":\"not_available\"}}"
+}

@@ -1,0 +1,35 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nullsink.is/sitemap.xml
+
+# AI crawlers. Stance: allow on-demand *retrieval* agents (they fetch to answer a live user
+# query, i.e. high-intent discovery for an LLM proxy), block bulk *training* scrapers (no
+# upside, and declining bulk harvest is consistent with a no-logs privacy product). robots.txt
+# is advisory, not enforcement. To maximise reach instead, delete the Disallow blocks below.
+
+# bulk training scrapers: blocked
+User-agent: GPTBot
+Disallow: /
+
+User-agent: ClaudeBot
+Disallow: /
+
+User-agent: CCBot
+Disallow: /
+
+User-agent: Google-Extended
+Disallow: /
+
+# on-demand retrieval / answer agents: allowed
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /

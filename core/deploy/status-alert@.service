@@ -1,0 +1,13 @@
+# Templated OnFailure= sink: pages Telegram that the instance unit (%i) failed. Wire it onto any unit with
+#   [Unit]
+#   OnFailure=status-alert@%n.service
+# %n expands to the failed unit's full name and becomes this template's instance, so alert.sh is told which
+# unit died. Runs as root so it can read the unit journal (for the health-check report) and the env file.
+[Unit]
+Description=Telegram alert that %i failed
+
+[Service]
+Type=oneshot
+# Telegram creds live in the app's env file (chmod 600, service-owned). `-` so a missing file doesn't error.
+EnvironmentFile=-/etc/nullsink.env
+ExecStart=/opt/nullsink/deploy/alert.sh %i

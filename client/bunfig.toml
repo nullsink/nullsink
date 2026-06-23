@@ -1,0 +1,4 @@
+# Test runner config. Preload registers the DOM (happy-dom) and jest-dom matchers before any test file,
+# so React components render headless under `bun test`. See bun.sh/docs/test/dom.
+[test]
+preload = ["./happydom.ts", "./testing-library.ts"]

@@ -1,0 +1,22 @@
+/* nullsink design tokens — drop into any project, reference via var(--ns-*). */
+:root {
+  /* — color — */
+  --ns-void: #0B0B0C;        /* base / background (near-black) */
+  --ns-acid: #E5FF00;        /* the one accent. use sparingly. */
+  --ns-red: #FF453A;         /* danger hue. ONLY for what can cost money: the no-refunds + lose-the-key warnings and the UNRECOVERABLE tag. */
+  --ns-bone: #ECECE6;        /* primary text on dark */
+  --ns-paper: #F1EFE7;       /* light surface */
+  --ns-ink: #101010;         /* text / mark on light */
+  --ns-muted: #8C8C84;       /* secondary text on dark (~6:1 on void — it carries 12-13px text, so AA-floor isn't enough) */
+  --ns-faint: #46463F;       /* tertiary / captions on dark */
+  --ns-paper-muted: #6A675E; /* secondary text on light */
+  --ns-line: rgba(255, 255, 255, 0.14); /* hairline on dark */
+  --ns-paper-line: rgba(0, 0, 0, 0.18);  /* hairline on light */
+
+  /* — type — */
+  --ns-font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; /* primary: everything */
+  --ns-font-sans: "IBM Plex Sans", system-ui, sans-serif;          /* secondary: long body only */
+  --ns-weight-display: 600;
+  --ns-weight-pipe: 300; /* the "|" in the wordmark is light */
+  --ns-tracking-display: -0.045em;
+}

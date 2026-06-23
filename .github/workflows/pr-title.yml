@@ -1,0 +1,20 @@
+# With squash merging, a PR's title becomes the squashed commit subject on main — which is exactly what
+# release-please reads to compute the next version + changelog. So gate the PR title as a Conventional
+# Commit here; a malformed title fails this check before it can land and pollute the changelog.
+# Make it a required status check in branch protection to enforce it.
+name: pr-title
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  pull-requests: read   # read the PR title from the event; this job never checks out PR code
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

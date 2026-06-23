@@ -1,0 +1,27 @@
+# One-shot DB backup, run daily by backup.timer. Snapshots balances.db + pending.db via sqlite3 .backup,
+# optionally age-encrypts, and (if BACKUP_PUSH_CMD is set) ships the artifact off-box. Runs AS THE SERVICE
+# USER so the SQLite sidecars it touches stay service-owned (a root .backup breaks billing writes).
+[Unit]
+Description=nullsink billing-DB backup (one-shot; run by backup.timer)
+# Page Telegram if a backup run fails (a silent backup failure = creeping data-loss risk).
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=oneshot
+User=nullsink
+Group=nullsink
+WorkingDirectory=/opt/nullsink
+# BACKUP_AGE_RECIPIENT / BACKUP_PUSH_CMD / BACKUP_KEEP live here; `-` so a missing file is fine.
+EnvironmentFile=-/etc/nullsink.env
+# Same StateDirectory as the app, so /var/lib/nullsink (and backups/ under it) is writable under
+# ProtectSystem=strict. DB_PATH/PENDING_DB_PATH default to this dir.
+StateDirectory=nullsink
+Environment=DB_DIR=/var/lib/nullsink
+ExecStart=/opt/nullsink/deploy/backup.sh
+
+# Hardening (mirrors nullsink.service). NB: ProtectHome=read-only still lets the push step read an
+# ssh/rclone credential under the service user's home; the push needs network, so no IPAddress* deny here.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true

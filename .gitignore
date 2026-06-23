@@ -1,0 +1,17 @@
+# Hoisted workspace deps — Bun installs a single root node_modules for all packages.
+node_modules
+
+# Local agent working memory (notes, not project source).
+memory/
+
+# OS / editor cruft.
+.DS_Store
+
+# Claude Code session state + local worktrees — local only, never project source.
+.claude/
+
+# Private operator notes (deploy runbooks, hardening, roadmap) — never part of the public repo.
+internal/
+
+# Per-package ignores (build artifacts, local DBs, .env, etc.) live in core/.gitignore
+# and client/.gitignore and still apply within their subtrees.

@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "name": "openai-chat-buffered",
+    "provider": "openai",
+    "endpoint": "/v1/chat/completions",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "expectReasoning": false
+  },
+  "raw": "{\n  \"id\": \"chatcmpl-DnPFKbLgsNUlpQmpk9EyFi9ewICDt\",\n  \"object\": \"chat.completion\",\n  \"created\": 1780667490,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\": \"assistant\",\n        \"content\": \"Sure! What would you like to know?\",\n        \"refusal\": null,\n        \"annotations\": []\n      },\n      \"logprobs\": null,\n      \"finish_reason\": \"stop\"\n    }\n  ],\n  \"usage\": {\n    \"prompt_tokens\": 13,\n    \"completion_tokens\": 9,\n    \"total_tokens\": 22,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\": 0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\": {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\": 0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\": \"default\",\n  \"system_fingerprint\": \"fp_196f526a25\"\n}\n"
+}

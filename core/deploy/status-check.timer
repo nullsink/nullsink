@@ -1,0 +1,12 @@
+# Fire the health check shortly after boot and every 10 minutes thereafter. Enable with:
+# systemctl enable --now status-check.timer (setup.sh does this). Monotonic OnBootSec/OnUnitActiveSec resume
+# on their own after a reboot; Persistent= is intentionally omitted (it only affects OnCalendar= timers).
+[Unit]
+Description=Run the nullsink health check every 10 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target

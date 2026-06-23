@@ -1,0 +1,40 @@
+# Automated release flow. On every push to main, release-please reads the Conventional Commit history
+# (squash-merge subjects) and maintains an open "release PR" that bumps the version + regenerates
+# CHANGELOG.md. Merging that PR creates the vX.Y.Z git tag + a GitHub Release (notes = the changelog
+# section), then this workflow builds the verifiable linux-x64 artifacts and attaches them to it.
+#
+# The build runs here via `needs` (not release.yml's tag trigger) on purpose: a tag pushed by the default
+# GITHUB_TOKEN does NOT trigger other workflows (GitHub blocks recursive runs), so we drive the build
+# directly from this run instead of needing a PAT. The build itself lives once in release.yml (reused).
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write       # create the release PR, the tag, and the GitHub Release
+  pull-requests: write  # open/update the release PR
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Reads release-please-config.json + .release-please-manifest.json (the defaults).
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+  # Only when the release PR was just merged (a real release was cut): build + attach the artifacts to
+  # the Release release-please created, by reusing release.yml with the new tag.
+  build:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

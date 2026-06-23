@@ -1,0 +1,48 @@
+# Weekly: flag when a pinned external version (Bun / bitcoind / monero, in core/deploy/setup.sh) falls behind
+# upstream's latest release. NOTIFY-ONLY — opens a GitHub issue, never bumps anything (a bump changes a
+# checksum and must be done deliberately). Run on demand via the "Run workflow" button too. The comparison
+# logic lives in core/scripts/check-pins.sh (runnable locally from the core/ directory).
+name: check-pins
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    if: github.repository == 'nullsink/nullsink'   # don't run on forks (would open issues on the fork)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: compare pins vs upstream
+        id: c
+        working-directory: core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if report="$(scripts/check-pins.sh)"; then
+            echo "all pins current"; exit 0
+          fi
+          {
+            echo "behind=true"
+            echo "report<<REPORT_EOF"
+            echo "$report"
+            echo "REPORT_EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: open an issue when behind (deduped by title)
+        if: steps.c.outputs.behind == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.c.outputs.report }}
+        run: |
+          title="Pinned dependencies behind upstream"
+          if gh issue list --state open --search "$title in:title" --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "an open '$title' issue already exists — leaving it"; exit 0
+          fi
+          printf '%s\n\nBump the version + hash in `core/deploy/setup.sh` (and `bun-version` in `.github/workflows/ci.yml` for Bun), verifying the new checksum. Notify-only; nothing was changed.\n' "$REPORT" \
+            | gh issue create --title "$title" --body-file -

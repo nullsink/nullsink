@@ -1,0 +1,63 @@
+[Unit]
+Description=nullsink — metered Anthropic proxy
+After=network-online.target
+Wants=network-online.target
+# Page Telegram if this unit enters `failed` (a clean crash, or a crash-loop that trips the start limit).
+# Secondary to status-check.timer, which catches a hung-but-"active" or stalled service every 10 min.
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+User=nullsink
+Group=nullsink
+WorkingDirectory=/opt/nullsink
+EnvironmentFile=/etc/nullsink.env
+# Runs the self-contained `bun build --compile` artifact via the `current` symlink, swapped atomically
+# by deploy.sh/setup.sh's install_binary (versioned binary + relative `current` symlink for rollback).
+ExecStart=/usr/local/lib/nullsink/current
+Restart=always
+RestartSec=2
+
+# Balance ledger lives here: /var/lib/nullsink, created service-owned and
+# writable even under ProtectSystem=strict. This is the only stateful asset —
+# back it up (losing it = refunding everyone). It holds token hashes + balances
+# only; no identity, no request history.
+StateDirectory=nullsink
+Environment=DB_PATH=/var/lib/nullsink/balances.db
+
+# In-flight XMR orders (the buy rail), in the same StateDirectory. NOT the primary asset (rows are
+# transient) but while an order is in-flight it holds the ONLY payment→token link — losing it
+# mid-flight = a paid customer with nothing to credit — so BACK IT UP too.
+Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
+
+# Holds many concurrent, minutes-long upstream connections.
+LimitNOFILE=1048576
+
+# Memory + task containment. The box (4 GB) also runs Caddy, monero-wallet-rpc, Tor, and the OS, so a leak
+# or flood in this service must not OOM the whole box. MemoryMax is a hard cgroup cap: exceeding it invokes
+# the cgroup OOM killer, which reaps only processes in THIS unit (never Caddy/sshd box-wide), and
+# OOMPolicy=stop + Restart=always relaunch cleanly. MemoryHigh applies reclaim back-pressure first (soft),
+# below the hard cap. A post-OOM kill strands any in-flight holds, the same accepted edge as any ungraceful
+# death (see index.ts shutdown notes). TasksMax bounds a thread/fork runaway. Values
+# leave roughly 2 GB for everything else on the box; raise MemoryMax if real load ever trips a false kill.
+MemoryHigh=1536M
+MemoryMax=2048M
+TasksMax=512
+OOMPolicy=stop
+
+# Drain in-flight requests on stop/restart so their billing settles (the app handles SIGTERM: it lets
+# streams finish for a short grace, then bills any straggler its metered partial + refunds the rest before
+# force-closing). This window must stay ABOVE the app's SHUTDOWN_GRACE_MS (default 25s) so the app always
+# finishes settlement on its own terms; if systemd SIGKILLs first, an in-flight hold is left un-reconciled.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+# Hardening. The app writes only the balance ledger, under StateDirectory (below);
+# ProtectSystem=strict keeps the rest of the filesystem read-only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

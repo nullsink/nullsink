@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "name": "openai-chat-tool",
+    "provider": "openai",
+    "endpoint": "/v1/chat/completions",
+    "model": "gpt-4o-mini",
+    "stream": false,
+    "expectReasoning": false
+  },
+  "raw": "{\n  \"id\": \"chatcmpl-DnPFNum9LU38MueyL37LLNVGd5S2h\",\n  \"object\": \"chat.completion\",\n  \"created\": 1780667493,\n  \"model\": \"gpt-4o-mini-2024-07-18\",\n  \"choices\": [\n    {\n      \"index\": 0,\n      \"message\": {\n        \"role\": \"assistant\",\n        \"content\": null,\n        \"tool_calls\": [\n          {\n            \"id\": \"call_Ku1ZNznhVKoHHaQKJY6Z7pk2\",\n            \"type\": \"function\",\n            \"function\": {\n              \"name\": \"get_weather\",\n              \"arguments\": \"{\\\"city\\\":\\\"Paris\\\"}\"\n            }\n          }\n        ],\n        \"refusal\": null,\n        \"annotations\": []\n      },\n      \"logprobs\": null,\n      \"finish_reason\": \"tool_calls\"\n    }\n  ],\n  \"usage\": {\n    \"prompt_tokens\": 54,\n    \"completion_tokens\": 14,\n    \"total_tokens\": 68,\n    \"prompt_tokens_details\": {\n      \"cached_tokens\": 0,\n      \"audio_tokens\": 0\n    },\n    \"completion_tokens_details\": {\n      \"reasoning_tokens\": 0,\n      \"audio_tokens\": 0,\n      \"accepted_prediction_tokens\": 0,\n      \"rejected_prediction_tokens\": 0\n    }\n  },\n  \"service_tier\": \"default\",\n  \"system_fingerprint\": \"fp_f8d40babb7\"\n}\n"
+}

@@ -1,0 +1,12 @@
+# Run deploy/backup.sh daily. Enable with: systemctl enable --now backup.timer (setup.sh does this).
+# Persistent=true so a backup missed while the box was off runs on the next boot (don't silently skip a day).
+[Unit]
+Description=Daily backup of the nullsink billing DBs
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

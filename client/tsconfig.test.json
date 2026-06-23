@@ -1,0 +1,11 @@
+{
+  // Typechecks the test files + their harness in isolation, with Bun's globals (bun:test, mock, …) added.
+  // Kept out of the app build (tsconfig.json excludes *.test.*) so production code stays browser-only and
+  // strict. Run via `tsc -p tsconfig.test.json` (the `test` npm script does this before `bun test`).
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun", "vite/client"]
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.test.tsx", "happydom.ts", "testing-library.ts", "matchers.d.ts"],
+  "exclude": []
+}

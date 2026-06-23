@@ -1,0 +1,50 @@
+[Unit]
+Description=bitcoind — pruned, WATCH-ONLY node + wallet for the Bitcoin buy rail
+After=network-online.target
+Wants=network-online.target
+# Page Telegram if this unit enters `failed`. Secondary to status-check.timer, which catches a stalled or
+# de-synced node (height behind headers, wallet not loaded) on every tick regardless of unit state.
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+# Same low-privilege user as the proxy. The loaded wallet is a WATCH-ONLY descriptor wallet (imported from
+# your xpub, NO private keys) — it detects deposits and derives receive addresses but CANNOT spend. The
+# spend key never touches the box (the "watch-only online, cold custody" invariant).
+User=nullsink
+Group=nullsink
+
+# Holds the pruned chain + chainstate (~15 GB steady-state) and the watch-only wallet. Persistent so the
+# wallet's address index keeps advancing across restarts (an order's derivation index must keep resolving).
+# Sensitive only in that the watch-only wallet reveals your deposit addresses — no spend capability. The
+# wallet is created once from your xpub.
+StateDirectory=bitcoind
+StateDirectoryMode=0700
+RuntimeDirectory=bitcoind
+
+# bitcoin.conf (created per the runbook) carries: prune=, server=1, rpcbind=127.0.0.1 + rpcauth=, and
+# wallet=nullsink. RPC is localhost-ONLY — NEVER bind it public. Run in the foreground for systemd (Type=simple).
+ExecStart=/usr/local/bin/bitcoind -datadir=%S/bitcoind -conf=%S/bitcoind/bitcoin.conf -pid=/run/bitcoind/bitcoind.pid
+# Let bitcoind flush the chainstate cleanly on stop (a hard kill mid-flush forces a slow reindex next boot).
+ExecStop=/usr/local/bin/bitcoin-cli -datadir=%S/bitcoind stop
+TimeoutStopSec=300
+Restart=always
+RestartSec=5
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# NOTE: unlike the Monero view-only watcher (which only ever talks to a localhost Tor SOCKS proxy and so can
+# IPAddressDeny=any), bitcoind needs OUTBOUND P2P to sync the chain — so we do NOT deny non-localhost
+# traffic. The cold-custody guarantee is at the WALLET level (the loaded wallet is watch-only, no spend key),
+# not network isolation. The RPC stays localhost-bound. To run P2P over Tor, add proxy=127.0.0.1:9050 to
+# bitcoin.conf (optional — the node is local + trusted, so there's no remote-node-lies risk to mitigate,
+# unlike Monero).
+
+[Install]
+WantedBy=multi-user.target

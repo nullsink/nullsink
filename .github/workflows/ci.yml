@@ -1,0 +1,50 @@
+# Gate every PR (and main) on typecheck + the test suites of BOTH workspace packages,
+# AND lint core's deploy artifacts (shell scripts + Caddyfile). The box runs a compiled
+# binary whose operations ARE those deploy scripts/units, so a type error, a broken boot
+# guard, or a deploy-script bug becomes a red PR here instead of a live crash-loop.
+# Tests run via `bun --filter` so each package's bunfig.toml [test] preload applies
+# (a bare `bun test` at the root would skip them).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read   # CI only reads the repo; fork PRs get no write scope
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14   # pin: reproducible CI; matches the box runtime + @types/bun
+      - run: bun install --frozen-lockfile
+      - run: bun --filter '*' typecheck
+      - run: bun --filter '*' test
+      - run: bun --filter '*' build          # core single-binary + client static bundle (smoke)
+      - run: bun --filter './core' build:nsk  # nsk operator-CLI binary (smoke)
+
+  lint:
+    # Runs core/scripts/lint.sh — the same gate a developer runs locally — with pinned linters.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install pinned linters
+        run: |
+          SHELLCHECK_SHA256=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+          curl -fsSL https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz -o shellcheck.tar.xz
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz
+          sudo install -m755 shellcheck-v0.11.0/shellcheck /usr/local/bin/shellcheck
+          CADDY_VER=2.11.4
+          CADDY_SHA512=8220d1f013b6f27510247b2360c9e0ca9f018feebd82515f07635318b34ff9777ccc8fd0b6e6f2486ce3a33fe389fbb7db12d05baa474f4587509fb4f5ebf1c9
+          curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VER}/caddy_${CADDY_VER}_linux_amd64.tar.gz" -o caddy.tar.gz
+          echo "${CADDY_SHA512}  caddy.tar.gz" | sha512sum -c -
+          tar -xzf caddy.tar.gz caddy
+          sudo install -m755 caddy /usr/local/bin/caddy
+      - run: scripts/lint.sh
+        working-directory: core

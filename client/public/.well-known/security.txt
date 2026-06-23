@@ -1,0 +1,4 @@
+Contact: mailto:security@nullsink.is
+Encryption: https://nullsink.is/.well-known/security-pgp.asc
+Expires: 2027-06-04T00:00:00.000Z
+Preferred-Languages: en

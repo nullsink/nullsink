@@ -1,0 +1,153 @@
+# Caddyfile — nullsink public edge (clearnet, automatic TLS). Host-agnostic template.
+#
+# The served domain comes from {$NULLSINK_DOMAIN}: set NULLSINK_DOMAIN in /etc/nullsink.env and setup.sh
+# feeds it to Caddy via a systemd drop-in (so this file hardcodes no host). Point that domain's A/AAAA
+# record at this box. The UI web root defaults to /var/www/nullsink/current-web — the versioned-UI symlink
+# deploy.sh maintains (override with NULLSINK_WEBROOT). No ACME `email` is set: Caddy issues + renews certs
+# without one. Add an
+# `email you@example.com` line to the global block below if you want Let's Encrypt cert-expiry notices.
+#
+# Design:
+#   - The app stays bound to 127.0.0.1:8080 (HOST=127.0.0.1); only Caddy faces the internet.
+#   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions (OpenAI, when enabled)
+#     + GET /balance + POST /buy + POST /order-status + GET /rails.
+#   - /buy IS routed: a browser-side UI can only call a reachable endpoint, and we run no server-side BFF,
+#     so /buy is publicly reachable. That's fine: /buy hands out a payment address, not free value, and is
+#     bounded by the app's resource caps. No CAPTCHA/PoW gate (decided). We simply don't advertise it.
+#     (Taking /buy genuinely off the public net would need a BFF — a different design.)
+#   - NO `log` directive → Caddy keeps no access logs / no client IPs. Access logging is off by default
+#     in Caddy v2; this comment makes the no-identity intent explicit. Don't add `log` without thought.
+{
+	# Slow-loris guard: bound how long a client may take to send request HEADERS and the full request BODY.
+	# read_body maps to Go's ReadTimeout (the whole-request READ deadline); it does NOT bound response WRITES,
+	# so long SSE generations on /v1/messages (streamed for up to UPSTREAM_TIMEOUT_MS, ~10min) are unaffected.
+	# 5m tolerates a 32 MiB multimodal upload over a slow link while still cutting a dribble (slow-body)
+	# attack. Do NOT add a `write` timeout here: it WOULD cut a long generation. flush_interval -1 (below)
+	# keeps SSE flushing immediately regardless.
+	servers {
+		timeouts {
+			read_header 15s
+			read_body 5m
+		}
+	}
+}
+
+{$NULLSINK_DOMAIN} {
+	# --- Security headers ---
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		# The token is the customer's money: no third-party script may ever load on the page that
+		# holds it. Everything is same-origin (UI + /buy + /balance + /v1 on the one domain), so a
+		# strict default-src 'self' needs no carve-outs — the built UI self-hosts fonts (@fontsource)
+		# and the QR (bundled qrcode-generator), no CDN. base-uri 'none' is load-bearing, not cosmetic:
+		# the UI fetches /balance with a RELATIVE url, so an injected <base> could redirect that request
+		# (and the raw token) to an attacker origin — this forbids it. frame-ancestors/X-Frame-Options
+		# stop clickjacking. Applied site-wide (incl. API routes); harmless on JSON, defence in depth.
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+		X-Frame-Options "DENY"
+		# The page uses no powerful browser APIs, so deny them all (defence in depth). payment=() forbids
+		# the browser Payment Request API — irrelevant here since funding is XMR, but explicit is better.
+		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+		-Server
+	}
+
+	# --- Metered API. Large multimodal prompts allowed; SSE streamed through untouched. ---
+	handle /v1/messages {
+		# Caddy enforces max_size on the ACTUAL bytes received, so this also closes the
+		# chunked-transfer bypass that the app's content-length-header check misses.
+		request_body {
+			max_size 32MiB
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1 # stream SSE immediately, no response buffering (long generations)
+			header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+		}
+	}
+
+	# --- Metered API (OpenAI Chat Completions + Responses). Same treatment as /v1/messages; the app 404s
+	#     these when OPENAI_API_KEY is unset, so routing them is harmless before the provider is enabled. ---
+	handle /v1/chat/completions {
+		request_body {
+			max_size 32MiB
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1 # stream SSE immediately, no response buffering (long generations)
+			header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+		}
+	}
+
+	handle /v1/responses {
+		request_body {
+			max_size 32MiB
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Balance check (API clients + the UI poll this). ---
+	handle /balance {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Credit purchase (called by the UI). Tiny JSON body. ---
+	handle /buy {
+		request_body {
+			max_size 4KB
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Order status (the UI polls a pending payment's progress, keyed by the token HASH — never the
+	#     raw token). Tiny JSON body, same as /buy; reveals no balance. ---
+	handle /order-status {
+		request_body {
+			max_size 4KB
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Active pay rails (the UI picker reads this to render the coin choices; reveals only which coins
+	#     we accept — already public on the marketing pages). Tiny GET, no body, no balance. ---
+	handle /rails {
+		reverse_proxy 127.0.0.1:8080 {
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; it's a
+	#     localhost-only liveness check, so public requests for it just 404 here.) ---
+	handle {
+		root * {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}
+		encode gzip zstd
+		file_server
+	}
+
+	# --- Pretty 404. file_server (above) raises a 404 when an unknown path matches no static file; serve
+	#     the prerendered /404.html in its place but KEEP the 404 status (the file_server `status`
+	#     subdirective, Caddy v2.7+). A soft-404 (200 + not-found body) is an SEO anti-pattern and would
+	#     contradict the page's own noindex meta. Gated on @404 so other edge errors (e.g. a 502 if the app
+	#     is down) still get Caddy's default handling. This never touches the API's own 404s: a JSON 404
+	#     forwarded by reverse_proxy is a *successful* proxy of an upstream response, not a Caddy-raised
+	#     error, so handle_errors never sees it. The site-wide security headers (incl. CSP) above apply to
+	#     this response too, and the body is same-origin, so default-src 'self' stays satisfied. ---
+	handle_errors {
+		@404 expression {err.status_code} == 404
+		handle @404 {
+			root * {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}
+			rewrite * /404.html
+			file_server {
+				status 404
+			}
+		}
+	}
+}

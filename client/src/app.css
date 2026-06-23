@@ -1,0 +1,821 @@
+/* nullsink purchase page. Dark-first, mono-led, one accent (acid) used as a scalpel.
+   Lines are content-driven single hairlines (no decorative grid, no double borders). */
+
+* { box-sizing: border-box; }
+
+:root { color-scheme: dark; }
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  background: var(--ns-void);
+  color: var(--ns-bone);
+  font-family: var(--ns-font-mono);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--ns-acid); color: var(--ns-ink); }
+
+a { color: var(--ns-bone); text-underline-offset: 3px; }
+a:hover { color: var(--ns-acid); }
+
+button { font-family: inherit; font-size: inherit; cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* ---- layout shell ------------------------------------------------------- */
+.shell {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 0 20px 80px;
+}
+
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 22px 0 18px;
+  border-bottom: 1px solid var(--ns-line);
+}
+.bar .links { font-size: 13px; color: var(--ns-muted); display: flex; gap: 18px; }
+.bar .links a { text-decoration: none; }
+/* the brand wraps the wordmark in a home link; keep the wordmark's exact look (no underline, and the
+   text doesn't flip to acid on hover the way body links do — the mark is already the accent) */
+.brand { text-decoration: none; color: inherit; }
+.brand:hover { color: inherit; }
+
+/* ---- wordmark ----------------------------------------------------------- */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5ch;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: var(--ns-tracking-display);
+  font-size: 19px;
+}
+.wordmark .mark { height: 1cap; width: 1cap; color: var(--ns-acid); display: inline-block; }
+
+/* ---- section scaffolding ------------------------------------------------ */
+.section { margin-top: 40px; }
+.section h2 {
+  margin: 8px 0 4px;
+  font-size: 22px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: var(--ns-tracking-display);
+}
+
+/* ---- hero (two annotation notes: ? = what, ! = experimental) ------------ */
+.hero { padding: 32px 0 0; }
+/* .note is used on both a <p> (caveat) and the <h1> (lead proposition) — pin font-size/weight
+   so the heading reads as body text, not a UA-styled h1. */
+.note {
+  display: flex;
+  gap: 0.9ch;
+  align-items: flex-start;
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--ns-bone);
+}
+.note:last-child { margin-bottom: 0; }
+.note .marker {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55em;
+  height: 1.55em;
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+  margin-top: 0.05em;
+}
+
+/* the "!" caution marker on the early-days notice — red chip (ink-on-red, like .hl.danger). A
+   deliberate use of the reserved money-hue for the one experimental-uptime caveat. */
+.note .marker.danger { background: var(--ns-red); }
+
+/* ---- amount picker ------------------------------------------------------ */
+.field-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+  margin-bottom: 12px;
+}
+/* Spacing-only classes that replaced inline style={} props — kept out of the markup so the
+   launch CSP can stay strict (style-src 'self', no 'unsafe-inline'). */
+.done-keyblock { margin-top: 18px; }
+.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+/* presets are pre-fill shortcuts for credit_usd; the matching one gets a thick acid
+   border (no fill), inactive ones are grayed. credit_usd is always the active value. */
+.preset {
+  background: transparent;
+  color: var(--ns-muted);
+  border: 1px solid var(--ns-line);
+  padding: 14px 0;
+  text-align: center;
+  font-size: 15px;
+  transition: border-color 0.12s, color 0.12s;
+}
+.preset:hover { color: var(--ns-bone); border-color: var(--ns-muted); }
+.preset[aria-pressed="true"] {
+  color: var(--ns-bone);
+  border-color: var(--ns-acid);
+  box-shadow: inset 0 0 0 1px var(--ns-acid);
+}
+
+/* custom amount: an obvious "type your own" field under the presets. The dollar sign and
+   acid underline mark it as the editable, active value (the presets above are quick fills). */
+.custom { margin-top: 16px; }
+.custom-label {
+  display: block;
+  font-size: 12px;
+  color: var(--ns-muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.custom-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  border-bottom: 1px solid var(--ns-acid);
+  padding-bottom: 2px;
+}
+.custom-field .dollar { color: var(--ns-acid); font-size: 18px; }
+.amount-input {
+  background: transparent;
+  border: none;
+  color: var(--ns-acid);
+  font-family: inherit;
+  font-size: 18px;
+  width: 7ch;
+  padding: 2px 0;
+}
+.amount-input:focus { outline: none; }
+
+.range-cap {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ns-muted);
+  letter-spacing: 0.04em;
+}
+.range-cap.flash { color: var(--ns-acid); }
+/* min/max sits in the AMOUNT label row (inherits its uppercase/size/color); flashes on a clamp */
+.range-inline { display: inline-flex; gap: 14px; }
+.range-inline.flash { color: var(--ns-acid); }
+.price-line { margin-top: 8px; font-size: 15px; line-height: 1.9; color: var(--ns-bone); letter-spacing: 0.04em; }
+.src-note {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--ns-muted);
+  letter-spacing: 0.04em;
+}
+/* venue names in the rate-source caption: bright bone, so the reputable sources read as a
+   trust signal without the loud acid block (acid is reserved for short key words like min/max). */
+.src-name { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
+/* the up-front reassurance, just below the price line: "any coin works" leads in acid, the rest in white */
+.pay-note { margin-top: 8px; font-size: 13px; color: var(--ns-bone); letter-spacing: 0.04em; }
+.pay-note .lead { color: var(--ns-acid); font-weight: var(--ns-weight-display); }
+
+/* simplified payment card */
+.pay { display: flex; gap: 18px; align-items: flex-start; margin-top: 22px; flex-wrap: wrap; }
+.pay-main { flex: 1; min-width: 0; }
+.pay-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+}
+.pay-amount {
+  margin-top: 10px;
+  font-size: 18px;
+  color: var(--ns-bone);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  word-break: break-all;
+}
+.pay-to {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ns-muted);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.pay-to span { word-break: break-all; }
+/* the address's first/last 4 — the chars a payer actually compares against their wallet */
+.pay-to .addr-end { color: var(--ns-acid); }
+.pay-meta { margin-top: 12px; font-size: 12px; color: var(--ns-muted); line-height: 1.55; }
+
+/* ---- primary / secondary buttons ---------------------------------------- */
+.btn-primary {
+  margin-top: 22px;
+  width: 100%;
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  border: 1px solid var(--ns-acid);
+  padding: 14px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: 0.02em;
+}
+/* Disabled, the CTA must still read as a button that exists — faint text at 0.55 opacity computed to
+   ~2:1 contrast, leaving the page's primary action invisible on dark mobile panels. Muted text on a
+   visible hairline keeps it clearly inactive without making it disappear. */
+.btn-primary:disabled {
+  background: transparent;
+  color: var(--ns-muted);
+  border-color: var(--ns-line);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--ns-bone);
+  border: 1px solid var(--ns-line);
+  padding: 10px 16px;
+}
+.btn-ghost:hover { border-color: var(--ns-muted); }
+.btn-ghost:disabled { color: var(--ns-faint); opacity: 0.55; }
+.btn-ghost:disabled:hover { border-color: var(--ns-line); }
+
+/* segmented key-mode toggle (new key | I have a key) */
+.seg { display: flex; border: 1px solid var(--ns-line); margin-top: 28px; }
+.seg button {
+  flex: 1;
+  background: transparent;
+  color: var(--ns-muted);
+  border: none;
+  padding: 12px;
+  font-size: 14px;
+}
+.seg button + button { border-left: 1px solid var(--ns-line); }
+.seg button.on { background: var(--ns-acid); color: var(--ns-ink); font-weight: var(--ns-weight-display); }
+
+/* coin picker — the .seg control carrying a logo + name + ticker per button, under a "pay with" label */
+.coin-pick { margin-top: 22px; }
+.seg.coins { margin-top: 8px; }
+.seg.coins button { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.coin-mark { width: 15px; height: 15px; flex: none; }
+.coin-tic { font-size: 12px; opacity: 0.7; }
+.coin-desc { margin-top: 10px; color: var(--ns-muted); font-size: 13px; }
+.coin-caveat { margin-top: 8px; color: var(--ns-muted); font-size: 12px; line-height: 1.5; }
+
+.hint { margin-top: 12px; color: var(--ns-muted); font-size: 13px; line-height: 1.5; }
+.have-key-inline { margin-top: 14px; }
+/* existing-key actions: check (default) + get address (highlighted), side by side */
+.btn-row { display: flex; gap: 10px; margin-top: 22px; }
+.btn-row .btn-primary { margin-top: 0; width: auto; flex: 1; }
+.btn-row .btn-ghost { flex: none; }
+
+/* click-through acceptance: a small acid checkbox plus a link up to the terms section */
+.agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 22px;
+  font-size: 13px;
+  color: var(--ns-muted);
+  line-height: 1.5;
+}
+.agree input { margin-top: 2px; flex: none; accent-color: var(--ns-acid); }
+/* the submit nudge moves focus here — make the landing spot unmissable */
+.agree input:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
+.agree a { color: var(--ns-bone); }
+.agree a:hover { color: var(--ns-acid); }
+
+/* ---- key flow entry: paste + balance fork ------------------------------- */
+.paste-input {
+  width: 100%;
+  display: block;
+  box-sizing: border-box;
+  color-scheme: dark;
+  background: transparent;
+  border: 1px solid var(--ns-line);
+  color: var(--ns-bone);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 12px 14px;
+  letter-spacing: 0.02em;
+}
+.paste-input:focus { outline: none; border-color: var(--ns-acid); }
+.paste-input::placeholder { color: var(--ns-faint); }
+/* kill native + extension password decorations (the stray key icon) */
+.paste-input::-ms-reveal,
+.paste-input::-ms-clear { display: none; }
+.paste-input::-webkit-credentials-auto-fill-button,
+.paste-input::-webkit-strong-password-auto-fill-button,
+.paste-input::-webkit-contacts-auto-fill-button {
+  display: none !important;
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+.check-line { margin-top: 16px; font-size: 14px; color: var(--ns-bone); }
+.check-line.none { color: var(--ns-muted); }
+.delta { color: var(--ns-muted); font-size: 18px; font-weight: 400; margin-left: 8px; }
+
+/* ---- notice strip (errors, register C) ---------------------------------- */
+.notice {
+  margin-top: 16px;
+  border-left: 2px solid var(--ns-acid);
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--ns-muted);
+}
+
+/* ---- the key cell — one acid-bordered component (mint + top-up) ---------- */
+.keycell {
+  border: 1px solid var(--ns-acid);
+  padding: 0;
+}
+.keycell .head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px 9px 16px;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-wrap: wrap;
+}
+.keycell .head .label { color: var(--ns-bone); }
+.keycell .head-right { display: flex; align-items: center; gap: 8px; }
+/* UNRECOVERABLE is a RED highlighter block — it belongs to the hard-absolute register (lose the key,
+   lose the credit), not the acid "this is the point" one. The bordered copy/show buttons on the right
+   are the clickable controls. */
+.keycell .head .tag {
+  background: var(--ns-red);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+  padding: 0.1em 0.5ch;
+  letter-spacing: 0.04em;
+}
+.keycell .body { padding: 16px; }
+.token {
+  font-size: 18px;
+  color: var(--ns-acid);
+  word-break: break-all;
+  overflow-wrap: anywhere; /* the masked run of • bullets has no break opportunity for break-all alone */
+  user-select: all;
+  line-height: 1.45;
+}
+
+/* ---- copy button (inline, label swaps to copied) ------------------------ */
+.copy {
+  background: transparent;
+  border: 1px solid var(--ns-line);
+  color: var(--ns-muted);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+}
+.copy:hover { border-color: var(--ns-muted); color: var(--ns-bone); }
+.copy.copied { color: var(--ns-acid); border-color: var(--ns-acid); }
+.copy:disabled { opacity: 0.55; }
+/* highlight variant: the small "a highlight you can click" action (the on-demand check) */
+.copy.acid {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  border-color: var(--ns-acid);
+  font-weight: var(--ns-weight-display);
+}
+.copy.acid:hover { color: var(--ns-ink); }
+/* roomier tap targets on touch devices only (desktop look unchanged): 12px padding + 11px text +
+   borders ≈ 40px tall — the practical minimum where a mis-tap stops hitting the neighbour (check
+   sits beside copy on the pay screen) */
+@media (pointer: coarse) {
+  .copy { padding: 12px 14px; }
+}
+
+/* ---- QR ----------------------------------------------------------------- */
+/* Generous size + breathing room: the svg bakes in a 4-module quiet zone, and the extra padding keeps
+   the modules clear of the hairline border (cramped modules read badly and scan worse). */
+.qr { width: 188px; height: 188px; flex: none; background: var(--ns-void); border: 1px solid var(--ns-line); padding: 12px; }
+.qr svg { display: block; width: 100%; height: 100%; }
+
+/* ---- status / on-demand check ------------------------------------------- */
+.status {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.status .watch { color: var(--ns-bone); }
+
+/* ---- pay with another coin (Trocador swap fallback) ---- */
+/* A short link directly under the key (above the XMR details) so a non-XMR holder spots the escape hatch
+   immediately; the third-party + rate fine print is the (*) footnote at the bottom. The link is acid; the
+   two (*) markers are white so they read against the acid link and the muted footnote. No logo. */
+.swap-line { font-size: 15px; }
+.swap-line a { color: var(--ns-acid); }
+.fn-ref { color: var(--ns-bone); }
+/* fine print is still a warning — sans for the multi-sentence read, and never below 13px */
+.swap-note { margin-top: 22px; font-size: 13px; color: var(--ns-muted); line-height: 1.55; }
+
+/* ---- funded ------------------------------------------------------------- */
+.funded-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.funded-tag {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+  padding: 3px 10px;
+  letter-spacing: 0.04em;
+}
+.balance { font-size: 30px; color: var(--ns-bone); font-weight: var(--ns-weight-display); }
+
+/* ---- the highlighter — the signature mark ------------------------------- */
+/* Acid as a block behind ink text, not as glowing text. The brand's light-surface
+   highlighter motif, used on dark as the one "this is the point" treatment. Reserve
+   it for short words; long strings (token, address) stay legible as plain text. The
+   primary button is the same language at button scale — a highlight you can click. */
+.hl {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+  padding: 0.04em 0.4ch;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+/* danger variant — the same highlighter block, red hue (dark ink stays for contrast). Reserved for
+   what can cost money: the two non-recoverable terms warnings (no refunds; lose the key, lose the
+   balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
+.hl.danger { background: var(--ns-red); }
+
+/* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
+.terms { border: 1px solid var(--ns-acid); }
+.terms-head {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-acid);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--ns-line);
+}
+.terms-list { list-style: none; margin: 0; padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+.terms-list li {
+  position: relative;
+  padding-left: 18px; /* room for the absolutely-positioned dash bullet; row spacing is the list's gap */
+  color: var(--ns-bone);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.terms-list li::before {
+  content: "–";
+  position: absolute;
+  left: 0;
+  color: var(--ns-muted);
+}
+/* the Monero-specific timing line keeps the dash bullet; the ɱ mark sits inline before the text */
+.terms-list li.terms-xmr .mono-mark { width: 1em; height: 1em; vertical-align: -0.12em; margin-right: 9px; color: var(--ns-bone); }
+
+/* ---- use it — integration reference (per-provider tabs over a <dl> of key/value rows) --- */
+/* CSS-only tabs: hidden radios drive the panels via :checked ~, so the reference reads with JS off.
+   Visually matches the .seg segmented control (acid-highlighted active). */
+.useit-tabs { position: relative; } /* anchor the absolutely-positioned (visually hidden) radios */
+.useit-radio { position: absolute; width: 1px; height: 1px; opacity: 0; } /* hidden but keyboard-focusable */
+.useit-tablist { display: flex; border: 1px solid var(--ns-line); margin-top: 16px; }
+.useit-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--ns-muted);
+  padding: 12px;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+/* logo inherits the label's color (currentColor): ink on the active acid tab, muted when inactive */
+.useit-tab-logo { width: 17px; height: 17px; flex: none; }
+.useit-tab + .useit-tab { border-left: 1px solid var(--ns-line); }
+#start-anthropic:checked ~ .useit-tablist label[for="start-anthropic"],
+#start-openai:checked ~ .useit-tablist label[for="start-openai"] {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+}
+/* keyboard focus ring on a tab when its (hidden) radio is focused */
+#start-anthropic:focus-visible ~ .useit-tablist label[for="start-anthropic"],
+#start-openai:focus-visible ~ .useit-tablist label[for="start-openai"] { outline: 2px solid var(--ns-acid); outline-offset: -2px; }
+.useit-panel { display: none; }
+#start-anthropic:checked ~ #start-panel-anthropic,
+#start-openai:checked ~ #start-panel-openai { display: block; }
+
+.kv { margin-top: 16px; }
+.kv dd { margin: 0; } /* reset the UA dd indent — the row is laid out with flex */
+.kvrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 13px;
+}
+.kvrow:last-child { border-bottom: none; }
+.kvrow .kvk {
+  color: var(--ns-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+.kvrow .kvv {
+  color: var(--ns-bone);
+  display: flex;
+  flex-direction: column; /* a row can carry >1 value (OpenAI's two endpoints) — stack them, one per line */
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+  word-break: break-all;
+}
+/* one value + its copy button, kept together on a single line */
+.kvrow .kvval { display: inline-flex; align-items: center; gap: 10px; }
+
+/* ---- shared page h1 (about / models / start / how it works) ------------- */
+.page-h1 {
+  margin: 8px 0 18px;
+  font-size: 22px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: var(--ns-tracking-display);
+}
+
+/* ---- supported models page — provider-level cards (logo + count + status) ---- */
+.providers { list-style: none; margin: 26px 0 0; padding: 0; }
+/* the <li> carries only the hairline; the row layout lives on .provider-row so it can sit on either a
+   <summary> (available providers, expandable) or a plain <div> (coming-soon rows, nothing to expand) */
+.provider { border-bottom: 1px solid var(--ns-line); }
+.provider:last-child { border-bottom: none; }
+/* one row per provider: logo, name + model count, then a status tag on the right */
+.provider-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0;
+}
+/* available rows expand via native <details>: no JS, survives prerender. Suppress the UA marker — the
+   +/− toggle on the right is the affordance instead. */
+summary.provider-row { cursor: pointer; list-style: none; }
+summary.provider-row::-webkit-details-marker { display: none; }
+.provider-toggle {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--ns-muted);
+}
+.provider-toggle::before { content: "+"; }
+.provider-details[open] > summary .provider-toggle::before { content: "\2212"; }
+/* the expanded model list: ids straight from models.json, indented past the logo column */
+.provider-models {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 18px 44px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 7px 18px;
+  font-size: 13px;
+  color: var(--ns-muted);
+}
+.provider-logo { width: 28px; height: 28px; flex: none; color: var(--ns-bone); }
+.provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.provider-name {
+  font-size: 16px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: var(--ns-tracking-display);
+  color: var(--ns-bone);
+}
+.provider-meta {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+}
+/* available = the acid highlighter tag (this is what you can use now); the brand's "the point" mark */
+.provider-tag {
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-ink);
+  background: var(--ns-acid);
+  padding: 4px 9px;
+}
+/* coming-soon: the whole row dims, and the tag drops to a faint outline (not the live acid block) */
+.provider.soon .provider-logo,
+.provider.soon .provider-name { color: var(--ns-muted); }
+.provider-tag.soon {
+  color: var(--ns-muted);
+  background: transparent;
+  border: 1px solid var(--ns-line);
+  padding: 3px 8px;
+}
+/* unavailable model — the model id dims and gets a RED highlighter chip (the danger register, ink-on-red
+   like .hl.danger). Red is otherwise reserved for the money warnings (see notes near .hl.danger); this is
+   a deliberate exception so an unroutable model reads as "down". See UNAVAILABLE in flow/Models.tsx. */
+.provider-models li.unavailable { color: var(--ns-muted); }
+.model-tag-unavailable {
+  margin-left: 8px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-ink);
+  background: var(--ns-red);
+  padding: 2px 6px;
+}
+/* coming-soon open-source row: three overlapping model logos in place of one provider mark */
+.provider-logos { flex: none; display: inline-flex; align-items: center; }
+.stack-disc {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--ns-void); /* page-bg disc so each front logo cleanly cuts the one behind it */
+  border: 1px solid var(--ns-line);
+}
+.stack-disc:not(:first-child) { margin-left: -10px; }
+/* first logo sits ON TOP, the rest tuck behind it left-to-right */
+.stack-disc:nth-child(1) { z-index: 3; }
+.stack-disc:nth-child(2) { z-index: 2; }
+.stack-disc:nth-child(3) { z-index: 1; }
+.stack-ico { width: 15px; height: 15px; color: var(--ns-muted); }
+
+/* ---- legal pages (privacy, terms) — long-form prose -------------------- */
+/* Calm by design: the acid accent is reserved for the brand wordmark (<Ns/>) and the lead-in term of each
+   bullet, never blocks of body text — a dense policy reads as document, not as the loud buy surface. */
+.legal { margin-top: 40px; }
+.legal-h1 {
+  margin: 8px 0 6px;
+  font-size: 22px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: var(--ns-tracking-display);
+}
+.legal-updated {
+  margin: 0 0 24px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+}
+.legal-lead { margin: 0 0 8px; color: var(--ns-bone); font-size: 15px; line-height: 1.6; }
+.legal h2 {
+  margin: 32px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 15px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: 0.02em;
+  color: var(--ns-bone);
+}
+.legal p { margin: 0 0 12px; color: var(--ns-bone); font-size: 14px; line-height: 1.65; }
+.legal ul { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.legal li {
+  position: relative;
+  padding-left: 18px; /* room for the dash bullet, matching the terms box */
+  color: var(--ns-bone);
+ 
+  font-size: 14px;
+  line-height: 1.6;
+}
+.legal li::before { content: "–"; position: absolute; left: 0; color: var(--ns-muted); }
+.legal a { color: var(--ns-bone); word-break: break-word; }
+.legal a:hover { color: var(--ns-acid); }
+/* the bold lead-in word of a bullet (e.g. "A token hash.") — bone, not acid, so the list stays calm.
+   Shared by the legal lists and the about page's how-it-works steps (a deliberate, calm echo). */
+.lead-term { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
+
+/* ---- about (standalone /about page: the project intro, prose only) ------- */
+/* The intro: a few plain bone paragraphs in the project's own voice — no markers, no acid; the sincere
+   register before the steps' numbered notes. (The h1 is the shared .page-h1.) */
+.about-copy { margin: 0 0 14px; color: var(--ns-bone); font-size: 15px; line-height: 1.65; }
+.about-copy:last-child { margin-bottom: 0; }
+
+/* The never-collect chips — short, unqualified "no X" claims, the site-wide trust signature closing
+   the footer (Layout.tsx). Hairline outline chips in the calm register (the bordered-literal language
+   of the copy buttons), NOT red: the danger hue stays reserved for the two warnings that can cost
+   money, and understatement reads more credible than shouting. Footer-scale type. */
+.nots {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 6px;
+  font-size: 12px;
+}
+.nots li {
+  display: inline-flex;
+  border: 1px solid var(--ns-line);
+  padding: 3px 8px;
+  color: var(--ns-bone);
+}
+
+/* ---- get started (/start) — the developer on-ramp ----------------------- */
+/* short explanatory paragraph inside a docs section — between .about-copy and the legal body in size */
+.section-copy { margin: 10px 0 0; color: var(--ns-bone); font-size: 14px; line-height: 1.6; }
+/* inline code — a hairline chip, echoing the site's existing "bordered = literal/control" language
+   (the copy buttons, the coming-soon tag): transparent fill, 1px line border, a touch smaller than
+   the prose around it. Marks "this exact string" without spending accent budget. Scoped to inline
+   use; code inside <pre> (the samples) is untouched. */
+:not(pre) > code {
+  border: 1px solid var(--ns-line);
+  padding: 0.08em 0.5ch;
+  font-family: var(--ns-font-mono); /* explicit: the UA stylesheet's generic `monospace` would override the inherited Plex */
+  font-size: 0.92em;
+  white-space: nowrap; /* a chip never breaks mid-string; the longest (max_completion_tokens) fits any viewport */
+}
+/* dash-bullet fact list (pricing, limits) — the terms/legal bullet language, free-standing */
+.dash-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dash-list li {
+  position: relative;
+  padding-left: 18px;
+  color: var(--ns-bone);
+ 
+  font-size: 14px;
+  line-height: 1.6;
+}
+.dash-list li::before { content: "–"; position: absolute; left: 0; color: var(--ns-muted); }
+
+/* code sample: hairline box, labelled head with the copy control, horizontally scrollable body */
+.codeblock { border: 1px solid var(--ns-line); margin-top: 14px; }
+.code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px 7px 14px;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+}
+.code-body {
+  margin: 0;
+  padding: 14px 16px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ns-bone);
+  /* wrap, don't clip: on a phone, a horizontally-scrolled curl with no scroll affordance reads as
+     the whole command — a truncated mental model of the request. The \-continuation style tolerates
+     wrapped lines; `anywhere` lets the long URL/key tokens break rather than overflow. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* the tinted substrings inside a sample (the placeholder key, the model id): acid TEXT, like .token —
+   "this is the part you change". Acid-as-block (.hl) stays reserved for prose emphasis. */
+.code-hl { color: var(--ns-acid); }
+
+/* ---- footer — the never-collect chips, then a thin row with the links ---- */
+.foot {
+  margin-top: 64px;
+  padding-top: 18px;
+  border-top: 1px solid var(--ns-line);
+  font-size: 12px;
+  color: var(--ns-muted);
+}
+.foot-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.foot-links { display: flex; gap: 16px; }
+.foot a { color: var(--ns-muted); text-decoration: none; }
+.foot a:hover { color: var(--ns-acid); }
+
+@media (max-width: 460px) {
+  /* four nav links + brand on a narrow bar: tighten the gaps so the row holds */
+  .bar .links { gap: 12px; }
+  .presets { grid-template-columns: repeat(2, 1fr); }
+  /* stack the QR above the payment details so the address/amount get the full width */
+  .pay { flex-direction: column; }
+}

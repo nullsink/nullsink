@@ -1,0 +1,73 @@
+[Unit]
+Description=monero-wallet-rpc — VIEW-ONLY watcher for the XMR-direct buy rail
+# Reaches the Monero node through the local Tor SOCKS proxy, so Tor must be up first.
+After=network-online.target tor.service
+Wants=network-online.target
+After=tor.service
+# Page Telegram if this unit enters `failed`. Secondary to status-check.timer, which catches a stalled
+# wallet (height behind the node) on every tick regardless of unit state.
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+# Same low-privilege user as the proxy, so it can own the wallet files and the app
+# never needs elevated rights. The wallet here is VIEW-ONLY — it cannot spend.
+User=nullsink
+Group=nullsink
+
+# Wallet files (prview, prview.keys) + the rpc password file live here, created
+# service-owned under /var/lib/nullsink-wallet. Persistent so subaddress
+# indices survive restarts — an order's subaddr minor index must keep resolving.
+# This dir is SENSITIVE: it holds your secret VIEW key (privacy, not spend). Back
+# up nothing from here; the view key is re-derivable from your offline wallet.
+StateDirectory=nullsink-wallet
+StateDirectoryMode=0700
+
+# MONERO_NODE=<onion-host>:<port>  — the remote node. Keep it in this file (not the unit) so swapping
+# nodes is a one-line edit + restart. PROD uses an .onion node reached over Tor (the default below).
+# MONERO_PROXY_ARG defaults to Tor; set it EMPTY in the env file for a DIRECT/clearnet node (e.g. staging) —
+# monero REFUSES --proxy to a clearnet daemon (no SSL/onion), so a clearnet node must drop the proxy.
+# Environment= is the default; EnvironmentFile= is loaded AFTER, so a value there overrides it.
+Environment="MONERO_PROXY_ARG=--proxy 127.0.0.1:9050"
+EnvironmentFile=/etc/monero-wallet-rpc.env
+
+# View-only watcher: detects deposits, derives per-order subaddresses, never spends.
+#  --untrusted-daemon : the remote node may lie/withhold; we still wait MONERO_CONFIRMATIONS.
+#  $MONERO_PROXY_ARG : node traffic over Tor by default (--proxy 127.0.0.1:9050); EMPTY = direct (see above).
+#  --rpc-bind-ip 127.0.0.1 --disable-rpc-login : localhost-only, so no auth; NEVER bind public.
+#  --password-file : keeps the wallet password out of the process args (ps/journal).
+#  $MONERO_NET_ARG : optional network flag from the env file — EMPTY for mainnet (prod, the default),
+#    `--stagenet` (or `--testnet`) for a testnet staging box. Unbraced $VAR so an empty value adds NO
+#    argument (a braced ${VAR} would pass an empty "" that monero-wallet-rpc rejects).
+ExecStart=/usr/local/bin/monero-wallet-rpc \
+  $MONERO_NET_ARG \
+  --wallet-file %S/nullsink-wallet/prview \
+  --password-file %S/nullsink-wallet/.rpc-pw \
+  --daemon-address ${MONERO_NODE} \
+  $MONERO_PROXY_ARG \
+  --untrusted-daemon \
+  --rpc-bind-ip 127.0.0.1 \
+  --rpc-bind-port 18083 \
+  --disable-rpc-login \
+  --non-interactive \
+  --log-file %S/nullsink-wallet/wallet-rpc.log
+
+Restart=always
+RestartSec=5
+
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# Belt-and-braces against a clearnet leak: the watcher only ever needs the local Tor
+# SOCKS proxy and its own localhost RPC bind. Deny all non-localhost traffic — if it
+# were ever misconfigured to a clearnet node, it fails closed instead of leaking.
+IPAddressDeny=any
+IPAddressAllow=localhost
+
+[Install]
+WantedBy=multi-user.target

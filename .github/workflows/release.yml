@@ -1,0 +1,74 @@
+# Build the self-contained linux-x64 artifacts (`bun build --compile`) for the server + the `nsk` operator
+# CLI, build the client UI (Vite), and attach them — with a SHA256SUMS file — to the GitHub Release for a
+# tag: server binary, `nsk` operator CLI, the deploy/ tarball, and the client UI tarball. These are the
+# verifiable artifacts a box downloads + checksums + serves/runs directly (no source/Bun on the box).
+# Notify/produce-only — it does not touch any running box.
+#
+# Normally driven by release-please.yml (workflow_call) when a release PR is merged; the Release already
+# exists and we just attach assets. Also runnable on a manually pushed v* tag as a fallback (it creates the
+# Release if missing). Don't push tags by hand in the normal flow — merge the release PR instead.
+name: release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to build + attach assets to (e.g. v0.1.0)"
+        required: true
+        type: string
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write       # create the GitHub Release + upload assets
+  id-token: write       # OIDC token for build-provenance attestation
+  attestations: write   # write the artifact attestation
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}   # workflow_call passes it; a tag push falls back to the ref
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14   # pin: matches the box runtime + the version pinned in core/deploy/setup.sh
+      - run: bun install --frozen-lockfile
+      - name: stamp the release tag into the version module
+        run: printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > core/src/version.ts   # baked into both binaries
+      - name: build server + operator-CLI binaries (linux-x64)
+        run: |
+          bun --filter './core' build       # -> core/nullsink-linux-x64 (same script CI smoke-checks on every PR)
+          bun --filter './core' build:nsk   # -> core/nsk-linux-x64 (the nsk ops CLI; same tag as the server, can't drift)
+          mv core/nullsink-linux-x64 core/nsk-linux-x64 .   # to repo root so the asset names = basenames the box fetches
+      - name: build client UI (Vite + prerender)
+        run: bun --filter './client' build   # -> client/dist (the static UI Caddy serves at the edge)
+      - name: package deploy tree + client UI
+        run: |
+          tar -czf "deploy-${TAG}.tar.gz" -C core deploy        # box fetches + extracts this instead of cloning source
+          tar -czf "nullsink-ui-${TAG}.tar.gz" -C client dist    # box extracts this into the versioned webroot
+      - name: checksum
+        run: sha256sum nullsink-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
+      - name: attest build provenance   # signed SLSA provenance for each artifact (public repo only)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            nullsink-linux-x64
+            nsk-linux-x64
+            deploy-${{ env.TAG }}.tar.gz
+            nullsink-ui-${{ env.TAG }}.tar.gz
+            SHA256SUMS
+      - name: attach assets to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # release-please already created the Release (notes = the CHANGELOG section). For a manual tag
+          # push there's no Release yet, so create one. Then attach/replace the verifiable assets.
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" \
+            --notes "Self-contained linux-x64 build of \`$TAG\`: server binary + operator CLI (\`nsk\`) + deploy tree + client UI tarball. The box downloads + checksum-verifies these (no source/Bun). Verify checksums: \`sha256sum -c SHA256SUMS\`. Verify provenance (any authenticated GitHub user): \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+          gh release upload "$TAG" \
+            nullsink-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
+            --clobber
