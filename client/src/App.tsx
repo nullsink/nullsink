@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { BUY_MAX_USD, BUY_MIN_USD, MARKUP_PCT } from "./lib/api.ts";
+import { BUY_MAX_USD, BUY_MIN_USD } from "./lib/api.ts";
 import { Layout } from "./Layout.tsx";
 import { KeyFlow } from "./flow/KeyFlow.tsx";
 import { Terms } from "./flow/Terms.tsx";
@@ -41,8 +41,7 @@ export function App() {
             <p className="note">
               <span className="marker danger" aria-hidden="true">!</span>
               <span>
-                Early days: purchases are ${BUY_MIN_USD}–${BUY_MAX_USD} while capacity grows, and you pay
-                provider list price + ~{MARKUP_PCT}% markup, once, at purchase. Load can fluctuate while we
+                Early days: purchases are ${BUY_MIN_USD}–${BUY_MAX_USD} while capacity grows. Load can fluctuate while we
                 scale, so brief outages may be frequent.
               </span>
             </p>
