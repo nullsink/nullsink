@@ -33,7 +33,9 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     permissions:
-      contents: write
+      contents: write       # create the Release + upload assets (release.yml)
+      id-token: write       # OIDC for build-provenance attestation (release.yml)
+      attestations: write   # write the artifact attestation (release.yml)
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
