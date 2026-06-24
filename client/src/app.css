@@ -455,11 +455,11 @@ button:disabled { cursor: not-allowed; }
    what can cost money: the two non-recoverable terms warnings (no refunds; lose the key, lose the
    balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
 .hl.danger { background: var(--ns-red); }
-/* a clickable acid highlight (the About "open source" pointer to the repo): the block IS the affordance,
-   so drop the link underline, and INVERT on hover (ink block, acid text) — the base a:hover flips text to
-   acid, which would vanish it on its own acid background. */
-a.hl { text-decoration: none; }
-a.hl:hover { background: var(--ns-ink); color: var(--ns-acid); }
+/* "the code is open source" links to the repo (About): the .hl block stays the decorative emphasis (fill =
+   status, per the grammar), and the ↗ glyph is the outbound-link affordance — so no underline on the chip.
+   The chip keeps its own ink colour on hover (its .hl rule wins); only the ↗ takes the normal link tint. */
+.src-link { text-decoration: none; }
+.src-link .ext { margin-left: 0.35ch; font-size: 0.85em; }
 
 /* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
 .terms { border: 1px solid var(--ns-acid); }

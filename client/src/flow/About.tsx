@@ -24,7 +24,10 @@ export function About() {
           who writes the code is the one who answers your email.
         </p>
         <p className="about-copy">
-          <a className="hl" href={GITHUB_URL} {...EXT}>the code is open source</a>.
+          <a className="src-link" href={GITHUB_URL} {...EXT}>
+            <span className="hl">the code is open source</span>
+            <span className="ext" aria-hidden="true">↗</span>
+          </a>.
         </p>
       </section>
     </Layout>
