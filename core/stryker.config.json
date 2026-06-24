@@ -1,0 +1,20 @@
+{
+  "$schema": "https://unpkg.com/@stryker-mutator/core@9.6.1/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "bun test"
+  },
+  "mutate": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "!src/version.ts"
+  ],
+  "coverageAnalysis": "off",
+  "reporters": ["clear-text", "progress", "json", "html"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation.json" },
+  "htmlReporter": { "fileName": "reports/mutation/mutation.html" },
+  "concurrency": 8,
+  "timeoutMS": 60000,
+  "disableTypeChecks": true
+}
