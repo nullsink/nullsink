@@ -26,7 +26,7 @@ export function About() {
         <p className="about-copy">
           <a className="src-link" href={GITHUB_URL} {...EXT}>
             <GitHubMark className="src-icon" />
-            <span className="hl">the code is open source</span>
+            <span>the code is <span className="hl">open source</span></span>
           </a>
         </p>
       </section>
