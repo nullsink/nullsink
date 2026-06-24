@@ -1,5 +1,6 @@
 import { Layout } from "../Layout.tsx";
 import { Ns } from "../ui.tsx";
+import { GITHUB_URL, EXT } from "../lib/links.ts";
 
 // "about" (route /about): the project intro in its own voice (one engineer, open source).
 // Deliberately small — the never-collect chips live in the footer (Layout.tsx) and integration lives on
@@ -23,7 +24,7 @@ export function About() {
           who writes the code is the one who answers your email.
         </p>
         <p className="about-copy">
-          <span className="hl">the code is open source</span>.
+          <a className="hl" href={GITHUB_URL} {...EXT}>the code is open source</a>.
         </p>
       </section>
     </Layout>
