@@ -128,17 +128,25 @@ export function isReasoningModel(model: string): boolean {
 // engine is reusable against any rate source. The model-string wrappers below (priceUsage / priceHoldBound)
 // are the ONLY things that touch the table; they resolve a Rate and delegate here. ---
 
+// Coerce an upstream-reported usage count to a sane, finite, non-negative number — the SINGLE sanitizer for
+// every count that reaches the cost math. A buffered Anthropic body passes usage through verbatim and the
+// streaming scanners only `?? 0`, so a parseable-but-mistyped field (a string, a negative, a non-finite) from
+// a buggy/hostile upstream would otherwise bill NaN (corrupting the ledger) or a negative (minting balance).
+// Exported and reused by the OpenAI usage adapter (usage/openai.ts) so both providers sanitize IDENTICALLY;
+// valid counts are unchanged.
+export const sanitizeCount = (x: unknown): number => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : 0);
+
 // Cost of one request's realized usage at `rate`, in micro-dollars (truncated; truncation favours the user).
 export function costOf(rate: Rate, usage: Usage): number {
-  const input = usage.input_tokens ?? 0;
-  const output = usage.output_tokens ?? 0;
-  const cacheWrite = usage.cache_creation_input_tokens ?? 0; // total: 5-min + 1-hour
-  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  const input = sanitizeCount(usage.input_tokens);
+  const output = sanitizeCount(usage.output_tokens);
+  const cacheWrite = sanitizeCount(usage.cache_creation_input_tokens); // total: 5-min + 1-hour
+  const cacheRead = sanitizeCount(usage.cache_read_input_tokens);
   // Split the cache-write total into its 1-hour (2× input) and 5-min (1.25× input) tiers. CLAMP the 1-hour
   // slice to [0, total]: a malformed/hostile report with 1h > total (or negative) must never drive the
   // 5-min remainder negative — since the 1h rate is dearer, that would UNDER-bill. Absent breakdown (every
   // OpenAI response, and any Anthropic response with no 1h writes) → write1h 0 → the whole total at 5-min.
-  const write1h = Math.min(Math.max(0, usage.cache_creation_1h_input_tokens ?? 0), cacheWrite);
+  const write1h = Math.min(sanitizeCount(usage.cache_creation_1h_input_tokens), cacheWrite);
   const write5m = cacheWrite - write1h;
   return Math.floor(
     (input * rate.input +

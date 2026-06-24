@@ -1292,3 +1292,30 @@ test("GET /rails lists the active rails + the default (for the client coin picke
     { name: "bitcoin", unit: "BTC", confirmations: 3 },
   ]);
 });
+
+// --- Mutation-surfaced gate edges ---
+
+// handler.ts:320 — the pre-flight funds gate `preBalance <= 0` survived `→ preBalance < 0`. A token at EXACTLY
+// 0 must 402 HERE, before the estimator runs — else a broke token forces a free upstream count_tokens
+// round-trip (the free-work abuse this gate exists to shed) before openHold rejects it.
+test("a token at exactly balance 0 is 402'd before the hold estimator runs (preBalance <= 0)", async () => {
+  let estCalls = 0;
+  const estimateHold = (input: Parameters<typeof byteBoundHold>[0]) => { estCalls++; return byteBoundHold(input); };
+  const { handler, balances } = makeHandler(ok("claude-opus-4-8", { output_tokens: 1 }), { estimateHold });
+  const token = "pr_zero";
+  balances.credit(hashToken(token), 0); // a real row at exactly 0 (not an unknown token → that's 401)
+  const res = await handler(messagesReq(token, { model: "claude-opus-4-8", max_tokens: 16, messages: [{ role: "user", content: "hi" }] }));
+  expect(res.status).toBe(402);
+  expect(((await res.json()) as { error: { message: string } }).error.message).toContain("insufficient_balance");
+  expect(estCalls).toBe(0); // the `< 0` mutant would let 0 through and call the estimator
+});
+
+// endpoints/buy.ts:42 — the credit_usd validation `typeof≠number || !finite || <MIN || >MAX` survived the
+// `||`→`&&` mutant (which never rejects). A below-minimum amount must 400 invalid_amount and store nothing.
+test("/buy rejects a below-minimum credit_usd with 400 invalid_amount (validation is OR-joined)", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const res = await handler(buyReq({ hash: "a".repeat(64), credit_usd: 1 })); // < buyMinUsd (5 in this harness)
+  expect(res.status).toBe(400);
+  expect(((await res.json()) as { error: string }).error).toBe("invalid_amount");
+  expect(orders.openCount()).toBe(0); // nothing reserved
+});
