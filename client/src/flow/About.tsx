@@ -1,5 +1,5 @@
 import { Layout } from "../Layout.tsx";
-import { Ns } from "../ui.tsx";
+import { Ns, GitHubMark } from "../ui.tsx";
 import { GITHUB_URL, EXT } from "../lib/links.ts";
 
 // "about" (route /about): the project intro in its own voice (one engineer, open source).
@@ -25,9 +25,9 @@ export function About() {
         </p>
         <p className="about-copy">
           <a className="src-link" href={GITHUB_URL} {...EXT}>
+            <GitHubMark className="src-icon" />
             <span className="hl">the code is open source</span>
-            <span className="ext" aria-hidden="true">↗</span>
-          </a>.
+          </a>
         </p>
       </section>
     </Layout>
