@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.2](https://github.com/nullsink/nullsink/compare/v1.0.1...v1.0.2) (2026-06-24)
+
+
+### Bug Fixes
+
+* **client:** point the GitHub links (footer + About) at the repo ([#9](https://github.com/nullsink/nullsink/issues/9)) ([4ca75f3](https://github.com/nullsink/nullsink/commit/4ca75f380220986a063600a00af04583555399b9))
+* **cost:** sanitize usage counts so a malformed upstream can't bill NaN/negative ([#6](https://github.com/nullsink/nullsink/issues/6)) ([582c039](https://github.com/nullsink/nullsink/commit/582c039900d31a0b4f0ed104158d15e07f57ae76))
+
 ## [1.0.1](https://github.com/nullsink/nullsink/compare/v1.0.0...v1.0.1) (2026-06-23)
 
 
