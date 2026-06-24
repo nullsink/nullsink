@@ -2,7 +2,7 @@
 // is a one-line change rather than a hunt across pages.
 
 // Community links — used in the footer (Layout) and the get-started page (Start).
-export const GITHUB_URL = "https://github.com/nullsink";
+export const GITHUB_URL = "https://github.com/nullsink/nullsink";
 export const DISCORD_URL = "https://discord.gg/sFK36yrBq";
 export const MATRIX_URL = "https://matrix.to/#/#nullsink:matrix.org";
 

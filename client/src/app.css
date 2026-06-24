@@ -455,6 +455,11 @@ button:disabled { cursor: not-allowed; }
    what can cost money: the two non-recoverable terms warnings (no refunds; lose the key, lose the
    balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
 .hl.danger { background: var(--ns-red); }
+/* "the code is open source" → repo (About): a GitHub mark + the phrase as one link. Inline-flex aligns the
+   mark with the .hl emphasis block; the mark is the affordance, so no underline. The chip keeps its own ink
+   colour (its .hl rule wins); only the mark takes the normal bone→acid link tint. */
+.src-link { display: inline-flex; align-items: center; gap: 0.5ch; text-decoration: none; }
+.src-icon { width: 1em; height: 1em; flex: none; }
 
 /* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
 .terms { border: 1px solid var(--ns-acid); }
