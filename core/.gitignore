@@ -20,3 +20,8 @@ memory/
 
 # Operator scratch / point-in-time box state (stale internal notes, not project source; never published).
 .state/
+
+# mutation testing (local tooling)
+.stryker-tmp/
+reports/
+stryker.log

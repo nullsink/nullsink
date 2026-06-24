@@ -38,6 +38,24 @@ test/     bun test (mostly fast-check property tests)
 | `bun run e2e:capture` | real-spend end-to-end + golden-fixture capture (operator-run) |
 | `bun run e2e:hold` | live hold-soundness check against real upstreams (operator-run) |
 
+### Mutation testing (on-demand)
+
+`bun test --coverage` shows which lines run; mutation testing shows whether the tests would actually *catch* a
+regression — high value for the billing/ledger core. The config is committed (`stryker.config.json`), but
+Stryker itself is **not** a dependency (it pulls a large Node tree), so install it on demand:
+
+```sh
+# whole core — slow (~25 min; runs the full suite per mutant, so it's a periodic probe, not a per-PR gate)
+bunx --package @stryker-mutator/core stryker run
+
+# scope to what you changed — fast
+bunx --package @stryker-mutator/core stryker run --mutate "src/ledger/**/*.ts"
+```
+
+It uses Stryker's built-in `command` runner (`bun test`, judged by exit code) — the community Bun test-runner
+plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON reports land in
+`reports/mutation/` (gitignored).
+
 ## Docs
 
 - [architecture.md](../docs/architecture.md) — how the pieces fit together
