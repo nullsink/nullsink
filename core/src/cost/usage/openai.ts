@@ -1,6 +1,6 @@
 // OpenAI usage adapter: maps OpenAI's two response shapes (Chat Completions + the newer Responses API)
 // into the canonical Usage.
-import type { Usage } from "../pricing";
+import { sanitizeCount, type Usage } from "../pricing";
 import type { Metered, UsageScanner, ScannerCtx } from "./types";
 
 // --- OpenAI Chat Completions shape ---------------------------------------------------------------
@@ -13,8 +13,6 @@ import type { Metered, UsageScanner, ScannerCtx } from "./types";
 //   2. Streaming carries usage ONLY in a final chunk (and only because we inject stream_options.
 //      include_usage). There is NO incremental usage, so a mid-stream disconnect has none — see the
 //      scanner's content-token fallback.
-
-const num = (x: any): number => (typeof x === "number" && Number.isFinite(x) ? x : 0);
 
 // OpenAI reports a single input total INCLUSIVE of cached tokens (both Chat and Responses), unlike
 // Anthropic's exclusive input_tokens. Split it into the non-cached portion (input rate) + cached
@@ -30,13 +28,13 @@ function splitOpenAIInput(totalInput: number, cached: number): Usage {
 // Chat Completions usage: prompt_tokens / completion_tokens, cached under prompt_tokens_details.
 // completion_tokens already includes reasoning_tokens.
 function mapOpenAIChatUsage(u: any): Usage {
-  return { ...splitOpenAIInput(num(u?.prompt_tokens), num(u?.prompt_tokens_details?.cached_tokens)), output_tokens: num(u?.completion_tokens) };
+  return { ...splitOpenAIInput(sanitizeCount(u?.prompt_tokens), sanitizeCount(u?.prompt_tokens_details?.cached_tokens)), output_tokens: sanitizeCount(u?.completion_tokens) };
 }
 
 // Responses usage: input_tokens / output_tokens, cached under input_tokens_details. output_tokens already
 // includes output_tokens_details.reasoning_tokens.
 function mapOpenAIResponsesUsage(u: any): Usage {
-  return { ...splitOpenAIInput(num(u?.input_tokens), num(u?.input_tokens_details?.cached_tokens)), output_tokens: num(u?.output_tokens) };
+  return { ...splitOpenAIInput(sanitizeCount(u?.input_tokens), sanitizeCount(u?.input_tokens_details?.cached_tokens)), output_tokens: sanitizeCount(u?.output_tokens) };
 }
 
 // Non-streaming path: one chat.completion JSON with top-level model + usage.
