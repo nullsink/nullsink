@@ -1,7 +1,7 @@
 // OpenAI usage adapter: maps OpenAI's two response shapes (Chat Completions + the newer Responses API)
 // into the canonical Usage.
 import { sanitizeCount, type Usage } from "../pricing";
-import type { Metered, UsageScanner, ScannerCtx } from "./types";
+import { MAX_SSE_LINE, type Metered, type UsageScanner, type ScannerCtx } from "./types";
 
 // --- OpenAI Chat Completions shape ---------------------------------------------------------------
 // Different from Anthropic in two ways that matter for billing:
@@ -94,6 +94,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
           }
         }
       }
+      if (buf.length > MAX_SSE_LINE) buf = ""; // drop a newline-less run so buf can't grow unbounded
     },
 
     result(): Metered {
@@ -180,6 +181,7 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
         if (evt.response?.usage) finalUsage = mapOpenAIResponsesUsage(evt.response.usage);
         if (evt.type === "response.output_text.delta" && typeof evt.delta === "string") contentChars += evt.delta.length;
       }
+      if (buf.length > MAX_SSE_LINE) buf = ""; // drop a newline-less run so buf can't grow unbounded
     },
 
     result(): Metered {

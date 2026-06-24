@@ -2,7 +2,7 @@
 // shapes — a buffered JSON body (extractUsage) and an incremental SSE stream (streamUsageScanner). Both
 // read ONLY these meta fields — never the completion content — and store none of it.
 import type { Usage } from "../pricing";
-import type { Metered, UsageScanner } from "./types";
+import { MAX_SSE_LINE, type Metered, type UsageScanner } from "./types";
 
 // Non-streaming path: the body is one JSON object carrying top-level model + usage.
 export function extractUsage(text: string): Metered {
@@ -78,6 +78,7 @@ export function streamUsageScanner(): UsageScanner {
             usage.cache_read_input_tokens = u.cache_read_input_tokens;
         }
       }
+      if (buf.length > MAX_SSE_LINE) buf = ""; // drop a newline-less run so buf can't grow unbounded
     },
 
     // Snapshot for billing. null until a message_start with usage is seen → caller full-refunds,

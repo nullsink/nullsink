@@ -3,7 +3,8 @@
 // through).
 import { test, expect } from "bun:test";
 import { streamUsageScanner } from "../src/cost/usage/anthropic";
-import { openaiResponsesScanner } from "../src/cost/usage/openai";
+import { openaiChatScanner, openaiResponsesScanner } from "../src/cost/usage/openai";
+import { MAX_SSE_LINE } from "../src/cost/usage/types";
 
 const feed = (scan: { feed(c: string): void }, s: string) => scan.feed(s);
 
@@ -40,4 +41,26 @@ test("OpenAI Responses scanner bills exact usage on a clean close (terminal even
   const m = scan.result();
   expect(m!.usage.output_tokens).toBe(50); // exact, not ceil(4/4)=1
   expect(m!.model).toBe("gpt-4o-2024-08-06");
+});
+
+// types.ts MAX_SSE_LINE — a newline-less upstream run must not grow the scanner buffer unbounded. The
+// oversized partial is dropped (so its eventual completion no longer parses) and the scanner resyncs at the
+// next newline. A capped scanner yields null for the over-long frame; an UNCAPPED one would assemble + bill
+// it — so `result() === null` here is what proves the cap fires.
+test("Anthropic scanner drops a newline-less over-long frame, then recovers", () => {
+  const scan = streamUsageScanner();
+  // start of a valid message_start, padded past the cap, NO newline yet → the partial is dropped
+  feed(scan, `data: {"type":"message_start","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"output_tokens":5,"_pad":"${"x".repeat(MAX_SSE_LINE + 16)}`);
+  feed(scan, `"}}}\n\n`); // completes the now-orphaned line → invalid JSON tail → ignored
+  expect(scan.result()).toBeNull(); // over-long frame dropped, not billed (uncapped would bill output 5)
+  // ...and the scanner still works for the rest of the stream
+  feed(scan, `data: ${JSON.stringify({ type: "message_start", message: { model: "claude-opus-4-8", usage: { input_tokens: 7, output_tokens: 3 } } })}\n\n`);
+  expect(scan.result()?.usage.output_tokens).toBe(3);
+});
+
+test("OpenAI scanner drops a newline-less over-long frame (no spurious bill)", () => {
+  const scan = openaiChatScanner({ model: "gpt-4o", inputTokens: 5 });
+  feed(scan, `data: {"model":"gpt-4o","usage":{"prompt_tokens":10,"completion_tokens":5,"_pad":"${"x".repeat(MAX_SSE_LINE + 16)}`);
+  feed(scan, `"}}\n\n`);
+  expect(scan.result()).toBeNull(); // dropped → nothing parsed → full refund, not the over-long usage
 });
