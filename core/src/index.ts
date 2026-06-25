@@ -131,8 +131,9 @@ const anthropicDeps = ANTHROPIC_API_KEY
     }
   : undefined;
 
-// OpenAI provider — OPTIONAL and additive: enabled iff OPENAI_API_KEY is set, else its endpoints 404 and
-// the proxy runs Anthropic-only. Hold counts via /v1/responses/input_tokens with the byte bound as cap +
+// OpenAI provider — OPTIONAL and symmetric with Anthropic above: enabled iff OPENAI_API_KEY is set, else its
+// endpoints 404 and the proxy serves whatever other provider is configured. Hold counts via
+// /v1/responses/input_tokens with the byte bound as cap +
 // fallback. NOTE (verified live): that counter accepts a RESPONSES-shaped body but 400s a Chat-Completions
 // {messages} body, so /v1/responses holds are tight while /v1/chat/completions holds use the byte bound
 // (sound, looser) — see hold.ts. Same key gates the count call and the forward, so a missing/typo'd key
