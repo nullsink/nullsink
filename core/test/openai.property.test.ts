@@ -19,9 +19,10 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> = {}) {
   const balances = openDb(":memory:");
   const orders = openOrderStore(":memory:");
   const deps: HandlerDeps = {
-    apiKey: "real-anthropic-key",
-    baseUrl: "https://anthropic.example",
-    version: "2023-06-01",
+    anthropic: { apiKey: "real-anthropic-key", baseUrl: "https://anthropic.example", version: "2023-06-01", estimateHold: byteBoundHold },
+    // OpenAI enabled with its own byte-bound estimator (so inputTokens = utf8 bytes — deterministic for
+    // the disconnect-bill assertion below).
+    openai: { apiKey: "real-openai-key", baseUrl: "https://openai.example", estimateHold: byteBoundHold },
     upstreamTimeoutMs: 1000,
     margin: 1.15,
     buyMinUsd: 5,
@@ -32,10 +33,6 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> = {}) {
     maxMessagesBodyBytes: 33_554_432,
     balances,
     orders,
-    estimateHold: byteBoundHold,
-    // OpenAI enabled with its own byte-bound estimator (so inputTokens = utf8 bytes — deterministic for
-    // the disconnect-bill assertion below).
-    openai: { apiKey: "real-openai-key", baseUrl: "https://openai.example", estimateHold: byteBoundHold },
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([
       ["monero", { name: "monero", createAddress: async () => ({ address: "8x", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a: string, amt: string) => `monero:${a}?tx_amount=${amt}` }],

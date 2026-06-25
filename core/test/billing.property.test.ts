@@ -48,9 +48,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> & RailK
     paymentUri: paymentUri ?? ((a, amt) => `monero:${a}?tx_amount=${amt}`),
   };
   const deps: HandlerDeps = {
-    apiKey: "real-upstream-key",
-    baseUrl: "https://upstream.example",
-    version: "2023-06-01",
+    anthropic: { apiKey: "real-upstream-key", baseUrl: "https://upstream.example", version: "2023-06-01", estimateHold: byteBoundHold },
     upstreamTimeoutMs: 1000,
     margin: 1.15,
     buyMinUsd: 5,
@@ -61,7 +59,6 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> & RailK
     maxMessagesBodyBytes: 33_554_432,
     balances,
     orders,
-    estimateHold: byteBoundHold,
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([["monero", monero]]),
     defaultRail: "monero",
@@ -1301,7 +1298,11 @@ test("GET /rails lists the active rails + the default (for the client coin picke
 test("a token at exactly balance 0 is 402'd before the hold estimator runs (preBalance <= 0)", async () => {
   let estCalls = 0;
   const estimateHold = (input: Parameters<typeof byteBoundHold>[0]) => { estCalls++; return byteBoundHold(input); };
-  const { handler, balances } = makeHandler(ok("claude-opus-4-8", { output_tokens: 1 }), { estimateHold });
+  // estimateHold now lives under the nested anthropic config, so override the whole object (the deps spread
+  // replaces anthropic wholesale) — restating the base creds with the counting estimator swapped in.
+  const { handler, balances } = makeHandler(ok("claude-opus-4-8", { output_tokens: 1 }), {
+    anthropic: { apiKey: "real-upstream-key", baseUrl: "https://upstream.example", version: "2023-06-01", estimateHold },
+  });
   const token = "pr_zero";
   balances.credit(hashToken(token), 0); // a real row at exactly 0 (not an unknown token → that's 401)
   const res = await handler(messagesReq(token, { model: "claude-opus-4-8", max_tokens: 16, messages: [{ role: "user", content: "hi" }] }));

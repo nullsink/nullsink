@@ -68,6 +68,6 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 ## Run locally
 
 ```sh
-cp .env.example .env   # set ANTHROPIC_API_KEY at minimum
+cp .env.example .env   # set at least one provider key (ANTHROPIC_API_KEY or OPENAI_API_KEY)
 bun run dev
 ```
