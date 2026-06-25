@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/nullsink/nullsink/compare/v1.0.2...v1.1.0) (2026-06-25)
+
+
+### Features
+
+* **providers:** make Anthropic optional, require ≥1 provider (S17) ([#11](https://github.com/nullsink/nullsink/issues/11)) ([17d1478](https://github.com/nullsink/nullsink/commit/17d14784ef36aaeac16c3679c38d8a20e49dd6fb))
+
 ## [1.0.2](https://github.com/nullsink/nullsink/compare/v1.0.1...v1.0.2) (2026-06-24)
 
 
