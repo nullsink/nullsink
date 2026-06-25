@@ -12,16 +12,13 @@ import { selectRails, type PayRail } from "./rails";
 import type { Incoming } from "./rails/types";
 import { makeTokenBucket } from "./ratelimit";
 import { drainInflight } from "./shutdown";
-import { numEnv, reqEnv } from "./env";
+import { numEnv } from "./env";
 import { classifyPollOutcome } from "./ledger/poll";
 import * as log from "./log";
 import * as metrics from "./metrics";
 import { BUILD_VERSION } from "./version";
 import { DEFAULT_MARGIN } from "./pricing-config";
 
-const API_KEY = reqEnv("ANTHROPIC_API_KEY");
-const BASE_URL = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
-const VERSION = process.env.ANTHROPIC_VERSION ?? "2023-06-01";
 const PORT = numEnv("PORT", 8080, 1, 65535);
 // Bind address. Defaults to 127.0.0.1 (safe by default): the app must NEVER face the open net — Caddy
 // fronts it and reverse-proxies to localhost. Override with HOST=0.0.0.0 only for local dev. A
@@ -110,16 +107,29 @@ const readRateLimit = makeTokenBucket({
   refillPerSec: READ_RATE_REFILL_PER_MIN / 60,
 });
 
-// Tighter-by-default hold (count_tokens), with the byte bound as both the "byte" mode and the fallback.
-const estimateHold =
-  HOLD_ESTIMATOR === "byte"
-    ? byteBoundHold
-    : makeCountTokensHold({
-        countUrl: BASE_URL + "/v1/messages/count_tokens",
-        authHeaders: { "x-api-key": API_KEY, "anthropic-version": VERSION },
-        omit: ANTHROPIC_COUNT_OMIT,
-        timeoutMs: COUNT_TOKENS_TIMEOUT_MS,
-      });
+// Anthropic provider — OPTIONAL and symmetric with OpenAI below: enabled iff ANTHROPIC_API_KEY is set, else
+// its /v1/messages endpoint 404s and the proxy runs OpenAI-only. At least one provider must be set (the boot
+// guard below exits if neither is). Tighter-by-default hold (count_tokens via /v1/messages/count_tokens),
+// with the byte bound as both the "byte" mode and the fallback. The same key gates the count call + forward.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com";
+const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION ?? "2023-06-01";
+const anthropicDeps = ANTHROPIC_API_KEY
+  ? {
+      apiKey: ANTHROPIC_API_KEY,
+      baseUrl: ANTHROPIC_BASE_URL,
+      version: ANTHROPIC_VERSION,
+      estimateHold:
+        HOLD_ESTIMATOR === "byte"
+          ? byteBoundHold
+          : makeCountTokensHold({
+              countUrl: ANTHROPIC_BASE_URL + "/v1/messages/count_tokens",
+              authHeaders: { "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": ANTHROPIC_VERSION },
+              omit: ANTHROPIC_COUNT_OMIT,
+              timeoutMs: COUNT_TOKENS_TIMEOUT_MS,
+            }),
+    }
+  : undefined;
 
 // OpenAI provider — OPTIONAL and additive: enabled iff OPENAI_API_KEY is set, else its endpoints 404 and
 // the proxy runs Anthropic-only. Hold counts via /v1/responses/input_tokens with the byte bound as cap +
@@ -145,6 +155,14 @@ const openaiDeps = OPENAI_API_KEY
     }
   : undefined;
 
+// At least one upstream provider must be configured — an all-absent set would 404 every metered path, so the
+// proxy would serve no LLM at all. Fail fast at boot like the other guards (selectProviders also throws as the
+// library-level backstop). Either provider alone is valid; the buy rails are independent of this.
+if (!anthropicDeps && !openaiDeps) {
+  log.error("boot", "no providers configured — set ANTHROPIC_API_KEY and/or OPENAI_API_KEY");
+  process.exit(1);
+}
+
 // Ephemeral live payment progress for /order-status, fed by the poller each tick (orderstatus.ts). Held
 // here, not the DB — it's a display aid, not money, and is re-derived on the next poll after a restart.
 const orderStatus = makeOrderStatus();
@@ -169,9 +187,8 @@ const DEFAULT_RAIL = [...rails.keys()][0]!; // first listed = the rail /buy quot
 log.info("boot", `pay rails: ${[...rails.keys()].join(", ")} (default ${DEFAULT_RAIL})`);
 
 const handler = createHandler({
-  apiKey: API_KEY,
-  baseUrl: BASE_URL,
-  version: VERSION,
+  anthropic: anthropicDeps,
+  openai: openaiDeps,
   upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
   streamSettleDeadlineMs: STREAM_SETTLE_DEADLINE_MS,
   margin: MARGIN,
@@ -183,8 +200,6 @@ const handler = createHandler({
   maxMessagesBodyBytes: MAX_MESSAGES_BODY_BYTES,
   balances,
   orders,
-  estimateHold,
-  openai: openaiDeps,
   defaultMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
   upstreamFetch: fetch,
   rails: new Map<string, RailView>(rails), // every active rail's view (PayRail satisfies RailView structurally)
@@ -222,7 +237,9 @@ const server = Bun.serve({
   },
 });
 
-log.info("boot", `nullsink ${BUILD_VERSION} → anthropic ${BASE_URL}${openaiDeps ? ` + openai ${OPENAI_BASE_URL}` : " (openai disabled: no OPENAI_API_KEY)"} listening on ${HOST}:${server.port}`);
+// Active providers, listed like the "pay rails:" line — exactly those configured, in a stable order.
+const providerSummary = [anthropicDeps && `anthropic ${anthropicDeps.baseUrl}`, openaiDeps && `openai ${openaiDeps.baseUrl}`].filter(Boolean).join(" + ");
+log.info("boot", `nullsink ${BUILD_VERSION} → ${providerSummary} listening on ${HOST}:${server.port}`);
 
 // --- Settlement poller. Pure outbound: fetches confirmed deposits via each rail's watch-only wallet and
 // hands them to settle(), which credits the matching token once a deposit has CONFIRMATIONS. ---

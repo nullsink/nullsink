@@ -45,9 +45,9 @@ const balances = openDb(":memory:");
 balances.credit(hashToken(TOKEN), 1_000_000_000); // $1000 of headroom
 
 const deps: HandlerDeps = {
-  apiKey: ANTHROPIC_API_KEY ?? "absent",
-  baseUrl: "https://api.anthropic.com",
-  version: process.env.ANTHROPIC_VERSION ?? "2023-06-01",
+  // byte bound → no extra count_tokens call per shape (cheaper, still sound)
+  anthropic: { apiKey: ANTHROPIC_API_KEY ?? "absent", baseUrl: "https://api.anthropic.com", version: process.env.ANTHROPIC_VERSION ?? "2023-06-01", estimateHold: byteBoundHold },
+  openai: OPENAI_API_KEY ? { apiKey: OPENAI_API_KEY, baseUrl: "https://api.openai.com", estimateHold: byteBoundHold } : undefined,
   upstreamTimeoutMs: 120_000,
   margin: 1.125,
   buyMinUsd: 5,
@@ -58,8 +58,6 @@ const deps: HandlerDeps = {
   maxMessagesBodyBytes: 33_554_432,
   balances,
   orders: openOrderStore(":memory:"),
-  estimateHold: byteBoundHold, // byte bound → no extra count_tokens call per shape (cheaper, still sound)
-  openai: OPENAI_API_KEY ? { apiKey: OPENAI_API_KEY, baseUrl: "https://api.openai.com", estimateHold: byteBoundHold } : undefined,
   upstreamFetch: fetch,
   rails: new Map<string, RailView>([
     ["monero", { name: "monero", createAddress: async () => ({ address: "x", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a: string, amt: string) => `monero:${a}?tx_amount=${amt}` }],

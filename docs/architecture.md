@@ -48,8 +48,9 @@ fails closed.
 **Provider seam** (`providers/types.ts`) — what it takes to forward to an upstream LLM:
 read the token, reject premium features outside the flat per-token card, resolve the
 output cap, check the model is ours, inject our key, normalize usage from both buffered and
-streaming responses. Anthropic is always registered (`/v1/messages`); the OpenAI pair
-(`/v1/chat/completions`, `/v1/responses`) is registered only when `OPENAI_API_KEY` is set.
+streaming responses. Each provider is registered only when its key is set — Anthropic
+(`/v1/messages`) on `ANTHROPIC_API_KEY`, the OpenAI pair (`/v1/chat/completions`,
+`/v1/responses`) on `OPENAI_API_KEY` — and at least one is required.
 
 **Rail seam** (`rails/types.ts`) — what it takes to accept a coin: mint a per-order address
 and detect confirmed deposits. A rail is **watch-only**: it observes incoming payments

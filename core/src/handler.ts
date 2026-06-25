@@ -144,9 +144,20 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
 }
 
 export type HandlerDeps = {
-  apiKey: string;
-  baseUrl: string;
-  version: string;
+  // Provider configs — each present iff its key is set (index.ts). At least one is required: selectProviders
+  // throws on an all-absent set and index.ts fails fast at boot. Absent → that provider's endpoints 404, so
+  // the proxy runs either-or (Anthropic-only, OpenAI-only, or both).
+  anthropic?: {
+    apiKey: string;
+    baseUrl: string;
+    version: string;
+    estimateHold: HoldEstimator; // sizes the pre-flight hold; prod default is count_tokens (index.ts), byte bound as fallback
+  };
+  openai?: {
+    apiKey: string;
+    baseUrl: string;
+    estimateHold: HoldEstimator; // OpenAI's own hold estimator (count via /v1/responses/input_tokens, byte fallback)
+  };
   upstreamTimeoutMs: number;
   margin: number;
   buyMinUsd: number;
@@ -157,14 +168,6 @@ export type HandlerDeps = {
   maxMessagesBodyBytes: number;
   balances: BalanceStore;
   orders: OrdersStore;
-  estimateHold: HoldEstimator; // sizes the pre-flight hold; prod default is count_tokens (index.ts), byte bound as fallback
-  // OpenAI provider config — present iff OPENAI_API_KEY is set (index.ts). Absent → /v1/chat/completions
-  // 404s like any unsupported endpoint, so the proxy runs Anthropic-only by default (enable by adding a key).
-  openai?: {
-    apiKey: string;
-    baseUrl: string;
-    estimateHold: HoldEstimator; // OpenAI's own hold estimator (count via /v1/responses/input_tokens, byte fallback)
-  };
   // Output cap applied (and injected into the forwarded body) when a request OMITS one. 0/undefined =
   // require an explicit cap (max_tokens_required). Set it (index.ts, DEFAULT_MAX_OUTPUT_TOKENS) so stock
   // OpenAI clients that don't send a cap work. Provider-agnostic.
@@ -204,14 +207,10 @@ export type HandlerDeps = {
 
 export function createHandler(d: HandlerDeps): (req: Request) => Promise<Response> {
   const {
-    apiKey: API_KEY,
-    baseUrl: BASE_URL,
-    version: VERSION,
     upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
     maxMessagesBodyBytes: MAX_MESSAGES_BODY_BYTES,
     balances,
     orders,
-    estimateHold,
     upstreamFetch,
     orderStatus,
     inflight = new Set<(reason?: "drain") => void>(),
@@ -251,13 +250,10 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     orderStatus,
   });
 
-  // Active upstream providers, resolved into an exact-path → Provider registry (providers/index.ts). The
-  // Anthropic provider is always present; the OpenAI pair is registered iff OPENAI_API_KEY was configured
-  // (d.openai), so its endpoints 404 when disabled. Built here so each closes over THIS handler's creds.
-  const PROVIDERS = selectProviders({
-    anthropic: { apiKey: API_KEY, baseUrl: BASE_URL, version: VERSION, estimateHold },
-    openai: d.openai ? { apiKey: d.openai.apiKey, baseUrl: d.openai.baseUrl, estimateHold: d.openai.estimateHold } : undefined,
-  });
+  // Active upstream providers, resolved into an exact-path → Provider registry (providers/index.ts). Each is
+  // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
+  // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
+  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai });
   // Exact-path lookup (Map.get is exact — no prefix readmit of subpaths like /v1/messages/batches); an
   // unknown path or a disabled provider misses → the fail-closed 404 in handle().
   const providerForPath = (pathname: string): Provider | undefined => PROVIDERS.get(pathname);

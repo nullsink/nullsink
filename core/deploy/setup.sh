@@ -206,17 +206,17 @@ step "Installing systemd service"
 # The unit's ExecStart points at the binary (/usr/local/lib/nullsink/current), installed in the step above.
 systemctl enable "$SVC_NAME"
 # The env file EXISTING isn't the same as it being CONFIGURED. On a re-run (env present) we (re)start so the
-# buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the app comes up and the
-# rails work, yet /v1 proxying will 401 until a real key is set. A freshly templated env is left for the
-# operator to fill before the first start.
+# buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the box boots and the rails
+# work, yet /v1/messages will 401 until a real Anthropic key is set (or run OpenAI-only via OPENAI_API_KEY —
+# at least one provider key is required to boot). A freshly templated env is left for the operator to fill.
 if [ "$FRESH_ENV" -eq 0 ]; then
   systemctl restart "$SVC_NAME"
   _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_akey" ] || [ "$_akey" = replace-me ]; then
-    todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1 will 401 until you set a real key + restart $SVC_NAME"
+    todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $SVC_NAME"
   fi
 else
-  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY), then: systemctl start $SVC_NAME"
+  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY and/or OPENAI_API_KEY — at least one), then: systemctl start $SVC_NAME"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"
