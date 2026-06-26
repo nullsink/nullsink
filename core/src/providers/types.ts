@@ -30,9 +30,4 @@ export type Provider = {
   // --- settle ---
   extractUsage: (text: string) => Metered; // buffered response → {model, usage}
   makeScanner: (ctx: ScannerCtx) => UsageScanner; // streaming meter (provider-shaped SSE); ctx feeds the disconnect bill
-  // When true, the streaming-disconnect bill treats EVERY model on this provider as a reasoning model (bills
-  // the output cap, not the visible-text char estimate). Open-weight hosts (Tinfoil) serve reasoning models
-  // whose thinking tokens never stream as visible text — and vLLM may emit them in a separate reasoning_content
-  // field the estimate can't see — so the cap is the only sound disconnect bound. Absent = false.
-  forceReasoning?: boolean;
 };

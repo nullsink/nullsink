@@ -435,7 +435,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
         // streamed outcome exactly once: served (clean usage), servedPartial (disconnect floor), or streamAborted.
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
-        const scan = provider.makeScanner({ model, inputTokens, maxTokens, reasoning: isReasoningModel(model) || provider.forceReasoning === true });
+        const scan = provider.makeScanner({ model, inputTokens, maxTokens, reasoning: isReasoningModel(model) });
         let settled = false;
         // Set true the instant the client cuts the connection (the cancel callback), BEFORE we cancel the
         // upstream — cancelling upstream resolves any in-flight read as `done`, which would otherwise reach

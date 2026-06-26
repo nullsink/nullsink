@@ -157,12 +157,12 @@ test("Tinfoil forward forces stream_options.include_usage (over a client false) 
 
 // --- forceReasoning: a disconnect bills the cap, not the visible-char estimate --------------------
 
-test("a Tinfoil streaming disconnect bills the output cap (forceReasoning) though the model isn't a REASONING_MARKER", async () => {
+test("a Tinfoil streaming disconnect counts reasoning_content in the char estimate (no cap) — open-weight reasoning is visible", async () => {
   let cancelled = false;
   const chunks = [
     { model: TF, choices: [{ delta: { role: "assistant", content: "" } }] },
-    { model: TF, choices: [{ delta: { content: "12345678" } }] }, // 8 visible chars before disconnect
-    { model: TF, choices: [{ delta: { content: "never-read" } }] },
+    { model: TF, choices: [{ delta: { reasoning_content: "r".repeat(40) } }] }, // 40 reasoning chars streamed
+    { model: TF, choices: [{ delta: { content: "cccccccc" } }] }, // 8 answer chars streamed
     { model: TF, choices: [], usage: { prompt_tokens: 1000, completion_tokens: 9999 } }, // never reached
   ];
   const token = "pr_tf_cancel";
@@ -172,13 +172,14 @@ test("a Tinfoil streaming disconnect bills the output cap (forceReasoning) thoug
   const res = await handler(chatReq(token, body));
   const reader = res.body!.getReader();
   await reader.read(); // role chunk
-  await reader.read(); // "12345678" → char estimate would be ceil(8/4)=2
+  await reader.read(); // reasoning_content (40 chars) — counted, not ignored
+  await reader.read(); // content (8 chars)
   await reader.cancel(); // client disconnects
   expect(cancelled).toBe(true); // upstream generation cancelled → spend stops
-  // deepseek-v4-pro is NOT in REASONING_MARKERS, so without forceReasoning the disconnect would bill ~2 output
-  // tokens. forceReasoning makes it bill the CAP (1000) instead — the only sound bound when thinking tokens
-  // aren't visible in the stream. Input is the byte-bound hold's count (utf8 bytes of the forwarded body).
+  // B: open-weight reasoning streams in reasoning_content (visible), so the disconnect uses the char estimate
+  // over content + reasoning_content — NOT the cap. 40 + 8 = 48 chars → ceil(48/4) = 12 output tokens. Input
+  // is the byte-bound hold's count. (OpenAI's HIDDEN-reasoning models still bill the cap — openai.property.)
   const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
-  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1000 };
+  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 12 };
   expect(debit(balances, token)).toBe(priceUsage(TF, expected));
 });

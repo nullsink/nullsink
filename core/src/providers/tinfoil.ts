@@ -71,9 +71,9 @@ export function makeTinfoilProvider(cfg: TinfoilConfig): Provider {
     injectAuth: (headers) => headers.set("authorization", `Bearer ${cfg.apiKey}`),
     prepareBody: tinfoilPrepareBody,
     extractUsage: extractOpenAIChatUsage,
+    // The shared chat scanner sums delta.content + delta.reasoning_content for its disconnect estimate, so an
+    // open-weight model that streams its reasoning is metered like any other (no cap needed). MERGE-GATED on
+    // step-6 verifying the curated models stream reasoning live; a silently-thinking one would need a cap.
     makeScanner: (ctx) => openaiChatScanner(ctx),
-    // Open-weight reasoning models stream thinking tokens out of the visible text (vLLM may use a separate
-    // reasoning_content field), so a streaming disconnect bills the output cap, not the char estimate.
-    forceReasoning: true,
   };
 }

@@ -62,7 +62,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   let buf = "";
   let model: string | null = null;
   let finalUsage: Usage | null = null; // exact, from the include_usage final chunk
-  let contentChars = 0; // accumulated streamed output text length, for the disconnect estimate
+  let contentChars = 0; // accumulated streamed output text (content + reasoning_content), for the disconnect estimate
   let sawAny = false; // any parseable event → generation started (bill the partial, not a full refund)
   let failed = false; // upstream signalled an error mid-stream (not a client disconnect) → full refund
 
@@ -91,6 +91,11 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
           for (const ch of choices) {
             const c = ch?.delta?.content;
             if (typeof c === "string") contentChars += c.length;
+            // Open-weight (vLLM) reasoning streams HERE, not in content, and bills as output — count it so the
+            // disconnect estimate isn't blind to it. Genuine OpenAI never sends this on chat, so it's a no-op
+            // there (its hidden reasoning stays covered by the isReasoningModel cap in disconnectOutput).
+            const r = ch?.delta?.reasoning_content;
+            if (typeof r === "string") contentChars += r.length;
           }
         }
       }
@@ -116,12 +121,13 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   };
 }
 
-// Output-token estimate for a mid-stream disconnect (no final usage chunk). Normally the char heuristic;
-// but for a REASONING model the billed thinking tokens never appear as streamed text, so the char count is
-// blind to them and would massively under-bill — bill the output CAP instead (a sound upper bound, since
-// reasoning can fill it). This can OVER-bill an honest early disconnect of a reasoning stream up to the cap
-// (≤ the hold already reserved) — the accepted price of closing the under-bill exploit, since reasoning is
-// unmeasurable mid-stream. maxTokens absent (e.g. tests) → falls back to the char estimate.
+// Output-token estimate for a mid-stream disconnect (no final usage chunk): the char heuristic over all
+// streamed text (content + any reasoning_content, both summed into contentChars above). For a model whose
+// reasoning is HIDDEN from the stream (ctx.reasoning — OpenAI's o-series / gpt-5, where thinking tokens bill
+// as output but never stream), the char count is systematically blind, so bill the output CAP instead (a
+// sound upper bound). Open-weight models that STREAM their reasoning (reasoning_content, counted above) are
+// not flagged reasoning, so they take the char path like any model. The cap can OVER-bill an honest early
+// disconnect (≤ the hold already reserved). maxTokens absent (e.g. tests) → falls back to the char estimate.
 function disconnectOutput(contentChars: number, ctx: ScannerCtx): number {
   const est = Math.ceil(contentChars / CHARS_PER_TOKEN);
   return ctx.reasoning ? Math.max(est, ctx.maxTokens ?? 0) : est;
