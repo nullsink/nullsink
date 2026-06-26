@@ -13,9 +13,13 @@ import { test, expect } from "bun:test";
 import fc from "fast-check";
 import { costOf, holdBoundOf, isPriced, isReasoningModel, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
 import prices from "../src/cost/prices.json";
+import tinfoilPrices from "../src/cost/prices.tinfoil.json";
 
 type UsdRate = { provider: string; input: number; output: number; cache_read: number; cache_write: number };
-const PRICES = prices as Record<string, UsdRate>;
+// Merge both rate sources exactly as pricing.ts does, so the oracle stays a faithful independent check of the
+// real table (now incl. the hand-maintained Tinfoil rates). Disjoint ids today; pricing.ts throws if they
+// ever collide, so the spread can't silently shadow.
+const PRICES = { ...prices, ...tinfoilPrices } as Record<string, UsdRate>;
 const IDS = Object.keys(PRICES);
 
 // Independent reimplementation of the matcher: among every registered id that is an exact match or a

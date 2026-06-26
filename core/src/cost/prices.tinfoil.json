@@ -1,0 +1,9 @@
+{
+  "deepseek-v4-pro": {
+    "provider": "tinfoil",
+    "input": 1.5,
+    "output": 5.25,
+    "cache_read": 1.5,
+    "cache_write": 1.5
+  }
+}

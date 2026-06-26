@@ -9,6 +9,12 @@
 // are stored as micro-dollars per MILLION tokens (USD/Mtok × 1e6), so a request's cost is integer-exact:
 //   cost_micros = tokens * rate / 1_000_000   (no floats; truncation favours the user).
 import prices from "./prices.json";
+// Hand-maintained Tinfoil rates, merged below. Kept SEPARATE from prices.json (which cli/sync-prices.ts
+// rewrites wholesale from models.dev) so the synced mirror stays pure and a re-sync can't clobber these.
+// Tinfoil isn't on models.dev yet and its prices aren't machine-readable; once it is, fold it into the sync
+// and retire this file. cache_read/cache_write are set equal to input (Tinfoil bills flat, no cache fee), so
+// however tokens get classified the cost is the same input rate.
+import tinfoilPrices from "./prices.tinfoil.json";
 
 // Same four rate fields in prices.json (USD per Mtok) and, after the scaling below, internally
 // (micro-dollars per Mtok), PLUS the synthesized `cache_write_1h` tier (see below — not on disk).
@@ -36,7 +42,23 @@ const ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2;
 // id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
 // exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
 // gpt-4o also matches gpt-4o-2024-08-06) codeless.
-const RATES: [id: string, m: PricedModel][] = Object.entries(prices as Record<string, RawEntry>)
+// Merge the synced models.dev mirror (prices.json) with the hand-maintained Tinfoil rates. Both are id-keyed
+// and disjoint today, so the table stays a flat id → {provider, rate} lookup. A DUPLICATE id across the two
+// is the tripwire that an id is now served by >1 provider: at that point pricing must key by (provider, id)
+// and the handler's `provider/model` routing becomes load-bearing for billing too. Fail LOUD here rather than
+// silently letting one source win (which would mis-price/mis-route the shadowed model).
+const RAW_PRICES: [string, RawEntry][] = (() => {
+  const seen = new Set<string>();
+  const merged: [string, RawEntry][] = [];
+  for (const [id, c] of [...Object.entries(prices as Record<string, RawEntry>), ...Object.entries(tinfoilPrices as Record<string, RawEntry>)]) {
+    if (seen.has(id)) throw new Error(`duplicate priced model id "${id}" across prices.json + prices.tinfoil.json — pricing must move to (provider, id) keys (see the handler's provider/model routing)`);
+    seen.add(id);
+    merged.push([id, c]);
+  }
+  return merged;
+})();
+
+const RATES: [id: string, m: PricedModel][] = RAW_PRICES
   .map(([id, c]): [string, PricedModel] => {
     const input = Math.round(c.input * 1_000_000);
     return [
