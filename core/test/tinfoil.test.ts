@@ -237,3 +237,31 @@ test("Tinfoil accepts the legacy max_tokens cap and x-api-key auth; an absent ca
   expect(((await noCap.json()) as { error: { code: string } }).error.code).toBe("max_tokens_required");
   expect(calls.length).toBe(1); // still only the one accepted call
 });
+
+test("Tinfoil-only deployment exercises Tinfoil's own readToken (Bearer + x-api-key; no auth → 401)", async () => {
+  // With OpenAI also configured, representative=openai and OpenAI's reader runs — so Tinfoil's bearerToken is
+  // only reached when Tinfoil is the sole provider on the path (a privacy-focused Tinfoil-only box).
+  const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
+  const token = "pr_tf_only";
+  const { handler, balances } = makeHandler(fetchImpl, { openai: undefined });
+  fund(balances, token);
+  const body = { model: TF, max_completion_tokens: 100, messages: [{ role: "user", content: "hi" }] };
+  expect((await handler(chatReq(token, body))).status).toBe(200); // Authorization: Bearer
+  expect((await handler(new Request("https://proxy.local/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json", "x-api-key": token }, body: JSON.stringify(body) }))).status).toBe(200); // x-api-key fallback
+  expect((await handler(new Request("https://proxy.local/v1/chat/completions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }))).status).toBe(401); // no token
+  expect(calls.length).toBe(2); // the two authed calls forwarded; the unauthed one gated before spend
+});
+
+test("Tinfoil forward preserves the client's output cap, injects the default when omitted, and adds no stream_options to a non-stream request", async () => {
+  const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
+  const token = "pr_tf_cap";
+  const { handler, balances } = makeHandler(fetchImpl, { defaultMaxOutputTokens: 222 });
+  fund(balances, token);
+  // Client sends a cap → forwarded body keeps it verbatim (not overwritten), and a non-stream request gets no stream_options.
+  await handler(chatReq(token, { model: TF, max_completion_tokens: 100, messages: [{ role: "user", content: "hi" }] }));
+  expect(calls[0]!.body.max_completion_tokens).toBe(100);
+  expect("stream_options" in calls[0]!.body).toBe(false);
+  // Client omits a cap → the configured default is injected into the forward (bounding output to the hold).
+  await handler(chatReq(token, { model: TF, messages: [{ role: "user", content: "hi" }] }));
+  expect(calls[1]!.body.max_completion_tokens).toBe(222);
+});
