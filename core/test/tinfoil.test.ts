@@ -160,12 +160,15 @@ test("Tinfoil forward forces stream_options.include_usage (over a client false) 
 
 // --- forceReasoning: a disconnect bills the cap, not the visible-char estimate --------------------
 
-test("a Tinfoil streaming disconnect counts reasoning_content in the char estimate (no cap) — open-weight reasoning is visible", async () => {
+test("a Tinfoil streaming disconnect counts delta.reasoning (and reasoning_content) in the char estimate, no cap", async () => {
   let cancelled = false;
+  // Verified-live Tinfoil shape: reasoning streams in `delta.reasoning` (gpt-oss/glm/kimi). We also count the
+  // DeepSeek-style `reasoning_content` for robustness. Both must feed the disconnect estimate (no cap).
   const chunks = [
     { model: TF, choices: [{ delta: { role: "assistant", content: "" } }] },
-    { model: TF, choices: [{ delta: { reasoning_content: "r".repeat(40) } }] }, // 40 reasoning chars streamed
-    { model: TF, choices: [{ delta: { content: "cccccccc" } }] }, // 8 answer chars streamed
+    { model: TF, choices: [{ delta: { reasoning: "r".repeat(24) } }] }, // Tinfoil's field — 24 chars
+    { model: TF, choices: [{ delta: { reasoning_content: "x".repeat(16) } }] }, // DeepSeek-style — 16 chars
+    { model: TF, choices: [{ delta: { content: "cccccccc" } }] }, // 8 answer chars
     { model: TF, choices: [], usage: { prompt_tokens: 1000, completion_tokens: 9999 } }, // never reached
   ];
   const token = "pr_tf_cancel";
@@ -175,13 +178,14 @@ test("a Tinfoil streaming disconnect counts reasoning_content in the char estima
   const res = await handler(chatReq(token, body));
   const reader = res.body!.getReader();
   await reader.read(); // role chunk
-  await reader.read(); // reasoning_content (40 chars) — counted, not ignored
-  await reader.read(); // content (8 chars)
+  await reader.read(); // delta.reasoning (24) — counted
+  await reader.read(); // delta.reasoning_content (16) — counted
+  await reader.read(); // content (8)
   await reader.cancel(); // client disconnects
   expect(cancelled).toBe(true); // upstream generation cancelled → spend stops
-  // B: open-weight reasoning streams in reasoning_content (visible), so the disconnect uses the char estimate
-  // over content + reasoning_content — NOT the cap. 40 + 8 = 48 chars → ceil(48/4) = 12 output tokens. Input
-  // is the byte-bound hold's count. (OpenAI's HIDDEN-reasoning models still bill the cap — openai.property.)
+  // B: open-weight reasoning is visible, so the disconnect uses the char estimate over content + reasoning —
+  // NOT the cap. 24 + 16 + 8 = 48 chars → ceil(48/4) = 12 output tokens. Input is the byte-bound hold's count.
+  // (OpenAI's HIDDEN-reasoning models still bill the cap — see openai.property.test.)
   const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
   const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 12 };
   expect(debit(balances, token)).toBe(priceUsage(TF, expected));

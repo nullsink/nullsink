@@ -62,7 +62,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   let buf = "";
   let model: string | null = null;
   let finalUsage: Usage | null = null; // exact, from the include_usage final chunk
-  let contentChars = 0; // accumulated streamed output text (content + reasoning_content), for the disconnect estimate
+  let contentChars = 0; // accumulated streamed output text (content + reasoning/reasoning_content), for the disconnect estimate
   let sawAny = false; // any parseable event → generation started (bill the partial, not a full refund)
   let failed = false; // upstream signalled an error mid-stream (not a client disconnect) → full refund
 
@@ -89,12 +89,16 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
         const choices = evt.choices;
         if (Array.isArray(choices)) {
           for (const ch of choices) {
-            const c = ch?.delta?.content;
+            const d = ch?.delta;
+            const c = d?.content;
             if (typeof c === "string") contentChars += c.length;
-            // Open-weight (vLLM) reasoning streams HERE, not in content, and bills as output — count it so the
-            // disconnect estimate isn't blind to it. Genuine OpenAI never sends this on chat, so it's a no-op
-            // there (its hidden reasoning stays covered by the isReasoningModel cap in disconnectOutput).
-            const r = ch?.delta?.reasoning_content;
+            // Reasoning streams in a side field on OpenAI-compatible hosts and bills as output — count it too,
+            // or a disconnect estimate would be blind to it. Tinfoil/vLLM uses `reasoning` (verified live);
+            // DeepSeek-style hosts use `reasoning_content`. Genuine OpenAI emits NEITHER on chat (its reasoning
+            // is hidden, billed as a count only), so this is a strict no-op there — o-series/gpt-5 stay on the
+            // isReasoningModel output-cap path in disconnectOutput. (Tinfoil models that reason in `content`,
+            // e.g. deepseek/gemma, are already covered by the content count above.)
+            const r = d?.reasoning ?? d?.reasoning_content;
             if (typeof r === "string") contentChars += r.length;
           }
         }

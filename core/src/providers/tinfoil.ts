@@ -71,9 +71,11 @@ export function makeTinfoilProvider(cfg: TinfoilConfig): Provider {
     injectAuth: (headers) => headers.set("authorization", `Bearer ${cfg.apiKey}`),
     prepareBody: tinfoilPrepareBody,
     extractUsage: extractOpenAIChatUsage,
-    // The shared chat scanner sums delta.content + delta.reasoning_content for its disconnect estimate, so an
-    // open-weight model that streams its reasoning is metered like any other (no cap needed). MERGE-GATED on
-    // step-6 verifying the curated models stream reasoning live; a silently-thinking one would need a cap.
+    // The shared chat scanner sums delta.content + delta.reasoning (+ reasoning_content) for its disconnect
+    // estimate, so an open-weight model that streams its reasoning is metered like any other — no cap needed.
+    // VERIFIED live (step 6): every curated model streams reasoning visibly — in `content` (deepseek, gemma)
+    // or `delta.reasoning` (gpt-oss, glm, kimi); none silently. Re-probe reasoning streaming before adding a
+    // model — a silently-thinking one would under-bill on a mid-stream disconnect and need a cap.
     makeScanner: (ctx) => openaiChatScanner(ctx),
   };
 }
