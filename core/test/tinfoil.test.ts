@@ -193,17 +193,22 @@ test("a Tinfoil streaming disconnect counts delta.reasoning (and reasoning_conte
 
 // --- Premium gate + price-file invariant ----------------------------------------------------------
 
-test("Tinfoil rejects output-multiplying options (n != 1, best_of != 1) before any spend", async () => {
-  const { fetchImpl, calls } = capturing(TF, {});
+test("Tinfoil rejects output-multiplying options (n/best_of != 1) with unsupported_option, before any spend; n==1/best_of==1 pass", async () => {
+  const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
   const token = "pr_tf_reject";
   const { handler, balances } = makeHandler(fetchImpl);
   fund(balances, token);
-  for (const bad of [{ n: 2 }, { best_of: 2 }]) {
+  for (const bad of [{ n: 2 }, { best_of: 2 }, { n: 2, best_of: 2 }]) {
     const res = await handler(chatReq(token, { model: TF, max_completion_tokens: 100, ...bad, messages: [{ role: "user", content: "hi" }] }));
     expect(res.status).toBe(400); // n / best_of would multiply output past the single-completion hold
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("unsupported_option");
   }
-  expect(calls.length).toBe(0); // rejected at the gate — nothing forwarded
+  expect(calls.length).toBe(0); // every reject gated before forwarding
   expect(debit(balances, token)).toBe(0); // and nothing spent
+  // Boundary: the accepted values (n==1, best_of==1) are NOT rejected — the request forwards.
+  const ok = await handler(chatReq(token, { model: TF, max_completion_tokens: 100, n: 1, best_of: 1, messages: [{ role: "user", content: "hi" }] }));
+  expect(ok.status).toBe(200);
+  expect(calls.length).toBe(1);
 });
 
 test("prices.json and prices.tinfoil.json share no model id (the dup-throw invariant holds for the committed files)", () => {
@@ -211,4 +216,24 @@ test("prices.json and prices.tinfoil.json share no model id (the dup-throw invar
   // committed files statically so a colliding addition is caught here, not only at boot.
   const shared = Object.keys(tinfoilPrices).filter((id) => id in (prices as Record<string, unknown>));
   expect(shared).toEqual([]);
+});
+
+test("Tinfoil accepts the legacy max_tokens cap and x-api-key auth; an absent cap is rejected", async () => {
+  const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
+  const token = "pr_tf_compat";
+  const { handler, balances } = makeHandler(fetchImpl);
+  fund(balances, token);
+  // Legacy `max_tokens` (not max_completion_tokens) + the proxy token via x-api-key (the Bearer fallback).
+  const ok = await handler(new Request("https://proxy.local/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": token },
+    body: JSON.stringify({ model: TF, max_tokens: 100, messages: [{ role: "user", content: "hi" }] }),
+  }));
+  expect(ok.status).toBe(200);
+  expect(calls.length).toBe(1);
+  // max_tokens: 0 fails the m>0 guard → no cap → max_tokens_required, no further spend.
+  const noCap = await handler(chatReq(token, { model: TF, max_tokens: 0, messages: [{ role: "user", content: "hi" }] }));
+  expect(noCap.status).toBe(400);
+  expect(((await noCap.json()) as { error: { code: string } }).error.code).toBe("max_tokens_required");
+  expect(calls.length).toBe(1); // still only the one accepted call
 });

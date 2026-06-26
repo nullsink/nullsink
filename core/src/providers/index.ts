@@ -47,3 +47,29 @@ export function selectProviders(cfg: ProvidersConfig): Map<string, Provider[]> {
   if (m.size === 0) throw new Error("no providers configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY)");
   return m;
 }
+
+// Resolve which provider on a path serves a request, by model. Native id FIRST: a provider owning the
+// VERBATIM id wins (so an org/model open-weight id whose org segment equals a provider name isn't wrongly
+// stripped), then a `provider/model` namespace prefix (validated against the path's providers; the caller
+// strips it before forwarding). Pure + exported so the branchy routing is unit-testable apart from the handler.
+export type Resolution =
+  | { ok: true; provider: Provider; model: string; prefixed: boolean }
+  | { ok: false; error: "unsupported_model" | "ambiguous_model" };
+
+export function resolveProvider(candidates: Provider[], rawModel: string, knownProviderIds: Set<string>): Resolution {
+  // Native id first: one verbatim owner routes there; two would be ambiguous (unreachable while one provider
+  // owns each id, but the guard stands for when pricing moves to (provider, id) keys).
+  const nativeOwners = candidates.filter((c) => c.ownsModel(rawModel));
+  if (nativeOwners.length > 1) return { ok: false, error: "ambiguous_model" };
+  if (nativeOwners.length === 1) return { ok: true, provider: nativeOwners[0]!, model: rawModel, prefixed: false };
+  // No verbatim owner — try a `provider/model` prefix. A leading segment that doesn't name a registered
+  // provider stays part of the model (so an org/model id falls through to unsupported_model, not mis-split).
+  const slash = rawModel.indexOf("/");
+  const hint = slash > 0 ? rawModel.slice(0, slash) : "";
+  if (!hint || !knownProviderIds.has(hint)) return { ok: false, error: "unsupported_model" };
+  const bareModel = rawModel.slice(slash + 1);
+  const hinted = candidates.find((c) => c.id === hint);
+  // The prefix must name a provider serving THIS path AND that provider must own the bare model.
+  if (!hinted || !hinted.ownsModel(bareModel)) return { ok: false, error: "unsupported_model" };
+  return { ok: true, provider: hinted, model: bareModel, prefixed: true };
+}

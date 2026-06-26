@@ -9,6 +9,7 @@ import type { HoldEstimator } from "../src/hold";
 const estimateHold = (() => ({ micros: 0, inputTokens: 0 })) as unknown as HoldEstimator;
 const anthropic = { apiKey: "k", baseUrl: "https://up", version: "2023-06-01", estimateHold };
 const openai = { apiKey: "k", baseUrl: "https://up", estimateHold };
+const tinfoil = { apiKey: "k", baseUrl: "https://up", estimateHold };
 
 test("anthropic-only registers /v1/messages and no OpenAI paths", () => {
   const m = selectProviders({ anthropic });
@@ -27,4 +28,16 @@ test("both configured registers all three metered paths", () => {
 
 test("an all-absent config throws (the ≥1-provider invariant)", () => {
   expect(() => selectProviders({})).toThrow(/no providers configured/);
+});
+
+test("openai + tinfoil share /v1/chat/completions: both providers, in registration order; /v1/responses stays single", () => {
+  const m = selectProviders({ openai, tinfoil });
+  expect(m.get("/v1/chat/completions")!.map((p) => p.id)).toEqual(["openai", "tinfoil"]);
+  expect(m.get("/v1/responses")!.map((p) => p.id)).toEqual(["openai"]);
+});
+
+test("tinfoil-only registers /v1/chat/completions with a single provider", () => {
+  const m = selectProviders({ tinfoil });
+  expect([...m.keys()].sort()).toEqual(["/v1/chat/completions"]);
+  expect(m.get("/v1/chat/completions")!.map((p) => p.id)).toEqual(["tinfoil"]);
 });

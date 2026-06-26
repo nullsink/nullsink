@@ -6,7 +6,7 @@ import { priceUsage, isReasoningModel } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";
 import * as metrics from "./metrics";
-import { selectProviders, type Provider } from "./providers";
+import { selectProviders, resolveProvider, type Provider } from "./providers";
 import { makeEndpoints } from "./endpoints";
 import { deny, denyApi, apiErrorBody, NO_API_KEY, scrubRespHeaders, buildUpstreamHeaders } from "./http";
 import type { HoldEstimator } from "./hold";
@@ -319,37 +319,18 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     // before forwarding so the upstream sees its native id.
     const rawModel: string | null = typeof body?.model === "string" ? body.model : null;
     if (!rawModel) { metrics.recordGate("model"); return denyApi(representative, 400, "unsupported_model"); }
-    let provider: Provider;
-    let bareModel = rawModel;
-    let prefixed = false;
-    // Native id FIRST: if a provider on this path owns the VERBATIM id, route by that. Real model ids win over
-    // prefix parsing — including org/model open-weight ids whose org segment happens to equal a provider name
-    // (e.g. a Tinfoil model literally named `openai/gpt-oss-120b`), which a prefix-first reading would wrongly
-    // strip and fail to route. (>1 owner is unreachable today — one provider per id, dup-throw enforced — but
-    // kept as the ambiguity guard for when pricing moves to (provider, id) keys.)
-    const nativeOwners = candidates.filter((c) => c.ownsModel(rawModel));
-    if (nativeOwners.length > 1) { metrics.recordGate("model"); return denyApi(representative, 400, "ambiguous_model"); }
-    if (nativeOwners.length === 1) {
-      provider = nativeOwners[0]!;
-    } else {
-      // No candidate owns the verbatim id — try a `provider/model` namespace prefix.
-      const slash = rawModel.indexOf("/");
-      const hint = slash > 0 ? rawModel.slice(0, slash) : "";
-      if (!hint || !KNOWN_PROVIDER_IDS.has(hint)) { metrics.recordGate("model"); return denyApi(representative, 400, "unsupported_model"); }
-      bareModel = rawModel.slice(slash + 1);
-      const hinted = candidates.find((c) => c.id === hint);
-      // The prefix must name a provider on THIS path's wire shape (not e.g. `anthropic/` on the OpenAI chat
-      // path) AND that provider must own the bare model.
-      if (!hinted || !hinted.ownsModel(bareModel)) { metrics.recordGate("model"); return denyApi(hinted ?? representative, 400, "unsupported_model"); }
-      provider = hinted;
-      prefixed = true;
-    }
-    const model = bareModel;
-    // Forward with the prefix stripped — rebuilt ONLY when a prefix was present, so the common (bare / native)
-    // path still forwards the exact original bytes. body.model is normalized too, so the hold estimator/count
-    // call and prepareBody all see the native id.
-    if (prefixed) body.model = bareModel;
-    const effectiveRaw = prefixed ? JSON.stringify(body) : raw;
+    // Resolve which provider on this path serves the request, by model — native id first, then a
+    // `provider/model` namespace prefix (see providers/resolveProvider). The error envelope rides the
+    // representative (every provider on a path shares the wire shape).
+    const resolved = resolveProvider(candidates, rawModel, KNOWN_PROVIDER_IDS);
+    if (!resolved.ok) { metrics.recordGate("model"); return denyApi(representative, 400, resolved.error); }
+    const provider = resolved.provider;
+    const model = resolved.model;
+    // Forward with the prefix stripped — body is rebuilt ONLY when a prefix was present, so the common
+    // (bare/native) path still forwards the exact original bytes. body.model is normalized so the hold
+    // estimator/count call and prepareBody all see the native id.
+    if (resolved.prefixed) body.model = model;
+    const effectiveRaw = resolved.prefixed ? JSON.stringify(body) : raw;
 
     const rej = provider.premiumReject(body);
     if (rej) { metrics.recordGate("premium"); return denyApi(provider, rej.status, rej.error); }

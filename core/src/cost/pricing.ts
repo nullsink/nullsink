@@ -25,7 +25,7 @@ export type Rate = { input: number; output: number; cache_read: number; cache_wr
 // A prices.json entry as stored on disk: the provider tag + the four USD/Mtok rates. NOTE: prices.json does
 // NOT carry cache_write_1h — that tier is synthesized in the RATES build below, so the on-disk file stays a
 // pure models.dev mirror (regenerate with `bun run cli/sync-prices.ts`, never hand-edit).
-type RawEntry = Omit<Rate, "cache_write_1h"> & { provider: string };
+export type RawEntry = Omit<Rate, "cache_write_1h"> & { provider: string };
 
 // A resolved model: which provider owns it (for the cross-provider endpoint gate) + its scaled rate.
 type PricedModel = { provider: string; rate: Rate };
@@ -42,21 +42,25 @@ const ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2;
 // id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
 // exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
 // gpt-4o also matches gpt-4o-2024-08-06) codeless.
-// Merge the synced models.dev mirror (prices.json) with the hand-maintained Tinfoil rates. Both are id-keyed
-// and disjoint today, so the table stays a flat id → {provider, rate} lookup. A DUPLICATE id across the two
-// is the tripwire that an id is now served by >1 provider: at that point pricing must key by (provider, id)
-// and the handler's `provider/model` routing becomes load-bearing for billing too. Fail LOUD here rather than
-// silently letting one source win (which would mis-price/mis-route the shadowed model).
-const RAW_PRICES: [string, RawEntry][] = (() => {
+// Merge id-keyed price sources, THROWING on a duplicate id across them — the tripwire that an id is now
+// served by >1 provider (at which point pricing must key by (provider, id), and the handler's `provider/model`
+// routing becomes load-bearing for billing too). Each source is internally id-unique (a JSON object), so a
+// duplicate can only arise ACROSS sources. Exported + pure so the throw is unit-testable. Fail LOUD rather
+// than silently letting one source shadow the other (which would mis-price/mis-route).
+export function mergeRawPrices(...sources: Record<string, RawEntry>[]): [string, RawEntry][] {
   const seen = new Set<string>();
   const merged: [string, RawEntry][] = [];
-  for (const [id, c] of [...Object.entries(prices as Record<string, RawEntry>), ...Object.entries(tinfoilPrices as Record<string, RawEntry>)]) {
-    if (seen.has(id)) throw new Error(`duplicate priced model id "${id}" across prices.json + prices.tinfoil.json — pricing must move to (provider, id) keys (see the handler's provider/model routing)`);
-    seen.add(id);
-    merged.push([id, c]);
+  for (const src of sources) {
+    for (const [id, c] of Object.entries(src)) {
+      if (seen.has(id)) throw new Error(`duplicate priced model id "${id}" across price sources — pricing must move to (provider, id) keys (see the handler's provider/model routing)`);
+      seen.add(id);
+      merged.push([id, c]);
+    }
   }
   return merged;
-})();
+}
+
+const RAW_PRICES = mergeRawPrices(prices as Record<string, RawEntry>, tinfoilPrices as Record<string, RawEntry>);
 
 const RATES: [id: string, m: PricedModel][] = RAW_PRICES
   .map(([id, c]): [string, PricedModel] => {
