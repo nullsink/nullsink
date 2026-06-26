@@ -158,6 +158,13 @@ export type HandlerDeps = {
     baseUrl: string;
     estimateHold: HoldEstimator; // OpenAI's own hold estimator (count via /v1/responses/input_tokens, byte fallback)
   };
+  // Tinfoil config — present iff TINFOIL_API_KEY is set (index.ts). OpenAI-compatible; shares
+  // /v1/chat/completions with OpenAI (the handler routes by model). No count_tokens endpoint → byte-bound hold.
+  tinfoil?: {
+    apiKey: string;
+    baseUrl: string;
+    estimateHold: HoldEstimator;
+  };
   upstreamTimeoutMs: number;
   margin: number;
   buyMinUsd: number;
@@ -253,7 +260,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
   // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
   // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
   // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
-  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai });
+  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
   // Every registered provider id (anthropic / openai / …) — used to tell a `provider/model` namespace prefix
   // from a bare model id (which may itself contain a slash, e.g. an org/model open-weight id).
   const KNOWN_PROVIDER_IDS = new Set<string>([...PROVIDERS.values()].flat().map((p) => p.id));

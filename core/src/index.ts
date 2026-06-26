@@ -156,11 +156,19 @@ const openaiDeps = OPENAI_API_KEY
     }
   : undefined;
 
+// Tinfoil provider — OPTIONAL, OpenAI-compatible (open-weight models in attested TEEs). Enabled iff
+// TINFOIL_API_KEY is set; shares /v1/chat/completions with OpenAI (the handler routes by model). Tinfoil has
+// no count_tokens endpoint, so the hold ALWAYS uses the byte bound regardless of HOLD_ESTIMATOR (sound, just
+// looser). Same key gates the forward, so a missing/typo'd key disables the provider rather than 500ing.
+const TINFOIL_API_KEY = process.env.TINFOIL_API_KEY;
+const TINFOIL_BASE_URL = process.env.TINFOIL_BASE_URL ?? "https://inference.tinfoil.sh";
+const tinfoilDeps = TINFOIL_API_KEY ? { apiKey: TINFOIL_API_KEY, baseUrl: TINFOIL_BASE_URL, estimateHold: byteBoundHold } : undefined;
+
 // At least one upstream provider must be configured — an all-absent set would 404 every metered path, so the
 // proxy would serve no LLM at all. Fail fast at boot like the other guards (selectProviders also throws as the
-// library-level backstop). Either provider alone is valid; the buy rails are independent of this.
-if (!anthropicDeps && !openaiDeps) {
-  log.error("boot", "no providers configured — set ANTHROPIC_API_KEY and/or OPENAI_API_KEY");
+// library-level backstop). Any one provider alone is valid; the buy rails are independent of this.
+if (!anthropicDeps && !openaiDeps && !tinfoilDeps) {
+  log.error("boot", "no providers configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY");
   process.exit(1);
 }
 
@@ -190,6 +198,7 @@ log.info("boot", `pay rails: ${[...rails.keys()].join(", ")} (default ${DEFAULT_
 const handler = createHandler({
   anthropic: anthropicDeps,
   openai: openaiDeps,
+  tinfoil: tinfoilDeps,
   upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
   streamSettleDeadlineMs: STREAM_SETTLE_DEADLINE_MS,
   margin: MARGIN,
@@ -239,7 +248,7 @@ const server = Bun.serve({
 });
 
 // Active providers, listed like the "pay rails:" line — exactly those configured, in a stable order.
-const providerSummary = [anthropicDeps && `anthropic ${anthropicDeps.baseUrl}`, openaiDeps && `openai ${openaiDeps.baseUrl}`].filter(Boolean).join(" + ");
+const providerSummary = [anthropicDeps && `anthropic ${anthropicDeps.baseUrl}`, openaiDeps && `openai ${openaiDeps.baseUrl}`, tinfoilDeps && `tinfoil ${tinfoilDeps.baseUrl}`].filter(Boolean).join(" + ");
 log.info("boot", `nullsink ${BUILD_VERSION} → ${providerSummary} listening on ${HOST}:${server.port}`);
 
 // --- Settlement poller. Pure outbound: fetches confirmed deposits via each rail's watch-only wallet and
