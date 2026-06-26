@@ -1,7 +1,8 @@
-// Refuse to run nsk as root. Every subcommand opens the WAL-mode balances.db (via src/ledger/db); opening it
-// as root creates root-owned balances.db-wal / -shm sidecars the unprivileged service user then can't write,
-// which breaks the live ledger until someone repairs ownership (see cli/README.md). nsk fails closed rather
-// than risk that. Escape hatch: NSK_ALLOW_ROOT=1 for a deliberate, reviewed break-glass run.
+// Refuse to run nsk as root. Every subcommand opens a WAL-mode ledger (balances.db via src/ledger/db, or
+// pending.db for `orders`); opening it as root creates root-owned -wal / -shm sidecars the unprivileged
+// service user then can't write, which breaks the live ledger until someone repairs ownership (see
+// cli/README.md). nsk fails closed rather than risk that. Escape hatch: NSK_ALLOW_ROOT=1 for a deliberate,
+// reviewed break-glass run.
 
 // Pure policy decision (no I/O), so it's unit-testable: are we root with no override? `euid` is
 // process.geteuid()'s result — undefined on platforms without uids (nothing to enforce there).
@@ -11,7 +12,7 @@ export function rootGuardViolation(euid: number | undefined, allowRoot: string |
 
 // Thin process shell around the policy: if violated, explain how to run it right and exit non-zero. index.ts
 // calls this AFTER a ledger-opening command is resolved but BEFORE that command's module (and its DB
-// singleton) is imported — so the refusal lands before balances.db is ever opened.
+// singleton) is imported — so the refusal lands before that ledger is ever opened.
 export function refuseRootOrExit(cmd?: string): void {
   if (!rootGuardViolation(process.geteuid?.(), process.env.NSK_ALLOW_ROOT)) return;
   console.error(

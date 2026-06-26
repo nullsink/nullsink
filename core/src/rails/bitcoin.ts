@@ -9,6 +9,7 @@ import * as log from "../log";
 import { numEnv } from "../env";
 import { btcUsd } from "./rate";
 import { SATS_PER_BTC } from "./units";
+import { RAIL_META } from "./catalog";
 import type { PayRail, NewAddress, Incoming } from "./types";
 
 export class BitcoinError extends Error {}
@@ -129,7 +130,7 @@ export const bitcoinRail: PayRail = {
   name: "bitcoin",
   scale: SATS_PER_BTC,
   confirmations: CONFIRMATIONS,
-  unit: "BTC",
+  unit: RAIL_META.bitcoin.unit,
   createAddress: wallet.createAddress,
   incomingTransfers: wallet.incomingTransfers,
   rateUsd: btcUsd,
