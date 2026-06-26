@@ -23,7 +23,10 @@ or a request that ends up billing nothing — always returns to the same token.
 `cost/pricing.ts` imports `prices.json` once at startup, so billing is deterministic — never a
 live price fetch mid-request. Each model lists input, output, cache-read, and cache-write rates.
 Don't hand-edit `prices.json` — regenerate it with the dev-only `bun run cli/sync-prices.ts`,
-then review the diff and commit it.
+then review the diff and commit it. Tinfoil isn't on models.dev yet, so its rates are kept in a
+small hand-maintained `prices.tinfoil.json` (flat — no cache discount), merged at startup; a
+duplicate model id across the two files is a hard error — the tripwire for when an id is served
+by more than one provider.
 
 A request's model is matched by exact id or dated suffix, longest match first — `claude-opus-4-1`
 matches `claude-opus-4-1-20250805` but not `claude-opus-4-12345`. Each provider reports usage in
@@ -41,6 +44,9 @@ rate:
 - **Cache writes** — the one-time cost of creating the entry. On Anthropic that's 1.25× the input
   rate for the default 5-minute TTL, 2× for the 1-hour TTL; OpenAI charges no cache-write fee.
 
+Tinfoil bills flat — there's no cache tier to pass through, so a cached token costs the same as a
+normal input token.
+
 You decide what gets cached from your own request (the provider's `cache_control` breakpoints) —
 nullsink only meters the result. The two providers report cache usage differently (Anthropic's
 input count excludes cached tokens, OpenAI's includes them, and Anthropic reports the 1-hour write
@@ -57,7 +63,7 @@ reaches the provider (`providers/`):
   fees beyond per-token rates. Client-side (function) tools are just tokens, so they pass.
 - **Premium service tiers** — OpenAI `service_tier` flex/priority; only the standard tier maps to the card.
 - **Audio and other non-text modalities** — audio input or output bills far above text rates.
-- **Multi-completion** — OpenAI `n` > 1 multiplies output cost past a single-completion hold.
+- **Multi-completion** — OpenAI `n` > 1, or Tinfoil/vLLM `best_of` > 1, multiplies output cost past a single-completion hold.
 - **Regional routing** — Anthropic `inference_geo`.
 - **Off-card models** — `search-preview`, `deep-research`, audio, and realtime model ids.
 
@@ -152,12 +158,14 @@ For SSE responses the bytes are relayed untouched while a scanner meters usage o
 Settlement runs once, on whichever happens first: a clean finish (bill exact usage), an upstream
 error (full refund), a client cancel, or a force-settle deadline for a client that opens a stream
 but never reads it. On an early client disconnect nullsink still bills at least the input it
-already paid the provider to ingest (the "input floor"). Reasoning models (OpenAI's o-series and
-GPT-5) bill their hidden *thinking* tokens as output, yet those tokens never appear in the streamed
-text — so counting the visible characters on an early cut would under-bill. For these models a
-mid-stream disconnect is billed at the full output cap instead, a sound upper bound. (Anthropic
-extended thinking needs no special case: its scanner reads the running output count, thinking
-included, straight off the stream.) Graceful shutdown drains still-open streams, billing the
+already paid the provider to ingest (the "input floor"). Reasoning models whose thinking is *hidden*
+from the stream (OpenAI's o-series and GPT-5) bill those tokens as output yet never stream them — so
+counting the visible characters on an early cut would under-bill. For these a mid-stream disconnect
+is billed at the full output cap instead, a sound upper bound. Open-weight reasoning models (Tinfoil)
+*do* stream their thinking — as `content`, or in a `reasoning` field the scanner also counts — so
+they're metered from the streamed text like any model, no cap needed. (Anthropic extended thinking
+needs no special case either: its scanner reads the running output count, thinking included, straight
+off the stream.) Graceful shutdown drains still-open streams, billing the
 metered partial and refunding the rest.
 
 ## Invariants

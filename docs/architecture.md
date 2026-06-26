@@ -36,12 +36,13 @@ Bun.serve ── handle() router ──┬─ GET  /healthz
                                ├─ POST /order-status  ├─ endpoints/ (not metered)
                                ├─ GET  /rails         │
                                ├─ GET  /balance       ┘
-                               └─ POST /v1/...  → exact-path Provider → handleMetered
+                               └─ POST /v1/...  → exact-path provider(s) → handleMetered
 ```
 
 The `/v1` branch matches an **exact-path** registry, not a prefix (so
 `/v1/messages/batches` isn't silently admitted); an unmatched path is denied — the router
-fails closed.
+fails closed. A path can map to more than one provider (OpenAI + Tinfoil both speak
+`/v1/chat/completions`); `handleMetered` then resolves the one a request means by its model.
 
 ## The two seams
 
@@ -50,7 +51,10 @@ read the token, reject premium features outside the flat per-token card, resolve
 output cap, check the model is ours, inject our key, normalize usage from both buffered and
 streaming responses. Each provider is registered only when its key is set — Anthropic
 (`/v1/messages`) on `ANTHROPIC_API_KEY`, the OpenAI pair (`/v1/chat/completions`,
-`/v1/responses`) on `OPENAI_API_KEY` — and at least one is required.
+`/v1/responses`) on `OPENAI_API_KEY`, and Tinfoil (open-weight models, OpenAI-compatible) on
+`TINFOIL_API_KEY` — and at least one is required. Tinfoil shares `/v1/chat/completions` with
+OpenAI, so that path holds more than one provider: a request resolves to the provider that owns
+its model, or to an explicit `provider/model` prefix (stripped before forwarding upstream).
 
 **Rail seam** (`rails/types.ts`) — what it takes to accept a coin: mint a per-order address
 and detect confirmed deposits. A rail is **watch-only**: it observes incoming payments

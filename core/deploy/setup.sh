@@ -216,7 +216,7 @@ if [ "$FRESH_ENV" -eq 0 ]; then
     todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $SVC_NAME"
   fi
 else
-  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY and/or OPENAI_API_KEY — at least one), then: systemctl start $SVC_NAME"
+  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $SVC_NAME"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"
