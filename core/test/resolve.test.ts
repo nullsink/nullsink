@@ -9,7 +9,7 @@ import { resolveProvider, type Provider } from "../src/providers";
 const stub = (id: string, owns: (m: string) => boolean): Provider => ({ id, ownsModel: owns }) as unknown as Provider;
 
 const openai = stub("openai", (m) => m.startsWith("gpt-") || m.startsWith("o1") || m === "gpt-5");
-const tinfoil = stub("tinfoil", (m) => m === "deepseek-v4-pro" || m === "openai/gpt-oss-120b");
+const tinfoil = stub("tinfoil", (m) => m === "glm-5-2" || m === "openai/gpt-oss-120b");
 const KNOWN = new Set(["anthropic", "openai", "tinfoil"]);
 
 function expectOk(r: ReturnType<typeof resolveProvider>, provider: Provider, model: string, prefixed: boolean) {
@@ -21,7 +21,7 @@ function expectOk(r: ReturnType<typeof resolveProvider>, provider: Provider, mod
 }
 
 test("a bare id routes to its unique owner, unprefixed", () => {
-  expectOk(resolveProvider([openai, tinfoil], "deepseek-v4-pro", KNOWN), tinfoil, "deepseek-v4-pro", false);
+  expectOk(resolveProvider([openai, tinfoil], "glm-5-2", KNOWN), tinfoil, "glm-5-2", false);
   expectOk(resolveProvider([openai, tinfoil], "gpt-5", KNOWN), openai, "gpt-5", false);
 });
 
@@ -32,7 +32,7 @@ test("native id wins over prefix parsing: an `openai/…` id OWNED by Tinfoil ro
 });
 
 test("a `provider/model` prefix routes + strips when no provider owns the verbatim id", () => {
-  expectOk(resolveProvider([openai, tinfoil], "tinfoil/deepseek-v4-pro", KNOWN), tinfoil, "deepseek-v4-pro", true);
+  expectOk(resolveProvider([openai, tinfoil], "tinfoil/glm-5-2", KNOWN), tinfoil, "glm-5-2", true);
 });
 
 test("a prefix naming an unknown provider (or a leading slash) → unsupported_model", () => {
@@ -46,7 +46,7 @@ test("a prefix naming a provider not on this path → unsupported_model", () => 
 
 test("a prefix whose provider doesn't own the bare model → unsupported_model", () => {
   expect(resolveProvider([openai, tinfoil], "tinfoil/gpt-5", KNOWN)).toEqual({ ok: false, error: "unsupported_model" });
-  expect(resolveProvider([openai, tinfoil], "openai/deepseek-v4-pro", KNOWN)).toEqual({ ok: false, error: "unsupported_model" });
+  expect(resolveProvider([openai, tinfoil], "openai/glm-5-2", KNOWN)).toEqual({ ok: false, error: "unsupported_model" });
 });
 
 test("two verbatim owners → ambiguous_model (the guard for a future (provider,id) overlap)", () => {

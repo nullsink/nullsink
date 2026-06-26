@@ -15,7 +15,7 @@ import tinfoilPrices from "../src/cost/prices.tinfoil.json";
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 const INITIAL = 10_000_000_000; // $10k — covers any hold here
-const TF = "deepseek-v4-pro"; // priced under tinfoil (prices.tinfoil.json); NOT a REASONING_MARKER id
+const TF = "glm-5-2"; // priced under tinfoil (prices.tinfoil.json); NOT a REASONING_MARKER id
 
 const anthropic = { apiKey: "real-anthropic-key", baseUrl: "https://anthropic.example", version: "2023-06-01", estimateHold: byteBoundHold };
 
