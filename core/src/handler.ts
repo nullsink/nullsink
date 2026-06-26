@@ -332,6 +332,9 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     if (resolved.prefixed) body.model = model;
     const effectiveRaw = resolved.prefixed ? JSON.stringify(body) : raw;
 
+    // premiumReject runs AFTER resolution by necessity — the gate is provider-specific, so it needs the
+    // resolved provider. A request both unsupported-model and premium-violating is rejected as
+    // unsupported_model first; both are terminal pre-spend 400s, so the order is immaterial to the caller.
     const rej = provider.premiumReject(body);
     if (rej) { metrics.recordGate("premium"); return denyApi(provider, rej.status, rej.error); }
     // The request's output cap, or the global default if it omitted one (then injected into the forward

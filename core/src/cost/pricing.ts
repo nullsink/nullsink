@@ -39,9 +39,6 @@ type PricedModel = { provider: string; rate: Rate };
 //   "1-hour cache write tokens are 2× the base input tokens price".
 const ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2;
 
-// id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
-// exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
-// gpt-4o also matches gpt-4o-2024-08-06) codeless.
 // Merge id-keyed price sources, THROWING on a duplicate id across them — the tripwire that an id is now
 // served by >1 provider (at which point pricing must key by (provider, id), and the handler's `provider/model`
 // routing becomes load-bearing for billing too). Each source is internally id-unique (a JSON object), so a
@@ -62,6 +59,9 @@ export function mergeRawPrices(...sources: Record<string, RawEntry>[]): [string,
 
 const RAW_PRICES = mergeRawPrices(prices as Record<string, RawEntry>, tinfoilPrices as Record<string, RawEntry>);
 
+// id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
+// exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
+// gpt-4o also matches gpt-4o-2024-08-06) codeless.
 const RATES: [id: string, m: PricedModel][] = RAW_PRICES
   .map(([id, c]): [string, PricedModel] => {
     const input = Math.round(c.input * 1_000_000);
