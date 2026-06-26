@@ -18,19 +18,23 @@ export type ProvidersConfig = {
   openai?: { apiKey: string; baseUrl: string; estimateHold: HoldEstimator };
 };
 
-// Resolve the active providers into an EXACT-path → Provider map. Map.get is exact (no prefix readmit),
-// preserving the old providerForPath invariant: a prefix would readmit subpaths (e.g. /v1/messages/batches).
-// Unknown paths (or a disabled provider) miss the map → the handler's fail-closed 404.
-export function selectProviders(cfg: ProvidersConfig): Map<string, Provider> {
-  const m = new Map<string, Provider>();
-  if (cfg.anthropic) {
-    const anthropic = makeAnthropicProvider(cfg.anthropic);
-    m.set(anthropic.upstreamPath, anthropic); // /v1/messages
-  }
+// Resolve the active providers into an EXACT-path → Provider[] map. Map.get is exact (no prefix readmit),
+// preserving the old routing invariant: a prefix would readmit subpaths (e.g. /v1/messages/batches).
+// Unknown paths (or a disabled provider) miss the map → the handler's fail-closed 404. A path may carry more
+// than one provider (OpenAI + Tinfoil both speak /v1/chat/completions); the handler disambiguates per request
+// by model (bare id → unique owner, or an explicit `provider/model` prefix).
+export function selectProviders(cfg: ProvidersConfig): Map<string, Provider[]> {
+  const m = new Map<string, Provider[]>();
+  const register = (p: Provider) => {
+    const list = m.get(p.upstreamPath);
+    if (list) list.push(p);
+    else m.set(p.upstreamPath, [p]);
+  };
+  if (cfg.anthropic) register(makeAnthropicProvider(cfg.anthropic)); // /v1/messages
   if (cfg.openai) {
     const { chat, responses } = makeOpenAIProviders(cfg.openai);
-    m.set(chat.upstreamPath, chat); // /v1/chat/completions
-    m.set(responses.upstreamPath, responses); // /v1/responses
+    register(chat); // /v1/chat/completions
+    register(responses); // /v1/responses
   }
   // At least one provider must be configured — an empty set would 404 every metered path, serving no LLM at
   // all. Mirrors selectRails' empty-PAY_RAILS guard; the composition root (index.ts) fails fast on it at boot.
