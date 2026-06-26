@@ -10,6 +10,8 @@ import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { priceUsage, type Usage } from "../src/cost";
+import prices from "../src/cost/prices.json";
+import tinfoilPrices from "../src/cost/prices.tinfoil.json";
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 const INITIAL = 10_000_000_000; // $10k — covers any hold here
@@ -91,6 +93,7 @@ test("a bare Tinfoil model routes to Tinfoil and bills FLAT (cache_read == input
   const res = await handler(chatReq(token, { model: TF, max_completion_tokens: 1000, messages: [{ role: "user", content: "hi" }] }));
   expect(res.status).toBe(200);
   expect(calls[0]!.url).toBe("https://tinfoil.example/v1/chat/completions"); // routed to Tinfoil, not OpenAI
+  expect("store" in calls[0]!.body).toBe(false); // OpenAI-specific; never sent to Tinfoil (buffered path)
   // 400 of the 1000 prompt tokens are cached, but Tinfoil's cache_read rate == input rate → the bill equals
   // charging the whole prompt at the input rate. Flatness, proven against an independent shape.
   expect(debit(balances, token)).toBe(priceUsage(TF, { input_tokens: 1000, output_tokens: 200 }));
@@ -182,4 +185,26 @@ test("a Tinfoil streaming disconnect counts reasoning_content in the char estima
   const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
   const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 12 };
   expect(debit(balances, token)).toBe(priceUsage(TF, expected));
+});
+
+// --- Premium gate + price-file invariant ----------------------------------------------------------
+
+test("Tinfoil rejects output-multiplying options (n != 1, best_of != 1) before any spend", async () => {
+  const { fetchImpl, calls } = capturing(TF, {});
+  const token = "pr_tf_reject";
+  const { handler, balances } = makeHandler(fetchImpl);
+  fund(balances, token);
+  for (const bad of [{ n: 2 }, { best_of: 2 }]) {
+    const res = await handler(chatReq(token, { model: TF, max_completion_tokens: 100, ...bad, messages: [{ role: "user", content: "hi" }] }));
+    expect(res.status).toBe(400); // n / best_of would multiply output past the single-completion hold
+  }
+  expect(calls.length).toBe(0); // rejected at the gate — nothing forwarded
+  expect(debit(balances, token)).toBe(0); // and nothing spent
+});
+
+test("prices.json and prices.tinfoil.json share no model id (the dup-throw invariant holds for the committed files)", () => {
+  // The pricing merge throws at import on a duplicate id (the tripwire for (provider, id) keys). Guard the
+  // committed files statically so a colliding addition is caught here, not only at boot.
+  const shared = Object.keys(tinfoilPrices).filter((id) => id in (prices as Record<string, unknown>));
+  expect(shared).toEqual([]);
 });

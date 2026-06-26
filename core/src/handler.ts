@@ -322,11 +322,20 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     let provider: Provider;
     let bareModel = rawModel;
     let prefixed = false;
-    const slash = rawModel.indexOf("/");
-    if (slash > 0 && KNOWN_PROVIDER_IDS.has(rawModel.slice(0, slash))) {
-      // A leading segment that names a registered provider is the namespace prefix. (A slash that does NOT
-      // match a provider id stays part of the model, so org/model open-weight ids pass through untouched.)
-      const hint = rawModel.slice(0, slash);
+    // Native id FIRST: if a provider on this path owns the VERBATIM id, route by that. Real model ids win over
+    // prefix parsing — including org/model open-weight ids whose org segment happens to equal a provider name
+    // (e.g. a Tinfoil model literally named `openai/gpt-oss-120b`), which a prefix-first reading would wrongly
+    // strip and fail to route. (>1 owner is unreachable today — one provider per id, dup-throw enforced — but
+    // kept as the ambiguity guard for when pricing moves to (provider, id) keys.)
+    const nativeOwners = candidates.filter((c) => c.ownsModel(rawModel));
+    if (nativeOwners.length > 1) { metrics.recordGate("model"); return denyApi(representative, 400, "ambiguous_model"); }
+    if (nativeOwners.length === 1) {
+      provider = nativeOwners[0]!;
+    } else {
+      // No candidate owns the verbatim id — try a `provider/model` namespace prefix.
+      const slash = rawModel.indexOf("/");
+      const hint = slash > 0 ? rawModel.slice(0, slash) : "";
+      if (!hint || !KNOWN_PROVIDER_IDS.has(hint)) { metrics.recordGate("model"); return denyApi(representative, 400, "unsupported_model"); }
       bareModel = rawModel.slice(slash + 1);
       const hinted = candidates.find((c) => c.id === hint);
       // The prefix must name a provider on THIS path's wire shape (not e.g. `anthropic/` on the OpenAI chat
@@ -334,18 +343,11 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
       if (!hinted || !hinted.ownsModel(bareModel)) { metrics.recordGate("model"); return denyApi(hinted ?? representative, 400, "unsupported_model"); }
       provider = hinted;
       prefixed = true;
-    } else {
-      const owners = candidates.filter((c) => c.ownsModel(bareModel));
-      // Globally-unique ids today → exactly one owner. A future overlap (two providers, same id) is ambiguous
-      // from a bare id and must be disambiguated with the `provider/model` prefix, so reject rather than guess.
-      if (owners.length > 1) { metrics.recordGate("model"); return denyApi(representative, 400, "ambiguous_model"); }
-      if (owners.length === 0) { metrics.recordGate("model"); return denyApi(representative, 400, "unsupported_model"); }
-      provider = owners[0]!;
     }
     const model = bareModel;
-    // Forward with the prefix stripped — rebuilt ONLY when a prefix was present, so the common bare-id path
-    // still forwards the exact original bytes. body.model is normalized too, so the hold estimator/count call
-    // and prepareBody all see the native id.
+    // Forward with the prefix stripped — rebuilt ONLY when a prefix was present, so the common (bare / native)
+    // path still forwards the exact original bytes. body.model is normalized too, so the hold estimator/count
+    // call and prepareBody all see the native id.
     if (prefixed) body.model = bareModel;
     const effectiveRaw = prefixed ? JSON.stringify(body) : raw;
 
