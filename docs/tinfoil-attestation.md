@@ -1,37 +1,79 @@
-# Tinfoil attestation (rung 2) — design note
+# Tinfoil attestation (rung 2)
 
-Rung 1 (shipped) forwards to Tinfoil over plain HTTPS with no enclave verification —
-`trust-model.md` records the gap as "trusted but not yet verified." Rung 2 verifies the
-enclave before routing.
+The Tinfoil provider forwards to confidential-compute enclaves that host open-weight
+models. Rung 1 forwarded over plain HTTPS with no enclave verification. Rung 2 verifies
+the enclave before any request leaves the box, via a local verifying proxy.
 
-## Scope
-Operator integrity: cryptographic proof we route to a genuine SEV-SNP enclave running the
-published model image, closing the hole where a spoofed or compromised endpoint could
-retain content while we forward in good faith. The user's confidentiality boundary stays
-at enclave↔nullsink — metering reads plaintext to size the hold, enforce the cap, and bill.
-So this is an integrity feature; user-facing end-to-end privacy would need a different
-architecture (a blind tunnel billing off the enclave's signed usage) and is out of scope.
+## Scope — operator integrity
 
-## Approach — verifying-proxy sidecar
-Run Tinfoil's local verifying proxy as a systemd daemon alongside the rail daemons
-(`bitcoind`, `monero-wallet-rpc`). Point `TINFOIL_BASE_URL` at `http://127.0.0.1:<port>`;
-it attests, then forwards. The core binary stays zero-dep — the proxy is an ops component
-like the wallet daemons. Chosen over an in-process `@tinfoilsh/verifier` (a runtime
-dependency in the security-critical hot path) and over DIY SEV-SNP verification (large,
-fragile crypto we'd then own).
+Rung 2 proves, cryptographically, that we route to a genuine SEV-SNP enclave running
+Tinfoil's published model image. It closes the hole where a spoofed or compromised endpoint
+could retain content while we forwarded in good faith.
 
-## Open questions — confirm before building
-- Tinfoil's current verifying-proxy tooling: exact binary, release artifacts, and how it
-  pins/refreshes the expected enclave measurements.
-- Keeping those trusted measurements current with Tinfoil's releases without manual drift.
-- Failure handling: proxy down → Tinfoil unavailable; needs a health check + alert.
+It is an **integrity** guarantee, not user-facing confidentiality. nullsink meters by reading
+request content — to size the hold, enforce the output cap, and bill from usage — so a user's
+plaintext is always in nullsink's memory. Attestation verifies the *backend*; it never moves
+where plaintext lives. The confidentiality boundary stays at enclave↔nullsink. User end-to-end
+confidentiality would require a different architecture (the user attesting the enclave
+themselves, with nullsink a blind tunnel billing off the enclave's signed usage), which gives
+up sound holds and cap enforcement — a different product. See [trust-model.md](trust-model.md).
 
-## Wiring sketch
-- `core/deploy/tinfoil-proxy.service` — pinned systemd unit, modeled on
-  `monero-wallet-rpc.service`.
-- `deploy/setup.sh` + `deploy/deploy.sh` — install/refresh + health-gate the proxy.
-- `TINFOIL_BASE_URL` → the localhost proxy; key injection unchanged.
-- `trust-model.md` — move the Tinfoil line to "verified"; clarify in the README that
-  zero-dep means the core package (the box runs sidecars by design).
-- Re-add OpenAI-style modality/audio backstops to `premiumReject` if the curated model set
-  ever gains a non-text id (pre-merge audit finding).
+## How it works — the verifying-proxy sidecar
+
+`tinfoil-proxy` ([tinfoilsh/tinfoil-proxy](https://github.com/tinfoilsh/tinfoil-proxy)) runs as
+a systemd daemon on `127.0.0.1:3301`, alongside the rail daemons. The app points
+`TINFOIL_BASE_URL` at it, so every Tinfoil request is verified before it leaves the box:
+
+1. On startup the proxy attests the enclave at `inference.tinfoil.sh`: the **SEV-SNP hardware
+   report**, the **code measurement** (compared against the expected measurement from Tinfoil's
+   latest GitHub release, published as a Sigstore bundle and committed to the transparency log),
+   and the **enclave-bound TLS key** (the attestation carries the SHA-256 of the enclave's TLS
+   public key; the proxy pins it for the session and re-verifies on rotation).
+2. It then reverse-proxies `/v1` to the enclave, passing `Authorization` through unchanged.
+3. It **fails closed**: if attestation fails it exits before binding `:3301`, so the app's
+   Tinfoil requests get connection-refused rather than an unverified forward. OpenAI and
+   Anthropic are unaffected — only the Tinfoil path depends on the proxy.
+
+The core binary stays zero-dep: the proxy is an ops component like the wallet daemons, not an
+in-process library in the security-critical hot path. The Tinfoil API key stays app-side in
+`/etc/nullsink.env` — the app injects it and the proxy forwards it, so the key never enters the
+proxy unit's environment.
+
+## Wiring
+
+- `core/deploy/tinfoil-proxy.service` — the pinned systemd unit. Hardened like the rail daemons,
+  but with clearnet egress (it reaches `inference.tinfoil.sh` + GitHub + Sigstore), so no
+  `IPAddress*` filter — matching `nullsink.service`.
+- `core/deploy/setup.sh` — pins + checksum-verifies the binary (`install_verified_tinfoil_proxy`),
+  installs/enables it when `TINFOIL_API_KEY` is set (`tinfoil_active`), and points
+  `TINFOIL_BASE_URL` at the proxy (flipping only an absent or public-default value, never an
+  operator override). Ordered before the app restart so the app reads the new URL.
+- `core/deploy/status-check.sh` — adds the unit to the health loop plus a keyless `:3301`
+  readiness probe (a port that accepts a connection means startup attestation passed).
+- `deploy.sh` needs no change: it refreshes the unit on redeploy via `install_units`, like the
+  other daemon units. To bump the proxy, bump the pin in setup.sh and re-run it.
+
+## Residual gaps
+
+- **No measurement/version pinning.** We pin the proxy *binary* by SHA-256, but the proxy then
+  trusts whatever Tinfoil publishes as its *latest* release (gated only by Sigstore transparency)
+  — there is no CLI flag to pin a specific release or measurement. So a future Tinfoil release
+  changes what we trust automatically. The capability exists one layer down
+  (`tinfoilsh/verifier`'s `NewPinnedSecureClient`) but is not surfaced by the proxy. This is the
+  one open item; it warrants an email to Tinfoil (see below). Docs must not overstate the pin:
+  the verifier binary is pinned, the trust *target* is not.
+- **Startup-only liveness.** The `:3301` probe proves attestation at startup, not ongoing. A
+  mid-session enclave cert-rotation failure surfaces as upstream 502s in the app journal.
+- **Availability coupling.** Fail-closed ties Tinfoil availability to GitHub/Sigstore
+  reachability at proxy (re)start; `RestartSec` backoff and the status-check page cover it, and it
+  does not affect the other providers.
+- **Loopback hop.** app→proxy is plain HTTP on `127.0.0.1` (it carries the bearer key, loopback-only).
+
+## Open item — measurement pinning (email Tinfoil)
+
+Ask Tinfoil to surface the existing `verifier.NewPinnedSecureClient` capability through
+(1) a `tinfoil-proxy` flag — e.g. `--release <tag>` (or `-r owner/repo@tag`) and/or
+`--measurement <digest>` — and (2) a matching `tinfoil.NewClientWithParams` option, **including**
+making the cert-rotation re-verify path honor the pinned release rather than re-fetching latest.
+The plumbing already exists (`github.FetchDigest(repo, tag)`, `NewPinnedSecureClient`); only the
+CLI/wrapper surface and the rotation path are missing.

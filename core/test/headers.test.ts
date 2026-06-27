@@ -43,6 +43,22 @@ test("forward path strips the client SDK fingerprint and normalizes user-agent",
   expect(out.get("content-type")).toBe("application/json");
 });
 
+test("forward path strips the caller-page fingerprint (origin/referer)", () => {
+  // origin/referer are a caller-page fingerprint no LLM API needs; forwarding origin also trips the Tinfoil
+  // verifying proxy's loopback guard (a 403), so they're dropped for every provider on the shared path.
+  const out = buildUpstreamHeaders(
+    fakeProvider(),
+    reqWith({
+      origin: "https://app.example",
+      referer: "https://app.example/chat",
+      "content-type": "application/json",
+    }),
+  );
+  expect(out.has("origin")).toBe(false);
+  expect(out.has("referer")).toBe(false);
+  expect(out.get("content-type")).toBe("application/json");
+});
+
 test("forward path strips client auth/org/framing and injects our key", () => {
   const out = buildUpstreamHeaders(
     fakeProvider(),

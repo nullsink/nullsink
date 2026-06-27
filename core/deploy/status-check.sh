@@ -44,7 +44,7 @@ warn() { echo "WARN $*"; fail=1; }
 jnum() { grep -o "\"$2\" *: *[0-9]\+" <<<"$1" | head -1 | grep -o '[0-9]\+'; }
 
 # --- 1. units (skip a unit that isn't enabled — an intentionally-absent component, not a failure) ---
-for unit in nullsink caddy monero-wallet-rpc bitcoind tor; do
+for unit in nullsink caddy monero-wallet-rpc bitcoind tor tinfoil-proxy; do
   systemctl is-enabled --quiet "$unit" 2>/dev/null || { echo "skip unit $unit (not enabled)"; continue; }
   if [ "$(systemctl is-active "$unit" 2>/dev/null)" = active ]; then ok "unit $unit active"
   else warn "unit $unit NOT active"; fi
@@ -79,6 +79,17 @@ if systemctl is-active --quiet nullsink 2>/dev/null; then
   if [ -n "$nrestarts" ] && [ "$nrestarts" -ge "$NRESTARTS_WARN" ] 2>/dev/null; then
     warn "nullsink restarted ${nrestarts}× since last clean start — crash-flap nearing StartLimitBurst, after which systemd stops retrying (hard outage). Check boot logs for an OOM/'stranded hold' cause"
   else ok "nullsink restart count ${nrestarts:-?} since last clean start"; fi
+fi
+
+# --- 1d. tinfoil-proxy readiness (only if active): the rung-2 verifier fails CLOSED, exiting before it binds
+#     :3301, so a port that ACCEPTS a connection means startup attestation passed. Keyless + privacy-safe — any
+#     HTTP status (even a 401/403/404 from the enclave) proves the proxy answered; a refused/hung connect reads
+#     as 000. NOTE: this proves STARTUP attestation only; a mid-session enclave cert-rotation failure surfaces as
+#     upstream 502s in the app journal (§3), not here. ---
+if systemctl is-active --quiet tinfoil-proxy 2>/dev/null; then
+  tf_code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:3301/ 2>/dev/null)"
+  if [ -n "$tf_code" ] && [ "$tf_code" != 000 ]; then ok "tinfoil-proxy answering :3301 (attested at startup, HTTP $tf_code)"
+  else warn "tinfoil-proxy NOT answering :3301 — attestation failed at startup (fail-closed) or the proxy is hung; Tinfoil requests will fail (other providers unaffected)"; fi
 fi
 
 # --- 2. host: disk + WAL-sidecar ownership (a full disk or root-owned sidecars silently break billing) ---

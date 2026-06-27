@@ -1,0 +1,61 @@
+[Unit]
+Description=tinfoil-proxy — local verifying proxy for the Tinfoil confidential-compute provider (rung 2)
+# Attests the remote SEV-SNP enclave (hardware report + code measurement vs Tinfoil's Sigstore-logged
+# release + enclave-bound TLS key), then transparently reverse-proxies /v1 to inference.tinfoil.sh. The app
+# (nullsink.service) points TINFOIL_BASE_URL at this loopback proxy, so every Tinfoil request is verified
+# before it leaves the box. FAILS CLOSED: if attestation fails it exits before binding :3301, so the app's
+# Tinfoil requests get connection-refused rather than an unverified forward (other providers are unaffected).
+# Needs the network up first; talks to the internet DIRECTLY (no Tor), unlike the Monero watcher.
+After=network-online.target
+Wants=network-online.target
+# Page Telegram if this unit enters `failed`. A fail-closed crash-loop (GitHub/Sigstore unreachable, or a
+# measurement mismatch) restarts faster than the start limit, so it rarely reaches `failed` — the real page
+# is status-check.timer, which probes :3301 every 10 min and warns when the proxy isn't answering.
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+# Same low-privilege user as the app and the rail daemons. The proxy holds no secret: the app injects the
+# Tinfoil bearer token and the proxy passes Authorization through unchanged, so the key stays in
+# /etc/nullsink.env (app-side) and never reaches this unit's environment.
+User=nullsink
+Group=nullsink
+
+# Writable cache for the Sigstore/TUF verifier under ProtectSystem=strict (it refreshes the expected
+# measurements from Tinfoil's latest release on each start). HOME + WorkingDirectory point here so any
+# cache the verifier resolves via $HOME/.cache or the cwd lands in a service-owned dir; persistent so the
+# metadata survives restarts. Non-sensitive (public transparency-log data) — nothing here needs backup.
+StateDirectory=tinfoil-proxy
+StateDirectoryMode=0700
+WorkingDirectory=%S/tinfoil-proxy
+Environment=HOME=%S/tinfoil-proxy
+
+# Pin the trust target IN THE UNIT (not auto-discovery): verify the enclave at inference.tinfoil.sh against
+# the tinfoilsh/confidential-model-router release, and listen loopback-only on :3301. The app composes
+# TINFOIL_BASE_URL (http://127.0.0.1:3301) + /v1/chat/completions, so the proxy's /v1 surface lines up.
+ExecStart=/usr/local/bin/tinfoil-proxy \
+  --bind 127.0.0.1 \
+  --port 3301 \
+  --host inference.tinfoil.sh \
+  --repo tinfoilsh/confidential-model-router
+
+Restart=always
+RestartSec=5
+
+# Hardening (mirrors the rail daemons).
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# NO IPAddressDeny/Allow here: the proxy needs CLEARNET egress — to inference.tinfoil.sh AND to GitHub +
+# Sigstore (Fulcio/Rekor) to fetch and verify the expected measurements — and those endpoints sit behind
+# CDNs whose IPs rotate, so an allowlist would be brittle. This matches nullsink.service, which likewise runs
+# without an IP filter for its upstream calls. (The Monero watcher CAN lock to localhost only because it
+# reaches its node via the LOCAL Tor SOCKS proxy — not the case here.) Egress is bounded at the host edge by
+# nftables.conf (default-deny inbound; outbound open).
+
+[Install]
+WantedBy=multi-user.target

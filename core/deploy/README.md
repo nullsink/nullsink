@@ -32,6 +32,7 @@ alerts, troubleshooting). This file is just the map.
 
 ### systemd units & timers
 `nullsink.service` (the app) · `bitcoind.service` · `monero-wallet-rpc.service` (the two rail watchers) ·
+`tinfoil-proxy.service` (the rung-2 Tinfoil verifying proxy; installed when `TINFOIL_API_KEY` is set) ·
 `backup.service` + `backup.timer` · `status-check.service` + `status-check.timer` ·
 `status-alert@.service` (the templated `OnFailure=` paging sink).
 
