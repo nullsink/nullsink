@@ -8,6 +8,7 @@ import * as log from "../log";
 import { numEnv } from "../env";
 import { xmrUsd } from "./rate";
 import { ATOMIC_PER_XMR } from "./units";
+import { RAIL_META } from "./catalog";
 import type { PayRail, NewAddress, Incoming } from "./types";
 
 export class MoneroError extends Error {}
@@ -117,7 +118,7 @@ export const moneroRail: PayRail = {
   name: "monero",
   scale: ATOMIC_PER_XMR,
   confirmations: CONFIRMATIONS,
-  unit: "XMR",
+  unit: RAIL_META.monero.unit,
   createAddress: wallet.createAddress,
   incomingTransfers: wallet.incomingTransfers,
   rateUsd: xmrUsd,

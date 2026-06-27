@@ -17,6 +17,7 @@ const COMMANDS: Record<string, () => Promise<(args: string[]) => void>> = {
   balance: () => import("./balance").then((m) => m.runBalance),
   balances: () => import("./balances").then((m) => m.runBalances),
   financials: () => import("./financials").then((m) => m.runFinancials),
+  orders: () => import("./orders").then((m) => m.runOrders),
 };
 
 const USAGE =
@@ -27,6 +28,7 @@ const USAGE =
   "  balance <hash>              print a token's remaining balance\n" +
   "  balances [--format table|csv|json]                               every token's hash + balance\n" +
   "  financials [--since ..] [--until ..] [--format table|csv|json]   sales journal + liability\n" +
+  "  orders [--rail monero|bitcoin] [--format table|csv|json]         in-flight (unpaid) payment orders\n" +
   "  version                     print the build version";
 
 const cmd = process.argv[2];
