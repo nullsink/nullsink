@@ -4,16 +4,19 @@
 // live API, the forward, parsing the REAL usage, and the actual billing debit — then saves the
 // passed-through response bytes as a golden fixture for the offline replay test (test/fixtures.replay.test.ts).
 //
-// Run (set whichever keys you have; either provider can run alone):
-//   ANTHROPIC_API_KEY=sk-ant-… OPENAI_API_KEY=sk-… bun run scripts/e2e-capture.ts
+// Run (set whichever keys you have; any provider can run alone):
+//   ANTHROPIC_API_KEY=sk-ant-… OPENAI_API_KEY=sk-… TINFOIL_API_KEY=tk_… bun run scripts/e2e-capture.ts
 // Then review + commit test/fixtures/*.json — the replay test then guards the parsers offline forever.
+// Tinfoil joins the live --check canary + the disconnect check but writes NO committed fixture: it reuses the
+// OpenAI-chat parser/scanner the openai fixtures already guard offline, so a fixture would add maintenance,
+// not signal. Its live value is drift (does the Tinfoil API still return parseable usage → debit > 0).
 //
 // `--check` mode: same live calls + the SAME "a real 200 we couldn't bill" assertion (debit>0), but writes
 // NO fixtures and runs no commit step — so it's safe to run on a schedule (cron / systemd timer) as a live
 // USAGE-DRIFT CANARY. It catches the one residual cause of a content-for-free refund (refundedInFull) that
 // no offline test can: the upstream renaming/moving a usage field so our parser reads nothing on a real
 // 2xx. Exits non-zero on the first such shape, BEFORE that drift silently bills prod $0.
-//   ANTHROPIC_API_KEY=… OPENAI_API_KEY=… bun run scripts/e2e-capture.ts --check
+//   ANTHROPIC_API_KEY=… OPENAI_API_KEY=… TINFOIL_API_KEY=… bun run scripts/e2e-capture.ts --check
 //
 // Spend: each shape uses a cheap model + a small output cap + a trivial prompt, so well under $0.01 each
 // (reasoning shapes cap higher for headroom). Exits non-zero if any shape fails its checks.
@@ -33,8 +36,10 @@ const { openOrderStore } = await import("../src/ledger/orders");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!ANTHROPIC_API_KEY && !OPENAI_API_KEY) {
-  console.error("set ANTHROPIC_API_KEY and/or OPENAI_API_KEY");
+const TINFOIL_API_KEY = process.env.TINFOIL_API_KEY;
+const TINFOIL_BASE_URL = process.env.TINFOIL_BASE_URL ?? "https://inference.tinfoil.sh";
+if (!ANTHROPIC_API_KEY && !OPENAI_API_KEY && !TINFOIL_API_KEY) {
+  console.error("set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY");
   process.exit(1);
 }
 
@@ -48,6 +53,7 @@ const deps: HandlerDeps = {
   // byte bound → no extra count_tokens call per shape (cheaper, still sound)
   anthropic: { apiKey: ANTHROPIC_API_KEY ?? "absent", baseUrl: "https://api.anthropic.com", version: process.env.ANTHROPIC_VERSION ?? "2023-06-01", estimateHold: byteBoundHold },
   openai: OPENAI_API_KEY ? { apiKey: OPENAI_API_KEY, baseUrl: "https://api.openai.com", estimateHold: byteBoundHold } : undefined,
+  tinfoil: TINFOIL_API_KEY ? { apiKey: TINFOIL_API_KEY, baseUrl: TINFOIL_BASE_URL, estimateHold: byteBoundHold } : undefined,
   upstreamTimeoutMs: 120_000,
   margin: 1.125,
   buyMinUsd: 5,
@@ -68,12 +74,13 @@ const handler = createHandler(deps);
 
 type Shape = {
   name: string;
-  provider: "anthropic" | "openai";
+  provider: "anthropic" | "openai" | "tinfoil";
   endpoint: string;
   auth: "x-api-key" | "bearer";
   stream: boolean;
   body: any;
   expectReasoning?: boolean;
+  noFixture?: boolean; // run live + assert, but don't persist bytes (tinfoil reuses the openai-chat parser)
 };
 
 // A prefix over the 4096-token min cacheable size (haiku/opus), so a cache_control write actually caches —
@@ -120,6 +127,19 @@ if (OPENAI_API_KEY) {
       body: { model: "gpt-4o-mini", max_completion_tokens: 16, messages: [{ role: "user", content: "Write a long, detailed multi-paragraph essay about the ocean." }] } },
     { name: "openai-responses-truncated", provider: "openai", endpoint: "/v1/responses", auth: "bearer", stream: false,
       body: { model: "gpt-4o-mini", max_output_tokens: 16, input: "Write a long, detailed multi-paragraph essay about the ocean." } },
+  );
+}
+if (TINFOIL_API_KEY) {
+  // Tinfoil shares /v1/chat/completions with OpenAI; the handler routes a bare tinfoil-owned id (gpt-oss-120b)
+  // to Tinfoil. Canary-only (noFixture): the live value is whether Tinfoil still accepts our include_usage
+  // forcing + store omission and returns parseable usage → debit > 0. A reasoning shape is omitted here —
+  // open-weight reasoning is billed as visible output (no separate reasoning_tokens field to assert), and the
+  // visible-reasoning disconnect is exercised below.
+  shapes.push(
+    { name: "tinfoil-chat-buffered", provider: "tinfoil", endpoint: "/v1/chat/completions", auth: "bearer", stream: false, noFixture: true,
+      body: { model: "gpt-oss-120b", max_completion_tokens: 128, messages: [{ role: "user", content: "Reply with one short sentence." }] } },
+    { name: "tinfoil-chat-stream", provider: "tinfoil", endpoint: "/v1/chat/completions", auth: "bearer", stream: true, noFixture: true,
+      body: { model: "gpt-oss-120b", max_completion_tokens: 128, stream: true, messages: [{ role: "user", content: "Count to five." }] } },
   );
 }
 
@@ -196,7 +216,7 @@ for (const s of shapes) {
     // still save it — useful to inspect what came back
   }
 
-  if (!CHECK)
+  if (!CHECK && !s.noFixture)
     writeFileSync(
       new URL(`${s.name}.json`, FIXTURE_DIR),
       JSON.stringify({ meta: { name: s.name, provider: s.provider, endpoint: s.endpoint, model: s.body.model, stream: s.stream, expectReasoning: !!s.expectReasoning }, raw }, null, 2) + "\n",
@@ -233,8 +253,8 @@ async function disconnectCheck(name: string, endpoint: string, auth: "x-api-key"
   console.log(`  ${ok ? "✓" : "✗"} ${name}: billed=$${(billed / 1e6).toFixed(6)} (0 < billed <= hold=$${(hold / 1e6).toFixed(6)})${billed > hold ? " — OVERDRAFT" : billed <= 0 ? " — nothing billed (input leak)" : ""}`);
 }
 
+console.log(`\nLive mid-stream disconnect checks:`);
 if (OPENAI_API_KEY) {
-  console.log(`\nLive mid-stream disconnect checks:`);
   await disconnectCheck("openai-chat disconnect", "/v1/chat/completions", "bearer", "gpt-4o-mini", { model: "gpt-4o-mini", max_completion_tokens: 512, stream: true, messages: [{ role: "user", content: "Write a long detailed essay about the ocean." }] });
   // Reasoning-model disconnect — quantifies the known residual: reasoning tokens burn server-side but
   // aren't streamed as text, so the content estimate can't see them (bounded by the hold; never overdrafts).
@@ -242,6 +262,12 @@ if (OPENAI_API_KEY) {
 }
 if (ANTHROPIC_API_KEY) {
   await disconnectCheck("anthropic disconnect", "/v1/messages", "x-api-key", "claude-haiku-4-5", { model: "claude-haiku-4-5", max_tokens: 512, stream: true, messages: [{ role: "user", content: "Write a long detailed essay about the ocean." }] });
+}
+if (TINFOIL_API_KEY) {
+  // Tinfoil's open-weight reasoning streams as visible text (delta.reasoning), so the partial bill comes from
+  // the content estimate — no hidden-reasoning cap, and still clamped to the hold (no overdraft). Bare
+  // gpt-oss-120b routes to Tinfoil (it owns the priced id; OpenAI doesn't claim it).
+  await disconnectCheck("tinfoil-chat disconnect", "/v1/chat/completions", "bearer", "gpt-oss-120b", { model: "gpt-oss-120b", max_completion_tokens: 512, stream: true, messages: [{ role: "user", content: "Think step by step about prime factorizations, then list the primes under 50." }] });
 }
 
 // Final gate: run the offline replay cross-check over the fixtures we just wrote. The per-shape checks

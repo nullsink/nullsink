@@ -1,7 +1,8 @@
 // Live hold-soundness + counter checks against the REAL upstreams (operator-run; needs real keys; spends a
 // few cents). Validates the headline no-overdraft invariant on REAL prompts — the count-based pre-flight
-// hold must be >= the actual billed cost — across text / large / image / tools / cache-hit, for both
-// providers. Also answers two open questions a frozen fixture can't:
+// hold must be >= the actual billed cost — across text / large / image / tools / cache-hit, for all three
+// providers (Tinfoil has no token-counter, so its hold is the byte bound — itself a proven upper bound,
+// reported as BYTE-FALLBACK). Also answers two open questions a frozen fixture can't:
 //   • does OpenAI's /v1/responses/input_tokens accept a Chat-Completions-shaped {messages,tools} body and
 //     return a sound count, or does the hold silently fall back to the (loose) byte bound? (per-shape: it
 //     reports "count ok" vs "byte fallback").
@@ -10,7 +11,7 @@
 // "fail" on soundness unless there's a real bug: the byte-bound fallback is itself a proven upper bound, so
 // hold >= actual holds even when the counter rejects a body — that case is reported, not failed.
 //
-// Run: ANTHROPIC_API_KEY=… OPENAI_API_KEY=… bun run scripts/e2e-hold.ts
+// Run: ANTHROPIC_API_KEY=… OPENAI_API_KEY=… TINFOIL_API_KEY=… bun run scripts/e2e-hold.ts
 // No DB/handler import here (only hold/pricing/usage, which don't open the SQLite singletons), so no env
 // dance is needed; generation requests go straight to the upstreams.
 import {
@@ -25,12 +26,14 @@ import { extractUsage, extractOpenAIChatUsage, extractOpenAIResponsesUsage, type
 
 const A = process.env.ANTHROPIC_API_KEY;
 const O = process.env.OPENAI_API_KEY;
-if (!A && !O) {
-  console.error("set ANTHROPIC_API_KEY and/or OPENAI_API_KEY");
+const T = process.env.TINFOIL_API_KEY;
+if (!A && !O && !T) {
+  console.error("set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY");
   process.exit(1);
 }
 const AB = "https://api.anthropic.com";
 const OB = "https://api.openai.com";
+const TB = process.env.TINFOIL_BASE_URL ?? "https://inference.tinfoil.sh";
 const VER = "2023-06-01";
 const TIMEOUT = 60_000;
 
@@ -101,6 +104,27 @@ if (A && anthropicHold) {
   });
   shapes.push(
     { name: "anthropic-text", ...an({ messages: [{ role: "user", content: "Reply with one short sentence." }] }) },
+  );
+}
+if (T) {
+  // Tinfoil is OpenAI-chat-shaped but has NO count_tokens endpoint → the byte bound IS the hold (a proven
+  // upper bound; the run reports it as BYTE-FALLBACK, which is expected here, not a failure). extract reuses
+  // the OpenAI-chat parser. The reasoning shape stresses the output side — gpt-oss streams reasoning into the
+  // visible output, so completion_tokens (and the bill) include it; the maxTokens cap still bounds the hold.
+  const tf = (body: any, maxTokens = 64): Omit<Shape, "name"> => ({
+    base: TB,
+    path: "/v1/chat/completions",
+    authHeaders: { authorization: `Bearer ${T}`, "content-type": "application/json" },
+    hold: byteBoundHold,
+    extract: extractOpenAIChatUsage,
+    model: "gpt-oss-120b",
+    maxTokens,
+    body: { model: "gpt-oss-120b", max_completion_tokens: maxTokens, ...body },
+  });
+  shapes.push(
+    { name: "tinfoil-chat-small", ...tf({ messages: [{ role: "user", content: "Reply with one short sentence." }] }) },
+    { name: "tinfoil-chat-large", ...tf({ messages: [{ role: "user", content: "Summarize in one sentence:\n" + BIG.slice(0, 8000) }] }) },
+    { name: "tinfoil-chat-reasoning", ...tf({ messages: [{ role: "user", content: "What is 17*23? Think briefly, then give the number." }] }, 512) },
   );
 }
 
