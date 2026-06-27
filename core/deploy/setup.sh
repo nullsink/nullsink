@@ -32,7 +32,10 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # nullsink app release: the GitHub Release tag whose self-contained binary the box runs (fetched + checksum-
 # verified + activated by install_binary). Bump this deliberately — like the toolchain pins below — to roll
 # the box to a new release; deploy/deploy.sh <tag> does the same swap (health-gated) on an existing box.
-RELEASE_TAG="v0.4.0"
+# Env-overridable so a re-run can pin a specific release WITHOUT editing this file (and without downgrading a
+# box already past the default): `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh`. Needed when re-running setup.sh
+# to add a setup-only component (e.g. the rung-2 tinfoil-proxy) onto a box newer than this default, or to stage an RC.
+RELEASE_TAG="${RELEASE_TAG:-v0.4.0}"
 # Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the
 # fanquake-signed SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
 BITCOIN_VERSION="31.0"
