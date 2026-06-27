@@ -10,12 +10,10 @@ import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { priceUsage, type Usage } from "../src/cost";
-import prices from "../src/cost/prices.json";
-import tinfoilPrices from "../src/cost/prices.tinfoil.json";
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 const INITIAL = 10_000_000_000; // $10k — covers any hold here
-const TF = "glm-5-2"; // priced under tinfoil (prices.tinfoil.json); NOT a REASONING_MARKER id
+const TF = "glm-5-2"; // priced under tinfoil (prices.json); NOT a REASONING_MARKER id
 
 const anthropic = { apiKey: "real-anthropic-key", baseUrl: "https://anthropic.example", version: "2023-06-01", estimateHold: byteBoundHold };
 
@@ -209,13 +207,6 @@ test("Tinfoil rejects output-multiplying options (n/best_of != 1) with unsupport
   const ok = await handler(chatReq(token, { model: TF, max_completion_tokens: 100, n: 1, best_of: 1, messages: [{ role: "user", content: "hi" }] }));
   expect(ok.status).toBe(200);
   expect(calls.length).toBe(1);
-});
-
-test("prices.json and prices.tinfoil.json share no model id (the dup-throw invariant holds for the committed files)", () => {
-  // The pricing merge throws at import on a duplicate id (the tripwire for (provider, id) keys). Guard the
-  // committed files statically so a colliding addition is caught here, not only at boot.
-  const shared = Object.keys(tinfoilPrices).filter((id) => id in (prices as Record<string, unknown>));
-  expect(shared).toEqual([]);
 });
 
 test("Tinfoil accepts the legacy max_tokens cap and x-api-key auth; an absent cap is rejected", async () => {

@@ -23,10 +23,10 @@ or a request that ends up billing nothing — always returns to the same token.
 `cost/pricing.ts` imports `prices.json` once at startup, so billing is deterministic — never a
 live price fetch mid-request. Each model lists input, output, cache-read, and cache-write rates.
 Don't hand-edit `prices.json` — regenerate it with the dev-only `bun run cli/sync-prices.ts`,
-then review the diff and commit it. Tinfoil isn't on models.dev yet, so its rates are kept in a
-small hand-maintained `prices.tinfoil.json` (flat — no cache discount), merged at startup; a
-duplicate model id across the two files is a hard error — the tripwire for when an id is served
-by more than one provider.
+then review the diff and commit it. All providers (Anthropic, OpenAI, and Tinfoil) are synced from
+models.dev into the one `prices.json`; Tinfoil is flat — no cache discount, so cached reads bill at
+the input rate. A duplicate model id across providers is a hard error at sync time — the tripwire
+for when an id is served by more than one provider.
 
 A request's model is matched by exact id or dated suffix, longest match first — `claude-opus-4-1`
 matches `claude-opus-4-1-20250805` but not `claude-opus-4-12345`. Each provider reports usage in

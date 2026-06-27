@@ -9,12 +9,6 @@
 // are stored as micro-dollars per MILLION tokens (USD/Mtok × 1e6), so a request's cost is integer-exact:
 //   cost_micros = tokens * rate / 1_000_000   (no floats; truncation favours the user).
 import prices from "./prices.json";
-// Hand-maintained Tinfoil rates, merged below. Kept SEPARATE from prices.json (which cli/sync-prices.ts
-// rewrites wholesale from models.dev) so the synced mirror stays pure and a re-sync can't clobber these.
-// Tinfoil isn't on models.dev yet and its prices aren't machine-readable; once it is, fold it into the sync
-// and retire this file. cache_read/cache_write are set equal to input (Tinfoil bills flat, no cache fee), so
-// however tokens get classified the cost is the same input rate.
-import tinfoilPrices from "./prices.tinfoil.json";
 
 // Same four rate fields in prices.json (USD per Mtok) and, after the scaling below, internally
 // (micro-dollars per Mtok), PLUS the synthesized `cache_write_1h` tier (see below — not on disk).
@@ -57,7 +51,10 @@ export function mergeRawPrices(...sources: Record<string, RawEntry>[]): [string,
   return merged;
 }
 
-const RAW_PRICES = mergeRawPrices(prices as Record<string, RawEntry>, tinfoilPrices as Record<string, RawEntry>);
+// Tinfoil is now synced into prices.json alongside Anthropic/OpenAI (cli/sync-prices.ts), so this is a single
+// source today. mergeRawPrices stays as the cross-source dup guard for any future second source; the
+// cross-PROVIDER dup tripwire now lives in cli/sync-prices.ts (build time, across providers in the one file).
+const RAW_PRICES = mergeRawPrices(prices as Record<string, RawEntry>);
 
 // id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
 // exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
