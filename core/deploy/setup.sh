@@ -42,10 +42,11 @@ BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c6
 MONERO_VERSION="0.18.5.0"
 MONERO_SHA256_X64="166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e294"
 # tinfoil-proxy: the local verifying proxy for the Tinfoil provider (rung-2 attestation). Pinned version + the
-# SHA-256 of the linux-amd64 binary, from the release's published SHA256SUMS. NOTE: only the verifier BINARY is
-# pinned here — the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated); the
-# proxy CLI gives no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil
-# rail is active.
+# SHA-256 of the linux-amd64 binary. PROVENANCE is weaker than the Bitcoin/Monero pins above: those verify a
+# maintainer-GPG-signed hashes file, whereas tinfoil-proxy's SHA256SUMS is an unsigned CI artifact — so this is
+# trust-on-first-use (checked once at authoring) then pinned by SHA. NOTE: only the verifier BINARY is pinned;
+# the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated) and the proxy CLI gives
+# no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil rail is active.
 TINFOIL_PROXY_VERSION="v0.1.0"
 TINFOIL_PROXY_SHA256_X64="5ac964a7d4252c892e05876ed38c44dc4f37ec7d2a5c0845f1a04fd520b3d566"
 
@@ -101,7 +102,12 @@ install_verified_tinfoil_proxy() {  # the rung-2 attestation sidecar — fetch+v
   # Idempotent by SHA (the binary exposes no --version flag): skip the re-fetch when the pinned binary is already
   # in place, so a setup.sh re-run does no network here.
   if [ -x /usr/local/bin/tinfoil-proxy ] && echo "$TINFOIL_PROXY_SHA256_X64  /usr/local/bin/tinfoil-proxy" | sha256sum -c --status -; then return 0; fi
-  require_x86_64 "tinfoil-proxy"
+  # This install is GUARDED (called in an `if`), so a wrong arch must `return 1` to degrade to a todo — NOT
+  # require_x86_64's `exit 1`, which would kill the whole bootstrap (the firewall, app, and rails come later).
+  if [ "$(uname -m)" != "x86_64" ]; then
+    echo "    !! tinfoil-proxy pin is x86_64-only; this box is $(uname -m) — skipping" >&2
+    return 1
+  fi
   local tmp; tmp="$(mktemp -d)"
   # Explicit `|| return 1` (not bare set -e): this runs guarded in an `if`, where set -e is suspended for the
   # whole function — so a failed fetch must propagate by hand, or the caller's then-branch would start a unit
@@ -205,30 +211,24 @@ EOF
   note "Templated $ENV_FILE with placeholders"
 fi
 
-# Rung-2: when the Tinfoil rail is active, route through the local verifying proxy instead of the PUBLIC
-# (unverified) endpoint. Flip TINFOIL_BASE_URL only when it's ABSENT or still the public default — never clobber
-# an operator's deliberate override. Done here, BEFORE the app (re)start below, so the app reads the new URL; the
-# proxy itself is installed + started in its own step further down (also before the app restart). The existing-
-# value rewrite goes through a same-dir temp + atomic mv, restoring 600/owner, so the live secrets file is never
-# half-written.
+# Rung-2: when the Tinfoil rail is active and TINFOIL_BASE_URL is UNSET, default it to the local verifying proxy
+# (the real upgrade path — the pre-rung-2 template never wrote this line). Any EXPLICIT value is respected and
+# survives re-runs — there's no self-reverting flip of a value the operator can see: http://127.0.0.1:3301 routes
+# through the attesting proxy; the public endpoint forwards directly (unverified) and is flagged each run. Done
+# here, BEFORE the app (re)start below, so the app reads the value; the proxy itself is installed + started in its
+# own step further down (also before the app restart). Append is in-place (`>>`), preserving the file's 600/owner.
 if tinfoil_active; then
   _tbu="$(grep -E '^TINFOIL_BASE_URL=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_tbu" ]; then
-    { echo "# Tinfoil rung-2 attestation: route via the local verifying proxy (tinfoil-proxy.service)."
-      echo "# Set to https://inference.tinfoil.sh to bypass attestation (direct, unverified)."
+    { echo "# Tinfoil rung-2 attestation: the local verifying proxy (tinfoil-proxy.service). Set to"
+      echo "# https://inference.tinfoil.sh to forward directly, WITHOUT attestation (respected on re-runs)."
       echo "TINFOIL_BASE_URL=http://127.0.0.1:3301"
     } >> "$ENV_FILE"
-    note "TINFOIL_BASE_URL set to the local attesting proxy (http://127.0.0.1:3301)"
-  elif [ "$_tbu" = "https://inference.tinfoil.sh" ]; then
-    _envtmp="$(mktemp "${ENV_FILE}.XXXXXX")"
-    sed 's#^TINFOIL_BASE_URL=https://inference\.tinfoil\.sh[[:space:]]*$#TINFOIL_BASE_URL=http://127.0.0.1:3301#' "$ENV_FILE" > "$_envtmp"
-    chmod 600 "$_envtmp"; chown "$SVC_USER:$SVC_USER" "$_envtmp"
-    mv "$_envtmp" "$ENV_FILE"   # atomic same-FS rename
-    note "TINFOIL_BASE_URL flipped from the public endpoint to the local attesting proxy"
+    note "TINFOIL_BASE_URL defaulted to the local attesting proxy (http://127.0.0.1:3301)"
   elif [ "$_tbu" = "http://127.0.0.1:3301" ]; then
-    : # already routing through the local proxy — nothing to do (keeps re-runs quiet)
+    : # already routing through the local proxy — nothing to do
   else
-    todo "TINFOIL_BASE_URL is a custom value ($_tbu) — left as-is; point it at http://127.0.0.1:3301 to route through the attesting proxy"
+    note "TINFOIL_BASE_URL=$_tbu — Tinfoil is forwarding UNVERIFIED (not via the attesting proxy); set it to http://127.0.0.1:3301 to enable rung-2 attestation"
   fi
 fi
 

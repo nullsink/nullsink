@@ -8,9 +8,10 @@ Description=tinfoil-proxy — local verifying proxy for the Tinfoil confidential
 # Needs the network up first; talks to the internet DIRECTLY (no Tor), unlike the Monero watcher.
 After=network-online.target
 Wants=network-online.target
-# Page Telegram if this unit enters `failed`. A fail-closed crash-loop (GitHub/Sigstore unreachable, or a
-# measurement mismatch) restarts faster than the start limit, so it rarely reaches `failed` — the real page
-# is status-check.timer, which probes :3301 every 10 min and warns when the proxy isn't answering.
+# Page Telegram if this unit enters `failed`. With Restart=always + the RestartSec below, a persistent
+# fail-closed crash-loop (GitHub/Sigstore unreachable, or a measurement mismatch) restarts on a fixed interval
+# too SLOW to trip systemd's default start limit (5 starts / 10 s), so the unit rarely reaches `failed` and this
+# page rarely fires — the real page is status-check.timer, which probes :3301 every 10 min.
 OnFailure=status-alert@%n.service
 
 [Service]
@@ -40,7 +41,9 @@ ExecStart=/usr/local/bin/tinfoil-proxy \
   --repo tinfoilsh/confidential-model-router
 
 Restart=always
-RestartSec=5
+# Slower backoff than the rail daemons' 5 s: a persistent attestation failure loops against GitHub + Sigstore +
+# the enclave (external services), so retry gently rather than hammer them; it still self-heals when they recover.
+RestartSec=30
 
 # Hardening (mirrors the rail daemons).
 NoNewPrivileges=true

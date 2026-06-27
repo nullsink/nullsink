@@ -25,10 +25,11 @@ a systemd daemon on `127.0.0.1:3301`, alongside the rail daemons. The app points
 `TINFOIL_BASE_URL` at it, so every Tinfoil request is verified before it leaves the box:
 
 1. On startup the proxy attests the enclave at `inference.tinfoil.sh`: the **SEV-SNP hardware
-   report**, the **code measurement** (compared against the expected measurement from Tinfoil's
-   latest GitHub release, published as a Sigstore bundle and committed to the transparency log),
-   and the **enclave-bound TLS key** (the attestation carries the SHA-256 of the enclave's TLS
-   public key; the proxy pins it for the session and re-verifies on rotation).
+   report**, the **code measurement** (compared against the expected measurement from the latest
+   release of Tinfoil's enclave-config repo, `tinfoilsh/confidential-model-router`, published as a
+   Sigstore bundle and committed to the transparency log), and the **enclave-bound TLS key** (the
+   attestation carries the SHA-256 of the enclave's TLS public key; the proxy pins it for the
+   session and re-verifies on rotation).
 2. It then reverse-proxies `/v1` to the enclave, passing `Authorization` through unchanged.
 3. It **fails closed**: if attestation fails it exits before binding `:3301`, so the app's
    Tinfoil requests get connection-refused rather than an unverified forward. OpenAI and
@@ -57,11 +58,12 @@ proxy unit's environment.
 
 - **No measurement/version pinning.** We pin the proxy *binary* by SHA-256, but the proxy then
   trusts whatever Tinfoil publishes as its *latest* release (gated only by Sigstore transparency)
-  — there is no CLI flag to pin a specific release or measurement. So a future Tinfoil release
-  changes what we trust automatically. The capability exists one layer down
-  (`tinfoilsh/verifier`'s `NewPinnedSecureClient`) but is not surfaced by the proxy. This is the
-  one open item; it warrants an email to Tinfoil (see below). Docs must not overstate the pin:
-  the verifier binary is pinned, the trust *target* is not.
+  — there is no CLI flag to pin a specific release or measurement. The config repo
+  (`tinfoilsh/confidential-model-router`) ships releases roughly daily (100+ to date), so the
+  trusted measurement churns frequently and any proxy restart silently adopts the newest. The
+  pinning capability exists one layer down (`tinfoil-go`'s verifier, `NewPinnedSecureClient`) but
+  is not surfaced by the proxy. This is the one open item; it warrants an email to Tinfoil (see
+  below). The pin must not be overstated: the verifier binary is pinned, the trust *target* is not.
 - **Startup-only liveness.** The `:3301` probe proves attestation at startup, not ongoing. A
   mid-session enclave cert-rotation failure surfaces as upstream 502s in the app journal.
 - **Availability coupling.** Fail-closed ties Tinfoil availability to GitHub/Sigstore
