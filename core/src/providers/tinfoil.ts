@@ -43,12 +43,18 @@ function tinfoilPremiumReject(body: any): { status: number; error: string } | nu
 //     streams omit usage unless asked, and without it a streamed response carries NO usage → we'd refund in
 //     full (free usage). The final chunk then carries exact usage; the scanner's content fallback covers a
 //     mid-stream disconnect.
-//   • injectCap — bound the output to what we held when the client omitted a cap.
+//   • output cap — NORMALIZED to a single max_completion_tokens (== the value outputCap sized the hold from)
+//     with the legacy max_tokens dropped, so the forwarded ceiling can't diverge from the hold no matter how
+//     the backend prioritizes the two fields. (vLLM honors max_completion_tokens and, with both present,
+//     ignores max_tokens — verified live — but normalizing removes the dependency on that behavior.) When the
+//     client omitted a cap, injectCap supplies the held default.
 // Unlike OpenAI we do NOT send store:false — it's an OpenAI-specific retention flag; Tinfoil's no-retention
 // rests on enclave ephemerality, and sending an unknown field risks a strict-server 400.
 function tinfoilPrepareBody(_raw: string, body: any, streaming: boolean, injectCap?: number): string {
   const out: Record<string, unknown> = { ...(body ?? {}) };
-  if (injectCap != null) out.max_completion_tokens = injectCap; // client omitted a cap → bound output to the hold
+  const cap = injectCap ?? body?.max_completion_tokens ?? body?.max_tokens; // mirrors tinfoilOutputCap (the hold)
+  if (cap != null) out.max_completion_tokens = cap;
+  delete out.max_tokens; // forward one unambiguous ceiling; the legacy field can't out-rank the hold
   if (streaming) out.stream_options = { ...(body?.stream_options ?? {}), include_usage: true };
   return JSON.stringify(out);
 }

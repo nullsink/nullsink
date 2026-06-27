@@ -231,6 +231,9 @@ test("Tinfoil accepts the legacy max_tokens cap and x-api-key auth; an absent ca
   }));
   expect(ok.status).toBe(200);
   expect(calls.length).toBe(1);
+  // Legacy cap is normalized to max_completion_tokens (the field the backend honors) on forward; max_tokens dropped.
+  expect(calls[0]!.body.max_completion_tokens).toBe(100);
+  expect("max_tokens" in calls[0]!.body).toBe(false);
   // max_tokens: 0 fails the m>0 guard → no cap → max_tokens_required, no further spend.
   const noCap = await handler(chatReq(token, { model: TF, max_tokens: 0, messages: [{ role: "user", content: "hi" }] }));
   expect(noCap.status).toBe(400);
@@ -264,4 +267,9 @@ test("Tinfoil forward preserves the client's output cap, injects the default whe
   // Client omits a cap → the configured default is injected into the forward (bounding output to the hold).
   await handler(chatReq(token, { model: TF, messages: [{ role: "user", content: "hi" }] }));
   expect(calls[1]!.body.max_completion_tokens).toBe(222);
+  // Both caps present → forwarded as a single max_completion_tokens == the hold's cap; legacy max_tokens dropped,
+  // so the forwarded ceiling can't diverge from the hold regardless of backend cap precedence.
+  await handler(chatReq(token, { model: TF, max_completion_tokens: 100, max_tokens: 999999, messages: [{ role: "user", content: "hi" }] }));
+  expect(calls[2]!.body.max_completion_tokens).toBe(100);
+  expect("max_tokens" in calls[2]!.body).toBe(false);
 });
