@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 pin() { grep -oE "$1=\"[^\"]+\"" deploy/setup.sh | head -1 | cut -d'"' -f2; }
 btc_pinned="$(pin BITCOIN_VERSION)"
 xmr_pinned="$(pin MONERO_VERSION)"
-tf_pinned="$(pin TINFOIL_PROXY_VERSION)"   # rung-2 verifying proxy (kept WITH its leading v, unlike the others)
+tf_pinned="$(pin TINFOIL_PROXY_VERSION)"   # Tinfoil verifying proxy (kept WITH its leading v, unlike the others)
 
 gh_get() {  # GET a URL, adding the auth header only when GH_TOKEN is set (CI); unauth works too (rate-limited)
   if [ -n "${GH_TOKEN:-}" ]; then

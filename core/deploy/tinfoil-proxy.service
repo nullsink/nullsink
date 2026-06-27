@@ -1,5 +1,5 @@
 [Unit]
-Description=tinfoil-proxy — local verifying proxy for the Tinfoil confidential-compute provider (rung 2)
+Description=tinfoil-proxy — local verifying proxy for the Tinfoil confidential-compute provider (enclave attestation)
 # Attests the remote SEV-SNP enclave (hardware report + code measurement vs Tinfoil's Sigstore-logged
 # release + enclave-bound TLS key), then transparently reverse-proxies /v1 to inference.tinfoil.sh. The app
 # (nullsink.service) points TINFOIL_BASE_URL at this loopback proxy, so every Tinfoil request is verified

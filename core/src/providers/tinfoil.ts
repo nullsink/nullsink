@@ -1,5 +1,5 @@
 // Provider #3: Tinfoil (tinfoil.sh) — an OpenAI-compatible host of open-weight models running in attested
-// TEEs. Rung 1 is a plain forward (no attestation): the OpenAI Chat Completions shape, so it REUSES the
+// TEEs. The provider forwards plaintext (enclave attestation is the external tinfoil-proxy's job): the OpenAI Chat Completions shape, so it REUSES the
 // OpenAI chat scanner + usage extractor (cost/usage/openai.ts) and shares /v1/chat/completions with the
 // OpenAI provider — the handler routes between them by model (bare id → owner, or a `provider/model` prefix).
 // Built only when TINFOIL_API_KEY is configured (selectProviders); otherwise its endpoint 404s.

@@ -1,12 +1,12 @@
-# Tinfoil attestation (rung 2)
+# Tinfoil attestation
 
 The Tinfoil provider forwards to confidential-compute enclaves that host open-weight
-models. Rung 1 forwarded over plain HTTPS with no enclave verification. Rung 2 verifies
-the enclave before any request leaves the box, via a local verifying proxy.
+models. The initial integration forwarded over plain HTTPS with no enclave verification;
+this adds a local verifying proxy that attests the enclave before any request leaves the box.
 
 ## Scope — operator integrity
 
-Rung 2 proves, cryptographically, that we route to a genuine SEV-SNP enclave running
+Attestation proves, cryptographically, that we route to a genuine SEV-SNP enclave running
 Tinfoil's published model image. It closes the hole where a spoofed or compromised endpoint
 could retain content while we forwarded in good faith.
 
@@ -62,7 +62,7 @@ proxy unit's environment.
   (`tinfoilsh/confidential-model-router`) ships releases roughly daily (100+ to date), so the
   trusted measurement churns frequently and any proxy restart silently adopts the newest. The
   pinning capability exists one layer down (`tinfoil-go`'s verifier, `NewPinnedSecureClient`) but
-  is not surfaced by the proxy. This is the one open item; it warrants an email to Tinfoil (see
+  is not surfaced by the proxy — and pinning is impractical here anyway (see *Why we don't pin*
   below). The pin must not be overstated: the verifier binary is pinned, the trust *target* is not.
 - **Startup-only liveness.** The `:3301` probe proves attestation at startup, not ongoing. A
   mid-session enclave cert-rotation failure surfaces as upstream 502s in the app journal.
@@ -71,11 +71,14 @@ proxy unit's environment.
   does not affect the other providers.
 - **Loopback hop.** app→proxy is plain HTTP on `127.0.0.1` (it carries the bearer key, loopback-only).
 
-## Open item — measurement pinning (email Tinfoil)
+## Why we don't pin the measurement
 
-Ask Tinfoil to surface the existing `verifier.NewPinnedSecureClient` capability through
-(1) a `tinfoil-proxy` flag — e.g. `--release <tag>` (or `-r owner/repo@tag`) and/or
-`--measurement <digest>` — and (2) a matching `tinfoil.NewClientWithParams` option, **including**
-making the cert-rotation re-verify path honor the pinned release rather than re-fetching latest.
-The plumbing already exists (`github.FetchDigest(repo, tag)`, `NewPinnedSecureClient`); only the
-CLI/wrapper surface and the rotation path are missing.
+We considered pinning a specific reviewed measurement (and refusing any other), but it's
+impractical against Tinfoil's deployment: the fleet serves only the latest release and the
+measurement changes on every release (a few times a week), so a hard pin would fail closed on
+every rollout — with no security gain, since the live enclave is always the newest and an old pin
+can't be served. Auto-latest (verify against the newest published, Sigstore-logged release) is the
+sensible default and also auto-receives Tinfoil's security fixes. The realistic guard is **drift
+detection** — record the verified measurement and alert when it changes unexpectedly — which we can
+do box-side with no Tinfoil change (tracked in the backlog). Pinning would only be worthwhile if
+Tinfoil offered a slow/stable release channel.
