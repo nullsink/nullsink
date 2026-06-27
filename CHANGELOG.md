@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/nullsink/nullsink/compare/v1.1.0...v1.2.0) (2026-06-26)
+
+
+### Features
+
+* **cli:** add `nsk orders` — operator view of in-flight payment orders ([#14](https://github.com/nullsink/nullsink/issues/14)) ([655ef00](https://github.com/nullsink/nullsink/commit/655ef00173b5726e5b4903710d269ab6c2c7cb1f))
+
 ## [1.1.0](https://github.com/nullsink/nullsink/compare/v1.0.2...v1.1.0) (2026-06-25)
 
 
