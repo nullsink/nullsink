@@ -1,4 +1,4 @@
-# Weekly: flag when a pinned external version (Bun / bitcoind / monero, in core/deploy/setup.sh) falls behind
+# Weekly: flag when a pinned external version (Bun / bitcoind / monero / tinfoil-proxy, in core/deploy/setup.sh) falls behind
 # upstream's latest release. NOTIFY-ONLY — opens a GitHub issue, never bumps anything (a bump changes a
 # checksum and must be done deliberately). Run on demand via the "Run workflow" button too. The comparison
 # logic lives in core/scripts/check-pins.sh (runnable locally from the core/ directory).
