@@ -42,28 +42,22 @@ proxy unit's environment.
 
 ## Wiring
 
-- `core/deploy/tinfoil-proxy.service` — the pinned systemd unit. Hardened like the rail daemons,
-  but with clearnet egress (it reaches `inference.tinfoil.sh` + GitHub + Sigstore), so no
-  `IPAddress*` filter — matching `nullsink.service`.
-- `core/deploy/setup.sh` — pins + checksum-verifies the binary (`install_verified_tinfoil_proxy`),
-  installs/enables it when `TINFOIL_API_KEY` is set (`tinfoil_active`), and points
-  `TINFOIL_BASE_URL` at the proxy (flipping only an absent or public-default value, never an
-  operator override). Ordered before the app restart so the app reads the new URL.
-- `core/deploy/status-check.sh` — adds the unit to the health loop plus a keyless `:3301`
-  readiness probe (a port that accepts a connection means startup attestation passed).
-- `deploy.sh` needs no change: it refreshes the unit on redeploy via `install_units`, like the
-  other daemon units. To bump the proxy, bump the pin in setup.sh and re-run it.
+Deployed entirely under `core/deploy/` (read those files for specifics — they're commented):
+`setup.sh` pins + checksum-verifies the binary and installs/enables the proxy when a Tinfoil key is
+present, defaulting `TINFOIL_BASE_URL` to it; `tinfoil-proxy.service` is the hardened systemd unit;
+`status-check.sh` adds a liveness probe. Two non-obvious choices worth stating once: the unit takes
+no `IPAddress*` filter (it needs clearnet egress to the enclave + GitHub + Sigstore, like
+`nullsink.service`), and `deploy.sh` is unchanged — it refreshes the unit on redeploy but, like the
+other daemons, installs the binary only via `setup.sh`.
 
 ## Residual gaps
 
 - **No measurement/version pinning.** We pin the proxy *binary* by SHA-256, but the proxy then
   trusts whatever Tinfoil publishes as its *latest* release (gated only by Sigstore transparency)
-  — there is no CLI flag to pin a specific release or measurement. The config repo
-  (`tinfoilsh/confidential-model-router`) ships releases roughly daily (100+ to date), so the
-  trusted measurement churns frequently and any proxy restart silently adopts the newest. The
-  pinning capability exists one layer down (`tinfoil-go`'s verifier, `NewPinnedSecureClient`) but
-  is not surfaced by the proxy — and pinning is impractical here anyway (see *Why we don't pin*
-  below). The pin must not be overstated: the verifier binary is pinned, the trust *target* is not.
+  — there is no CLI flag to pin a specific release or measurement. The trusted measurement changes
+  on each release (a few times a week), so any proxy restart silently adopts the newest, and pinning
+  is impractical here anyway (see *Why we don't pin* below). The pin must not be overstated: the
+  verifier *binary* is pinned, the trust *target* is not.
 - **Startup-only liveness.** The `:3301` probe proves attestation at startup, not ongoing. A
   mid-session enclave cert-rotation failure surfaces as upstream 502s in the app journal.
 - **Availability coupling.** Fail-closed ties Tinfoil availability to GitHub/Sigstore
