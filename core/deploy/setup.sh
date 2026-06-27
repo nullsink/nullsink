@@ -30,12 +30,14 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 
 # --- Pinned external toolchain (bump deliberately) ---
 # nullsink app release: the GitHub Release tag whose self-contained binary the box runs (fetched + checksum-
-# verified + activated by install_binary). Bump this deliberately — like the toolchain pins below — to roll
-# the box to a new release; deploy/deploy.sh <tag> does the same swap (health-gated) on an existing box.
-# Env-overridable so a re-run can pin a specific release WITHOUT editing this file (and without downgrading a
-# box already past the default): `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh`. Needed when re-running setup.sh
-# to add a setup-only component (e.g. the tinfoil-proxy attestation sidecar) onto a box newer than this default, or to stage an RC.
-RELEASE_TAG="${RELEASE_TAG:-v0.4.0}"
+# verified + activated by install_binary). AUTO-BUMPED to each release by release-please — the
+# `x-release-please-version` annotation on the line below + the generic extra-files entry in
+# release-please-config.json — so a fresh bootstrap installs the current release without a manual edit.
+# deploy/deploy.sh <tag> rolls an existing box to any tag. Env-overridable so a re-run can pin a specific
+# release WITHOUT editing this file (and without downgrading a box already past the default):
+# `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
+# attestation sidecar) onto a newer box, or staging an RC.
+RELEASE_TAG="${RELEASE_TAG:-v1.2.0}" # x-release-please-version
 # Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the
 # fanquake-signed SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
 BITCOIN_VERSION="31.0"
