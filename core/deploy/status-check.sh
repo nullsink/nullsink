@@ -44,7 +44,7 @@ warn() { echo "WARN $*"; fail=1; }
 jnum() { grep -o "\"$2\" *: *[0-9]\+" <<<"$1" | head -1 | grep -o '[0-9]\+'; }
 
 # --- 1. units (skip a unit that isn't enabled — an intentionally-absent component, not a failure) ---
-for unit in nullsink caddy monero-wallet-rpc bitcoind tor; do
+for unit in nullsink caddy monero-wallet-rpc bitcoind tor tinfoil-proxy; do
   systemctl is-enabled --quiet "$unit" 2>/dev/null || { echo "skip unit $unit (not enabled)"; continue; }
   if [ "$(systemctl is-active "$unit" 2>/dev/null)" = active ]; then ok "unit $unit active"
   else warn "unit $unit NOT active"; fi
@@ -79,6 +79,18 @@ if systemctl is-active --quiet nullsink 2>/dev/null; then
   if [ -n "$nrestarts" ] && [ "$nrestarts" -ge "$NRESTARTS_WARN" ] 2>/dev/null; then
     warn "nullsink restarted ${nrestarts}× since last clean start — crash-flap nearing StartLimitBurst, after which systemd stops retrying (hard outage). Check boot logs for an OOM/'stranded hold' cause"
   else ok "nullsink restart count ${nrestarts:-?} since last clean start"; fi
+fi
+
+# --- 1d. tinfoil-proxy reachability (only if active): the proxy has no local health route — it reverse-proxies
+#     everything to the enclave — so this is an END-TO-END probe (proxy up AND enclave reachable), not a pure
+#     liveness check. The proxy fails CLOSED (exits before binding :3301) on a failed startup attestation, so a
+#     refused connect points at that; but a 000 can ALSO be a slow/unreachable enclave or CDN. Keyless +
+#     privacy-safe — any HTTP status (even a 401/403/404 from the enclave) proves the round-trip works. Ongoing
+#     per-request attestation failures (e.g. a mid-session cert rotation) surface as upstream 502s in §3, not here. ---
+if systemctl is-active --quiet tinfoil-proxy 2>/dev/null; then
+  tf_code="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:3301/ 2>/dev/null)"
+  if [ -n "$tf_code" ] && [ "$tf_code" != 000 ]; then ok "tinfoil-proxy reachable on :3301 (proxy+enclave round-trip, HTTP $tf_code)"
+  else warn "tinfoil-proxy not answering :3301 — the proxy is down/failed-closed (attestation) OR the enclave is unreachable; Tinfoil requests will fail (other providers unaffected)"; fi
 fi
 
 # --- 2. host: disk + WAL-sidecar ownership (a full disk or root-owned sidecars silently break billing) ---
