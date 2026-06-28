@@ -102,6 +102,17 @@ export function Models() {
       <section className="section models">
         <h1 className="page-h1">Supported models</h1>
 
+        <p className="note">
+          <span className="marker" aria-hidden="true">$</span>
+          <span>
+            The model list and per-token prices come from{" "}
+            <a href="https://models.dev" {...EXT}>
+              models.dev
+            </a>
+            . You pay each provider&apos;s published rate.
+          </span>
+        </p>
+
         {/* The trust framing: the "who can read your messages" lede beside a static you → nullsink →
             {frontier | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
             words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
@@ -111,7 +122,7 @@ export function Models() {
               <span className="hl">who can read your messages</span>
             </p>
             <ul className="trust-points">
-              <li className="lead">Every route strips your identity — no account, no logs.</li>
+              <li className="lead">Every route strips your identity. No account, no logs.</li>
               <li>Frontier providers still process your text.</li>
               <li>A sealed enclave can&apos;t read it at all.</li>
             </ul>
@@ -134,7 +145,7 @@ export function Models() {
               <span className="branch-row">
                 <span className="wire" />
                 <span className="node">
-                  <SquareGlyph /> frontier · sees your text
+                  <SquareGlyph /> frontier · receives plaintext
                 </span>
               </span>
             </span>
@@ -170,14 +181,6 @@ export function Models() {
             </div>
           ))}
         </section>
-
-        <p className="models-credit">
-          Catalogue derived from{" "}
-          <a href="https://models.dev" {...EXT}>
-            models.dev
-          </a>
-          .
-        </p>
       </section>
     </Layout>
   );

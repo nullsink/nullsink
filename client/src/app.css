@@ -770,9 +770,6 @@ button:disabled { cursor: not-allowed; }
 .rm-title { font-size: 15px; font-weight: var(--ns-weight-display); letter-spacing: -0.03em; color: var(--ns-muted); }
 .rm-meta { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 
-/* catalogue attribution — fine print; models.dev is the upstream source of the list. */
-.models-credit { margin-top: 28px; font-size: 12px; color: var(--ns-faint); }
-.models-credit a { color: var(--ns-muted); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---- legal pages (privacy, terms) — long-form prose -------------------- */
 /* Calm by design: the acid accent is reserved for the brand wordmark (<Ns/>) and the lead-in term of each

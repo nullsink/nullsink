@@ -157,7 +157,7 @@ export function Start() {
 
           <div className="useit-panel" id="start-panel-tinfoil">
             <p className="section-copy">
-              Open-weight models — gpt-oss, Llama, GLM, Kimi, Gemma — run inside a sealed enclave that
+              Open-weight models (gpt-oss, Llama, GLM, Kimi, Gemma) run inside a sealed enclave that
               can&apos;t read your prompts. They speak the same OpenAI Chat Completions API: same base url and
               Bearer key as the OpenAI tab, just an open-weight model id (browse the{" "}
               <a href="/models/">supported models</a>).
