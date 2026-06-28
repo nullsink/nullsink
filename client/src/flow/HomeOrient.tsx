@@ -8,10 +8,10 @@ import { BUY_MAX_USD, BUY_MIN_USD } from "../lib/api.ts";
 export function HomeOrient() {
   return (
     <aside className="home-orient">
-      <p className="home-intro">
+      <h1 className="home-intro">
         <Ns /> is an API proxy for frontier and open-weight models. Buy a prepaid key here, then point your
         own tools at it. No sign-up.
-      </p>
+      </h1>
 
       <Terms />
 
@@ -37,14 +37,14 @@ export function HomeOrient() {
           </dd>
         </div>
         <div className="avail-row">
-          <dt>API access</dt>
+          <dt>api access</dt>
           <dd className="on">
             <span className="avail-dot" aria-hidden="true" />
             live
           </dd>
         </div>
         <div className="avail-row">
-          <dt>Web chat</dt>
+          <dt>web chat</dt>
           <dd className="soon">
             <span className="avail-dot" aria-hidden="true" />
             roadmap

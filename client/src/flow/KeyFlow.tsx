@@ -224,8 +224,6 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
           submit();
         }}
       >
-        <h2>Buy credit</h2>
-
         {/* The optional key field leads the form: a returning user tops up here; a new user sees it once,
             leaves it blank, and continues straight down through amount → terms. Blank mints a fresh key; a
             valid token tops it up (check its balance with the button). */}
