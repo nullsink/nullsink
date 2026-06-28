@@ -134,7 +134,7 @@ export function Models() {
               <span className="branch-row">
                 <span className="wire" />
                 <span className="node">
-                  <SquareGlyph /> frontier · reads your text
+                  <SquareGlyph /> frontier · sees your text
                 </span>
               </span>
             </span>
