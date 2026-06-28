@@ -20,7 +20,6 @@ export function Layout({ children }: { children: ReactNode }) {
           <a href="/start/">start</a>
           <a href="/how-it-works/">how it works</a>
           <a href="/models/">models</a>
-          <a href="/about/">about</a>
         </nav>
       </header>
       {children}

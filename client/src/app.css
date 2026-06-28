@@ -467,12 +467,6 @@ button:disabled { cursor: not-allowed; }
    what can cost money: the two non-recoverable terms warnings (no refunds; lose the key, lose the
    balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
 .hl.danger { background: var(--ns-red); }
-/* "the code is open source" → repo (About): a GitHub mark + the phrase as one link. Inline-flex aligns the
-   mark with the .hl emphasis block; the mark is the affordance, so no underline. The chip keeps its own ink
-   colour (its .hl rule wins); only the mark takes the normal bone→acid link tint. */
-.src-link { display: inline-flex; align-items: center; gap: 0.5ch; text-decoration: none; }
-.src-icon { width: 1em; height: 1em; flex: none; }
-
 /* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
 .terms { border: 1px solid var(--ns-acid); }
 .terms-head {
@@ -815,9 +809,7 @@ button:disabled { cursor: not-allowed; }
    Shared by the legal lists and the about page's how-it-works steps (a deliberate, calm echo). */
 .lead-term { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
 
-/* ---- about (standalone /about page: the project intro, prose only) ------- */
-/* The intro: a few plain bone paragraphs in the project's own voice — no markers, no acid; the sincere
-   register before the steps' numbered notes. (The h1 is the shared .page-h1.) */
+/* calm prose line — a plain bone paragraph, no markers/acid. Used by the 404 body and the error boundary. */
 .about-copy { margin: 0 0 14px; color: var(--ns-bone); font-size: 15px; line-height: 1.65; }
 .about-copy:last-child { margin-bottom: 0; }
 
@@ -842,7 +834,7 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ---- get started (/start) — the developer on-ramp ----------------------- */
-/* short explanatory paragraph inside a docs section — between .about-copy and the legal body in size */
+/* short explanatory paragraph inside a docs section — sized between the body prose and the legal fine print */
 .section-copy { margin: 10px 0 0; color: var(--ns-bone); font-size: 14px; line-height: 1.6; }
 /* inline code — a hairline chip, echoing the site's existing "bordered = literal/control" language
    (the copy buttons, the coming-soon tag): transparent fill, 1px line border, a touch smaller than

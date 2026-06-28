@@ -37,7 +37,7 @@ const TIERS = [
   { key: "sealed", label: "Open weight", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Closed weight",
+    label: "Frontier",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
@@ -46,7 +46,7 @@ const TIERS = [
 
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
-  { id: "groq", name: "Groq", meta: "open-weight", Logo: GroqMark },
+  { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
   { id: "gemini", name: "Google Gemini", meta: "frontier", Logo: GeminiMark },
 ];
 
@@ -122,7 +122,7 @@ export function Models() {
               <span className="hl">who can read your messages</span>
             </p>
             <ul className="trust-points">
-              <li className="lead">Every route strips your identity. No account, no logs.</li>
+              <li className="lead">nullsink strips your identity.</li>
               <li>Frontier providers still process your text.</li>
               <li>A sealed enclave can&apos;t read it at all.</li>
             </ul>
