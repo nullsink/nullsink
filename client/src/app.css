@@ -109,7 +109,7 @@ button:disabled { cursor: not-allowed; }
 
 /* the orient column. */
 .home-orient { min-width: 0; display: flex; flex-direction: column; gap: 28px; }
-.home-intro { margin: 0; font-size: 16px; line-height: 1.6; color: var(--ns-bone); max-width: 46ch; }
+.home-intro { margin: 0; font-size: 16px; font-weight: 400; line-height: 1.6; color: var(--ns-bone); max-width: 46ch; }
 
 /* "point your tool here" quick-start: a hairline base-url row + a copy control, then a one-line note. */
 .qs-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); margin-bottom: 10px; }
@@ -569,21 +569,10 @@ button:disabled { cursor: not-allowed; }
    balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
 .hl.danger { background: var(--ns-red); }
 /* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
-/* terms — a hairline card with a left accent rail + a label/tagline head, echoing the /models provider
-   cards. Red stays scarce: only the two permanent-loss warnings carry it. */
-.terms { display: flex; border: 1px solid var(--ns-line); }
-.terms-rail { width: 3px; flex: none; background: var(--ns-acid); }
-.terms-body { flex: 1; min-width: 0; }
-.terms-head {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 11px 16px;
-  border-bottom: 1px solid var(--ns-line);
-}
-.terms-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: var(--ns-weight-display); color: var(--ns-bone); }
-.terms-tag { margin-left: auto; font-size: 12px; color: var(--ns-muted); }
-.terms-list { list-style: none; margin: 0; padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
+/* terms — kept light: a small uppercase header over a plain dash list, no box or border (it sits in the
+   calm orient column). Red stays scarce: only the two permanent-loss warnings carry it. */
+.terms-head { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); margin-bottom: 12px; }
+.terms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .terms-list li {
   position: relative;
   padding-left: 18px; /* room for the absolutely-positioned dash bullet; row spacing is the list's gap */
