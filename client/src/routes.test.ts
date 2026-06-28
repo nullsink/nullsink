@@ -11,14 +11,14 @@ test("the root path resolves to the landing route", () => {
 });
 
 test("a known subpage resolves, with or without a trailing slash", () => {
-  const about = ROUTES.find((r) => r.path === "/about")!;
-  expect(routeFor("/about")).toBe(about);
-  expect(routeFor("/about/")).toBe(about);
+  const models = ROUTES.find((r) => r.path === "/models")!;
+  expect(routeFor("/models")).toBe(models);
+  expect(routeFor("/models/")).toBe(models);
 });
 
 test("an unknown path resolves to the not-found view, not the landing", () => {
   expect(routeFor("/does-not-exist")).toBe(NOT_FOUND);
-  expect(routeFor("/about/extra")).toBe(NOT_FOUND);
+  expect(routeFor("/models/extra")).toBe(NOT_FOUND);
   expect(routeFor("/start/deeper/still")).toBe(NOT_FOUND);
 });
 

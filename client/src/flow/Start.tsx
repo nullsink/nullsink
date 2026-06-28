@@ -9,7 +9,7 @@ import { MARGIN, MARKUP_PCT, usd } from "../lib/api.ts";
 // tokens); the billing MECHANICS, other deliberate limits, and the premium-features policy live on
 // /how-it-works (cross-linked).
 // Every claim mirrors the proxy's actual contract (core src/handler.ts and the rejection table in the
-// core README); if the proxy changes, change this page — same stay-true-to-the-code rule as /about.
+// core README); if the proxy changes, change this page — same stay-true-to-the-code rule as /privacy.
 // Static: no state, no fetch — prerenders to plain HTML and reads with JS off (the copy buttons are the
 // only JS, the tabs are :checked CSS, and the samples remain selectable text regardless).
 // CodeBlock `highlights` tint the two things a reader must touch — their key, the model id — acid.

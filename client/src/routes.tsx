@@ -6,7 +6,6 @@
 import type { ReactElement } from "react";
 import { App } from "./App.tsx";
 import { MARKUP_PCT } from "./lib/api.ts";
-import { About } from "./flow/About.tsx";
 import { AnonymousClaudeApi } from "./flow/AnonymousClaudeApi.tsx";
 import { HowItWorks } from "./flow/HowItWorks.tsx";
 import { Models } from "./flow/Models.tsx";
@@ -55,15 +54,6 @@ export const ROUTES: Route[] = [
     description:
       "How nullsink works: a browser-minted key we only ever see as a hash, prepaid crypto credit, billing refunded to your exact usage, and what we never keep.",
     Component: HowItWorks,
-  },
-  {
-    path: "/about",
-    file: "about/index.html",
-    url: `${PROD}/about/`,
-    title: "nullsink: about",
-    description:
-      "What nullsink is and why it exists — a one-engineer privacy proxy for LLM APIs, open source, for when the question itself is sensitive. No accounts, no IP, no request logs.",
-    Component: About,
   },
   {
     path: "/models",

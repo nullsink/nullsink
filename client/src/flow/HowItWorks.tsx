@@ -5,7 +5,7 @@ import { MARKUP_PCT } from "../lib/api.ts";
 // Kept deliberately NON-internal: no wallet / subaddress / atomic-debit / store-flag jargon — just
 // user-visible guarantees, scannable (short paras + bullets). Payment is "crypto" (Monero or Bitcoin,
 // other coins via swap), NOT coin-specific — the buy flow carries the per-coin detail. NO open-source /
-// "mirrors the code" claims on this page (owner direction; that pitch lives on /about). Every claim still
+// "mirrors the code" claims on this page (owner direction). Every claim still
 // mirrors the proxy's contract (core/src/handler.ts,
 // src/ledger/settle.ts, src/ledger/db.ts, src/log.ts); guardrails: the hold is a sound upper bound (only
 // the FINAL bill is exact); we forward prompts but don't store them ("don't keep", never "can't see");
