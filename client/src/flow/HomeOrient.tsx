@@ -13,6 +13,14 @@ export function HomeOrient() {
         own tools at it. No sign-up.
       </h1>
 
+      <p className="note">
+        <span className="marker" aria-hidden="true">!</span>
+        <span>
+          Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase while we scale. Brief outages may be
+          frequent.
+        </span>
+      </p>
+
       <Terms />
 
       <dl className="avail">
@@ -51,11 +59,6 @@ export function HomeOrient() {
           </dd>
         </div>
       </dl>
-
-      <p className="home-fine">
-        Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase while we scale. Brief outages may be
-        frequent.
-      </p>
     </aside>
   );
 }
