@@ -226,17 +226,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
       >
         <h2>Buy credit</h2>
 
-        <AmountStep
-          amount={amount}
-          setAmount={setAmount}
-          unit={rails.find((r) => r.name === rail)?.unit ?? rails[0]?.unit ?? "BTC"}
-          rails={rails}
-          rail={rail}
-          setRail={setRail}
-        />
-
-        {/* One optional key field — no mode toggle. Blank → mint a fresh key; a valid token → top it up.
-            The balance is fetched on blur, so there's no separate "check balance" click. */}
+        {/* The optional key field leads the form: a returning user tops up here; a new user sees it once,
+            leaves it blank, and continues straight down through amount → terms. Blank mints a fresh key; a
+            valid token tops it up (check its balance with the button). */}
         <div className="have-key-inline">
           <div className="keyfield-head">
             <span>have a key?</span>
@@ -284,6 +276,15 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
             <p className="hint">Leave blank to mint a fresh key in your browser.</p>
           ) : null}
         </div>
+
+        <AmountStep
+          amount={amount}
+          setAmount={setAmount}
+          unit={rails.find((r) => r.name === rail)?.unit ?? rails[0]?.unit ?? "BTC"}
+          rails={rails}
+          rail={rail}
+          setRail={setRail}
+        />
 
         {/* Environmental /buy errors (rate/wallet/busy/rate-limit) surface here, pre-navigation. */}
         {errorCode && <div className="notice">{buyErrorMessage(errorCode)}</div>}

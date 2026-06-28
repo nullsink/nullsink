@@ -53,7 +53,7 @@ export function AmountStep({
   }
 
   return (
-    <div>
+    <div className="amount-step">
       <div className="field-label">
         <span>amount</span>
         <span className={"range-inline" + (flash ? " flash" : "")}>
@@ -130,13 +130,6 @@ export function AmountStep({
             ))}
           </div>
           <p className="coin-desc">{COIN_DESC[rail] ?? "paid on-chain"}</p>
-          {/* Bitcoin honesty, footnote register — its ledger is public; never shame the choice, just inform. */}
-          {rail === "bitcoin" && (
-            <p className="coin-caveat">
-              bitcoin&apos;s ledger is public. amounts and addresses are visible on-chain. nullsink keeps no
-              request logs and ties no payment to your key.
-            </p>
-          )}
         </div>
       )}
     </div>

@@ -36,6 +36,9 @@ button:disabled { cursor: not-allowed; }
 }
 /* the landing takes a wider measure for its two-column layout (see .home). */
 .shell.wide { max-width: 1000px; }
+/* keep the header + footer at the standard shell width on the wide landing, so they read the same on every page. */
+.shell.wide .bar,
+.shell.wide .foot { max-width: 760px; margin-inline: auto; }
 
 .bar {
   display: flex;
@@ -330,7 +333,8 @@ button:disabled { cursor: not-allowed; }
 .coin-mark { width: 15px; height: 15px; flex: none; }
 .coin-tic { font-size: 12px; opacity: 0.7; }
 .coin-desc { margin-top: 10px; color: var(--ns-muted); font-size: 13px; }
-.coin-caveat { margin-top: 8px; color: var(--ns-muted); font-size: 12px; line-height: 1.5; }
+/* separates the amount block from the optional key field now sitting above it (see KeyFlow home form). */
+.amount-step { margin-top: 28px; }
 
 .hint { margin-top: 12px; color: var(--ns-muted); font-size: 13px; line-height: 1.5; }
 .have-key-inline { margin-top: 28px; }
@@ -895,6 +899,7 @@ button:disabled { cursor: not-allowed; }
   padding: 0;
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 8px 6px;
   font-size: 12px;
 }
