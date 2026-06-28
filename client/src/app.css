@@ -569,15 +569,20 @@ button:disabled { cursor: not-allowed; }
    balance) and the key panel's UNRECOVERABLE tag. Nothing else — red only works while it's rare. */
 .hl.danger { background: var(--ns-red); }
 /* ---- terms — acid-bordered box (stands out), simple rows ----------------- */
-.terms { border: 1px solid var(--ns-acid); }
+/* terms — a hairline card with a left accent rail + a label/tagline head, echoing the /models provider
+   cards. Red stays scarce: only the two permanent-loss warnings carry it. */
+.terms { display: flex; border: 1px solid var(--ns-line); }
+.terms-rail { width: 3px; flex: none; background: var(--ns-acid); }
+.terms-body { flex: 1; min-width: 0; }
 .terms-head {
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ns-acid);
-  padding: 10px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 16px;
   border-bottom: 1px solid var(--ns-line);
 }
+.terms-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: var(--ns-weight-display); color: var(--ns-bone); }
+.terms-tag { margin-left: auto; font-size: 12px; color: var(--ns-muted); }
 .terms-list { list-style: none; margin: 0; padding: 12px 18px 14px; display: flex; flex-direction: column; gap: 12px; }
 .terms-list li {
   position: relative;
@@ -907,7 +912,7 @@ button:disabled { cursor: not-allowed; }
 .legal a { color: var(--ns-bone); word-break: break-word; }
 .legal a:hover { color: var(--ns-acid); }
 /* the bold lead-in word of a bullet (e.g. "A token hash.") — bone, not acid, so the list stays calm.
-   Shared by the legal lists and the about page's how-it-works steps (a deliberate, calm echo). */
+   Shared by the legal lists and the terms box. */
 .lead-term { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
 .lead-term.acid { color: var(--ns-acid); }
 

@@ -18,7 +18,6 @@ export function Layout({ children }: { children: ReactNode }) {
         </a>
         <nav className="links">
           <a href="/start/">start</a>
-          <a href="/how-it-works/">how it works</a>
           <a href="/models/">models</a>
         </nav>
       </header>

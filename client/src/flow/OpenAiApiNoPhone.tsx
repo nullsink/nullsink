@@ -36,8 +36,7 @@ export function OpenAiApiNoPhone() {
           </li>
         </ul>
         <p className="section-copy">
-          The proxy swaps your key for ours, so OpenAI never sees your token. The request lifecycle is in{" "}
-          <a href="/how-it-works/">how it works</a>; the models you can call are on{" "}
+          The proxy swaps your key for ours, so OpenAI never sees your token. The models you can call are on{" "}
           <a href="/models/">supported models</a>.
         </p>
       </section>

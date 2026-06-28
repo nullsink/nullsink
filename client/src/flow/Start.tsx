@@ -6,8 +6,7 @@ import { MARGIN, MARKUP_PCT, usd } from "../lib/api.ts";
 // "get started" — the developer on-ramp (route /start): everything needed to go from a funded key to a
 // working request without reading the server repo — the quick path, per-provider integration behind
 // CSS-only radio tabs, and the honest fine print. The ONE first-400 gotcha is kept here (set a max output
-// tokens); the billing MECHANICS, other deliberate limits, and the premium-features policy live on
-// /how-it-works (cross-linked).
+// tokens).
 // Every claim mirrors the proxy's actual contract (core src/handler.ts and the rejection table in the
 // core README); if the proxy changes, change this page — same stay-true-to-the-code rule as /privacy.
 // Static: no state, no fetch — prerenders to plain HTML and reads with JS off (the copy buttons are the
@@ -204,21 +203,18 @@ export function Start() {
           </li>
         </ul>
         <p className="section-copy">
-          One key spends on either provider. See the <a href="/models/">supported models</a>. The hold, the
-          refund to actual usage, and how streaming is billed are in{" "}
-          <a href="/how-it-works/">how it works</a>.
+          One key spends on either provider. See the <a href="/models/">supported models</a>.
         </p>
       </section>
 
       <section className="section">
         <h2>before your first request</h2>
         <p className="section-copy">
-          {/* acid-highlighted: the gotcha every first integration hits; the rest live on /how-it-works */}
+          {/* acid-highlighted: the gotcha every first integration hits */}
           <span className="hl">Always set a max output tokens</span> — <code>max_tokens</code> (Anthropic)
           or <code>max_completion_tokens</code> / <code>max_output_tokens</code> (OpenAI). Without one a
           request can be rejected (<code>max_tokens_required</code>). Other limits — unsupported models,
-          premium features off by default, OpenAI statelessness — are explained in{" "}
-          <a href="/how-it-works/">how it works</a>.
+          premium features off by default, OpenAI statelessness — also apply.
         </p>
       </section>
 

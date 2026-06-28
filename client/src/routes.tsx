@@ -7,7 +7,6 @@ import type { ReactElement } from "react";
 import { App } from "./App.tsx";
 import { MARKUP_PCT } from "./lib/api.ts";
 import { AnonymousClaudeApi } from "./flow/AnonymousClaudeApi.tsx";
-import { HowItWorks } from "./flow/HowItWorks.tsx";
 import { Models } from "./flow/Models.tsx";
 import { NotFound } from "./flow/NotFound.tsx";
 import { OpenAiApiNoPhone } from "./flow/OpenAiApiNoPhone.tsx";
@@ -45,15 +44,6 @@ export const ROUTES: Route[] = [
     description:
       `Point any Anthropic or OpenAI SDK at nullsink: base URLs, copy-paste curl examples, pricing (provider list price + ~${MARKUP_PCT}% at purchase), and the limits to know before your first request.`,
     Component: Start,
-  },
-  {
-    path: "/how-it-works",
-    file: "how-it-works/index.html",
-    url: `${PROD}/how-it-works/`,
-    title: "nullsink: how it works",
-    description:
-      "How nullsink works: a browser-minted key we only ever see as a hash, prepaid crypto credit, billing refunded to your exact usage, and what we never keep.",
-    Component: HowItWorks,
   },
   {
     path: "/models",

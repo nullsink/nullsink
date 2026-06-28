@@ -36,8 +36,7 @@ export function AnonymousClaudeApi() {
         </ul>
         <p className="section-copy">
           The proxy strips your key from each request and adds ours, so Anthropic never sees your token. The
-          full request lifecycle is in <a href="/how-it-works/">how it works</a>; the models you can call are
-          on <a href="/models/">supported models</a>.
+          models you can call are on <a href="/models/">supported models</a>.
         </p>
       </section>
 
