@@ -90,6 +90,20 @@
     "cache_read": 0.3,
     "cache_write": 3.75
   },
+  "gemma4-31b": {
+    "provider": "tinfoil",
+    "input": 0.4,
+    "output": 1,
+    "cache_read": 0.4,
+    "cache_write": 0
+  },
+  "glm-5-2": {
+    "provider": "tinfoil",
+    "input": 1.5,
+    "output": 5.25,
+    "cache_read": 1.5,
+    "cache_write": 0
+  },
   "gpt-3.5-turbo": {
     "provider": "openai",
     "input": 0.5,
@@ -326,6 +340,34 @@
     "input": 30,
     "output": 180,
     "cache_read": 0,
+    "cache_write": 0
+  },
+  "gpt-oss-120b": {
+    "provider": "tinfoil",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.15,
+    "cache_write": 0
+  },
+  "gpt-oss-safeguard-120b": {
+    "provider": "tinfoil",
+    "input": 0.15,
+    "output": 0.6,
+    "cache_read": 0.15,
+    "cache_write": 0
+  },
+  "kimi-k2-6": {
+    "provider": "tinfoil",
+    "input": 1.5,
+    "output": 5.25,
+    "cache_read": 1.5,
+    "cache_write": 0
+  },
+  "llama3-3-70b": {
+    "provider": "tinfoil",
+    "input": 1.75,
+    "output": 2.75,
+    "cache_read": 1.75,
     "cache_write": 0
   },
   "o1": {

@@ -9,7 +9,8 @@
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         { "type": "json", "path": "core/package.json", "jsonpath": "$.version" },
-        { "type": "json", "path": "client/package.json", "jsonpath": "$.version" }
+        { "type": "json", "path": "client/package.json", "jsonpath": "$.version" },
+        { "type": "generic", "path": "core/deploy/setup.sh" }
       ]
     }
   },

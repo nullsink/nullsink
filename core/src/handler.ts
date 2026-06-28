@@ -6,7 +6,7 @@ import { priceUsage, isReasoningModel } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";
 import * as metrics from "./metrics";
-import { selectProviders, type Provider } from "./providers";
+import { selectProviders, resolveProvider, type Provider } from "./providers";
 import { makeEndpoints } from "./endpoints";
 import { deny, denyApi, apiErrorBody, NO_API_KEY, scrubRespHeaders, buildUpstreamHeaders } from "./http";
 import type { HoldEstimator } from "./hold";
@@ -158,6 +158,13 @@ export type HandlerDeps = {
     baseUrl: string;
     estimateHold: HoldEstimator; // OpenAI's own hold estimator (count via /v1/responses/input_tokens, byte fallback)
   };
+  // Tinfoil config — present iff TINFOIL_API_KEY is set (index.ts). OpenAI-compatible; shares
+  // /v1/chat/completions with OpenAI (the handler routes by model). No count_tokens endpoint → byte-bound hold.
+  tinfoil?: {
+    apiKey: string;
+    baseUrl: string;
+    estimateHold: HoldEstimator;
+  };
   upstreamTimeoutMs: number;
   margin: number;
   buyMinUsd: number;
@@ -250,25 +257,33 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     orderStatus,
   });
 
-  // Active upstream providers, resolved into an exact-path → Provider registry (providers/index.ts). Each is
+  // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
   // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
   // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
-  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai });
+  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
+  // Every registered provider id (anthropic / openai / …) — used to tell a `provider/model` namespace prefix
+  // from a bare model id (which may itself contain a slash, e.g. an org/model open-weight id).
+  const KNOWN_PROVIDER_IDS = new Set<string>([...PROVIDERS.values()].flat().map((p) => p.id));
   // Exact-path lookup (Map.get is exact — no prefix readmit of subpaths like /v1/messages/batches); an
-  // unknown path or a disabled provider misses → the fail-closed 404 in handle().
-  const providerForPath = (pathname: string): Provider | undefined => PROVIDERS.get(pathname);
+  // unknown path or a disabled provider misses → the fail-closed 404 in handle(). A path may carry more than
+  // one provider (OpenAI + Tinfoil on /v1/chat/completions); handleMetered resolves the one a request means.
+  const providersForPath = (pathname: string): Provider[] | undefined => PROVIDERS.get(pathname);
 
   // --- Shared money skeleton. Gate (reject before any spend) → size + atomically debit the hold →
   // forward with our injected key → reconcile to the real metered cost (clamped at the hold so a refund
   // is never negative, enforcing the no-overdraft invariant). Provider-agnostic: every per-API-shape
   // difference is read off `provider`. ---
-  async function handleMetered(provider: Provider, req: Request, url: URL): Promise<Response> {
+  async function handleMetered(candidates: Provider[], req: Request, url: URL): Promise<Response> {
+    // Pre-resolution errors (size / auth / parse) use a representative provider's error envelope: every
+    // provider sharing a path speaks the same wire shape and reads the proxy token the same way, so any of
+    // them shapes these identically. The request-specific provider is resolved from the model below.
+    const representative = candidates[0]!;
     // Bound the body before buffering (DoS): the content-length header check rejects bodies that DECLARE
     // an oversized length before the balance check. Chunked uploads (no content-length) bypass this and
     // are bounded instead by Bun's maxRequestBodySize backstop (index.ts). Cap matches the upstream ceiling.
     if (Number(req.headers.get("content-length") ?? 0) > MAX_MESSAGES_BODY_BYTES) {
       metrics.recordGate("request");
-      return denyApi(provider, 413, "payload_too_large");
+      return denyApi(representative, 413, "payload_too_large");
     }
 
     // Two header-only sheds run BEFORE we buffer/parse the (up to 32 MiB) body, so neither an unauthenticated
@@ -279,10 +294,10 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     // A present, FUNDED token buffers and bills exactly as before; a real-but-broke token (balance <= 0) is
     // still gated AFTER the body checks below — it is a paid token, not the free abuse vector. We authenticate
     // against this token, never forward it, and inject the real key below.
-    const token = provider.readToken(req);
-    if (!token) { metrics.recordGate("auth"); return denyApi(provider, 401, NO_API_KEY.code, NO_API_KEY.message); }
+    const token = representative.readToken(req);
+    if (!token) { metrics.recordGate("auth"); return denyApi(representative, 401, NO_API_KEY.code, NO_API_KEY.message); }
     const hash = hashToken(token);
-    if (getBalance(hash) === null) { metrics.recordGate("auth"); return denyApi(provider, 401, "invalid_token"); }
+    if (getBalance(hash) === null) { metrics.recordGate("auth"); return denyApi(representative, 401, "invalid_token"); }
 
     // Buffer and parse — the source of truth for billing. Reject anything we can't price at our flat
     // rates, constraining the request to the standard pricing regime before a cent is spent.
@@ -292,15 +307,36 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
       body = JSON.parse(raw);
     } catch {
       metrics.recordGate("request");
-      return denyApi(provider, 400, "invalid_json");
+      return denyApi(representative, 400, "invalid_json");
     }
     // Streaming: pass SSE bytes through untouched, metering usage off the same stream (below). The
     // up-front hold gates admission either way, so this only affects how the response is reconciled.
     const streaming = body?.stream === true;
+
+    // Resolve which provider on this path serves the request, by model. A model may be namespaced
+    // `provider/model` for explicit selection; a bare id resolves to its unique owner among the path's
+    // providers (an overlap of the same id needs the prefix, else it's ambiguous). The prefix is stripped
+    // before forwarding so the upstream sees its native id.
+    const rawModel: string | null = typeof body?.model === "string" ? body.model : null;
+    if (!rawModel) { metrics.recordGate("model"); return denyApi(representative, 400, "unsupported_model"); }
+    // Resolve which provider on this path serves the request, by model — native id first, then a
+    // `provider/model` namespace prefix (see providers/resolveProvider). The error envelope rides the
+    // representative (every provider on a path shares the wire shape).
+    const resolved = resolveProvider(candidates, rawModel, KNOWN_PROVIDER_IDS);
+    if (!resolved.ok) { metrics.recordGate("model"); return denyApi(representative, 400, resolved.error); }
+    const provider = resolved.provider;
+    const model = resolved.model;
+    // Forward with the prefix stripped — body is rebuilt ONLY when a prefix was present, so the common
+    // (bare/native) path still forwards the exact original bytes. body.model is normalized so the hold
+    // estimator/count call and prepareBody all see the native id.
+    if (resolved.prefixed) body.model = model;
+    const effectiveRaw = resolved.prefixed ? JSON.stringify(body) : raw;
+
+    // premiumReject runs AFTER resolution by necessity — the gate is provider-specific, so it needs the
+    // resolved provider. A request both unsupported-model and premium-violating is rejected as
+    // unsupported_model first; both are terminal pre-spend 400s, so the order is immaterial to the caller.
     const rej = provider.premiumReject(body);
     if (rej) { metrics.recordGate("premium"); return denyApi(provider, rej.status, rej.error); }
-    const model: string | null = typeof body?.model === "string" ? body.model : null;
-    if (!model || !provider.ownsModel(model)) { metrics.recordGate("model"); return denyApi(provider, 400, "unsupported_model"); }
     // The request's output cap, or the global default if it omitted one (then injected into the forward
     // below so the bound is real). defaultMaxOutput=0 keeps the strict requirement (max_tokens_required).
     const clientCap = provider.outputCap(body);
@@ -323,7 +359,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     const clientBeta = req.headers.get("anthropic-beta");
     const { micros: holdAmount, inputTokens } = await provider.estimateHold({
       model,
-      raw,
+      raw: effectiveRaw,
       body,
       maxTokens,
       countHeaders: clientBeta ? { "anthropic-beta": clientBeta } : undefined,
@@ -361,7 +397,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     try {
       const headers = buildUpstreamHeaders(provider, req);
       // Inject the cap only when the client omitted one (clientCap == null) — i.e. the default supplied it.
-      const sendBody = provider.prepareBody(raw, body, streaming, clientCap == null ? maxTokens : undefined);
+      const sendBody = provider.prepareBody(effectiveRaw, body, streaming, clientCap == null ? maxTokens : undefined);
 
       metrics.recordRequest(); // a metered request we're forwarding upstream (post-gates); served counts the 2xx below
       const upstream = await upstreamFetch(provider.baseUrl + provider.upstreamPath + url.search, {
@@ -560,8 +596,8 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     // today; OpenAI added behind the same seam). Only these paths spend upstream — the up-front hold makes
     // each yield no free usage. Anything unmatched (other methods, batches/files, any endpoint Anthropic or
     // OpenAI add later) falls through to the fail-closed 404 below; a prefix match would readmit subpaths.
-    const provider = req.method === "POST" ? providerForPath(url.pathname) : undefined;
-    if (provider) return handleMetered(provider, req, url);
+    const candidates = req.method === "POST" ? providersForPath(url.pathname) : undefined;
+    if (candidates) return handleMetered(candidates, req, url);
 
     return deny(404, "unsupported_endpoint");
   };

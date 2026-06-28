@@ -70,28 +70,39 @@ function billableTextModel(m: any): boolean {
 // prefix matcher would otherwise re-admit an excluded id as its priced base model.
 
 // Providers to sync, each with its retired-id denylist (ids that 404 upstream despite models.dev listing).
-const PROVIDERS: Array<{ name: string; retired: Set<string> }> = [
+// flatCache: the provider bills cached prompt reads at the full INPUT rate (models.dev lists no cache rate).
+// Tinfoil is flat AND its vLLM backend CAN report cached prompt tokens (prompt_tokens_details.cached_tokens →
+// cache_read_input_tokens via the OpenAI usage extractor), so cache_read must default to `input`, never 0 —
+// else a cache hit would bill free and under-charge. (nomic-embed-text is dropped by billableTextModel: output 0.)
+const PROVIDERS: Array<{ name: string; retired: Set<string>; flatCache?: boolean }> = [
   { name: "anthropic", retired: ANTHROPIC_RETIRED },
   { name: "openai", retired: OPENAI_RETIRED },
+  { name: "tinfoil", retired: new Set(), flatCache: true },
 ];
 
 const out: Record<string, unknown> = {};
 const counts: Record<string, number> = {};
-for (const { name, retired } of PROVIDERS) {
+for (const { name, retired, flatCache } of PROVIDERS) {
   const models = data[name]?.models ?? {};
   for (const [id, m] of Object.entries<any>(models)) {
     if (retired.has(id)) continue; // retired upstream — see note above
     if (!billableTextModel(m)) continue;
     if (OFF_CARD_MODEL_MARKERS.some((s) => id.includes(s))) continue; // off-card billing (fee tools / audio) — see note
+    // prices.json is id-keyed across ALL providers, so a shared id would silently clobber here. Throw — the
+    // tripwire that an id is now served by >1 provider and pricing must move to (provider, id) keys. (This
+    // replaces the old cross-source dup-throw in pricing.mergeRawPrices, now that Tinfoil is synced here too.)
+    if (id in out) throw new Error(`duplicate priced model id "${id}" across providers (${(out[id] as { provider: string }).provider} vs ${name}) — pricing must key by (provider, id)`);
     const c = m.cost;
     out[id] = {
       provider: name,
       input: c.input,
       output: c.output,
-      // OpenAI has no cache-WRITE premium (cached input is billed at a discount on read, writes are free),
-      // so cache_write is absent there → 0. Sound: OpenAI never reports cache-creation tokens, and the
-      // hold bound's max(input, cache_read, cache_write) still resolves to `input`.
-      cache_read: c.cache_read ?? 0,
+      // cache_read: a real discount from models.dev when present. Absent → 0 for discount-providers (they
+      // never report cached tokens), but → INPUT for a flatCache provider (Tinfoil): its vLLM can report a
+      // cache hit yet bills it at the full input rate, so 0 would under-charge. cache_write is absent on both
+      // OpenAI-shape providers (no cache-WRITE token fee) → 0; the hold's max(input, cache_read, cache_write)
+      // still resolves to input.
+      cache_read: c.cache_read ?? (flatCache ? c.input : 0),
       cache_write: c.cache_write ?? 0,
     };
     counts[name] = (counts[name] ?? 0) + 1;

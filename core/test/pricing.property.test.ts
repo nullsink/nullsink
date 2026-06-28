@@ -11,10 +11,12 @@
 //     user (floor), and the response→request fallback (a request can never end up unpriced/free).
 import { test, expect } from "bun:test";
 import fc from "fast-check";
-import { costOf, holdBoundOf, isPriced, isReasoningModel, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
+import { costOf, holdBoundOf, isPriced, isReasoningModel, mergeRawPrices, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
 import prices from "../src/cost/prices.json";
 
 type UsdRate = { provider: string; input: number; output: number; cache_read: number; cache_write: number };
+// The oracle reads the same single prices.json the table does (all providers incl. Tinfoil are synced there
+// now), so it stays a faithful independent check of the real rates.
 const PRICES = prices as Record<string, UsdRate>;
 const IDS = Object.keys(PRICES);
 
@@ -213,4 +215,13 @@ test("isReasoningModel: reasoning families yes, their -chat variants no", () => 
   expect(isReasoningModel("gpt-5.2-chat-latest")).toBe(false);
   expect(isReasoningModel("gpt-4o")).toBe(false);
   expect(isReasoningModel("claude-opus-4-8")).toBe(false);
+});
+
+// The price-table merge is the tripwire for an id served by >1 provider: a duplicate across sources must
+// THROW (else one source silently shadows the other). Exercises the throw the committed files never trigger.
+test("mergeRawPrices throws on a duplicate id across sources, merges disjoint ones", () => {
+  const e = { provider: "x", input: 1, output: 1, cache_read: 0, cache_write: 0 };
+  expect(() => mergeRawPrices({ a: e }, { a: e })).toThrow(/duplicate priced model id/);
+  expect(() => mergeRawPrices({ a: e, b: e })).not.toThrow(); // one source is internally id-unique
+  expect(mergeRawPrices({ a: e }, { b: e }).map(([id]) => id).sort()).toEqual(["a", "b"]);
 });

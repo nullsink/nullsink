@@ -6,9 +6,11 @@ import type { Provider } from "../providers";
 
 // Never forward upstream: the client's auth (we inject our own), `anthropic-beta` (premium betas; a
 // flat-rate-safe subset is re-added by buildUpstreamHeaders — see ANTHROPIC_SAFE_BETA), the client's org id
-// (we use our account), host/connection/content-length (connection framing — let fetch set its own), and the
-// client SDK fingerprint: `user-agent` and the `x-stainless-*` family (the prefix is handled below). NOTE: not
-// a full RFC hop-by-hop strip (transfer-encoding/te/trailer/upgrade/keep-alive aren't listed); add if needed.
+// (we use our account), host/connection/content-length (connection framing — let fetch set its own), the
+// client SDK fingerprint: `user-agent` and the `x-stainless-*` family (the prefix is handled below), and the
+// caller-page fingerprint `origin`/`referer` — no LLM API gates on them, and the Tinfoil verifying proxy's
+// loopback guard rejects any forwarded `origin`. NOTE: not a full RFC hop-by-hop strip
+// (transfer-encoding/te/trailer/upgrade/keep-alive aren't listed); add if needed.
 export const STRIP = new Set([
   "host",
   "connection",
@@ -19,6 +21,8 @@ export const STRIP = new Set([
   "anthropic-organization-id",
   "user-agent", // client SDK fingerprint — normalized to a neutral value below, never forwarded
   "x-request-id", // client-supplied trace id; the upstream issues its own request-id on the response
+  "origin", // caller-page fingerprint; no upstream gates on it, and the Tinfoil verifying proxy 403s it
+  "referer",
 ]);
 
 // The Stainless-generated Anthropic AND OpenAI SDKs attach an `x-stainless-*` header cluster (os, arch, lang,

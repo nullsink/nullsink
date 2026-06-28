@@ -30,9 +30,14 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 
 # --- Pinned external toolchain (bump deliberately) ---
 # nullsink app release: the GitHub Release tag whose self-contained binary the box runs (fetched + checksum-
-# verified + activated by install_binary). Bump this deliberately — like the toolchain pins below — to roll
-# the box to a new release; deploy/deploy.sh <tag> does the same swap (health-gated) on an existing box.
-RELEASE_TAG="v0.4.0"
+# verified + activated by install_binary). AUTO-BUMPED to each release by release-please — the
+# `x-release-please-version` annotation on the line below + the generic extra-files entry in
+# release-please-config.json — so a fresh bootstrap installs the current release without a manual edit.
+# deploy/deploy.sh <tag> rolls an existing box to any tag. Env-overridable so a re-run can pin a specific
+# release WITHOUT editing this file (and without downgrading a box already past the default):
+# `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
+# attestation sidecar) onto a newer box, or staging an RC.
+RELEASE_TAG="${RELEASE_TAG:-v1.2.0}" # x-release-please-version
 # Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the
 # fanquake-signed SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
 BITCOIN_VERSION="31.0"
@@ -41,6 +46,14 @@ BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c6
 # binaryFate-signed hashes.txt (gpg-verified at authoring; key 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92).
 MONERO_VERSION="0.18.5.0"
 MONERO_SHA256_X64="166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e294"
+# tinfoil-proxy: the local verifying proxy for the Tinfoil provider (enclave attestation). Pinned version + the
+# SHA-256 of the linux-amd64 binary. PROVENANCE is weaker than the Bitcoin/Monero pins above: those verify a
+# maintainer-GPG-signed hashes file, whereas tinfoil-proxy's SHA256SUMS is an unsigned CI artifact — so this is
+# trust-on-first-use (checked once at authoring) then pinned by SHA. NOTE: only the verifier BINARY is pinned;
+# the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated) and the proxy CLI gives
+# no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil rail is active.
+TINFOIL_PROXY_VERSION="v0.1.0"
+TINFOIL_PROXY_SHA256_X64="5ac964a7d4252c892e05876ed38c44dc4f37ec7d2a5c0845f1a04fd520b3d566"
 
 # --- Verified-install helpers (pinned + checksum-verified; same model as the Bun block below) ---
 fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; aborts (set -e) on mismatch
@@ -61,6 +74,12 @@ rail_active() {  # $1=rail — true if listed in PAY_RAILS (or legacy PAY_RAIL) 
 }
 proxy_disabled() {  # true if the env sets MONERO_PROXY_ARG empty (direct/clearnet node, no Tor — e.g. staging)
   [ -f /etc/monero-wallet-rpc.env ] && grep -qE '^MONERO_PROXY_ARG=[[:space:]]*$' /etc/monero-wallet-rpc.env
+}
+tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in $ENV_FILE — gates the Tinfoil verifying proxy
+  [ -f "$ENV_FILE" ] || return 1
+  local k
+  k="$(grep -E '^TINFOIL_API_KEY=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
 }
 install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop calls the cli)
   if /usr/local/bin/bitcoind --version 2>/dev/null | grep -q "v${BITCOIN_VERSION}"; then return 0; fi
@@ -83,6 +102,26 @@ install_verified_monero_wallet() {  # monero-wallet-rpc (watcher) + monero-walle
   install -m755 "$tmp/monero-wallet-rpc" "$tmp/monero-wallet-cli" /usr/local/bin/
   rm -rf "$tmp"
   echo "    monero-wallet-rpc/cli v${MONERO_VERSION} installed"
+}
+install_verified_tinfoil_proxy() {  # the Tinfoil attestation sidecar — fetch+verify+install /usr/local/bin/tinfoil-proxy
+  # Idempotent by SHA (the binary exposes no --version flag): skip the re-fetch when the pinned binary is already
+  # in place, so a setup.sh re-run does no network here.
+  if [ -x /usr/local/bin/tinfoil-proxy ] && echo "$TINFOIL_PROXY_SHA256_X64  /usr/local/bin/tinfoil-proxy" | sha256sum -c --status -; then return 0; fi
+  # This install is GUARDED (called in an `if`), so a wrong arch must `return 1` to degrade to a todo — NOT
+  # require_x86_64's `exit 1`, which would kill the whole bootstrap (the firewall, app, and rails come later).
+  if [ "$(uname -m)" != "x86_64" ]; then
+    echo "    !! tinfoil-proxy pin is x86_64-only; this box is $(uname -m) — skipping" >&2
+    return 1
+  fi
+  local tmp; tmp="$(mktemp -d)"
+  # Explicit `|| return 1` (not bare set -e): this runs guarded in an `if`, where set -e is suspended for the
+  # whole function — so a failed fetch must propagate by hand, or the caller's then-branch would start a unit
+  # with no binary behind it.
+  fetch_verified "https://github.com/tinfoilsh/tinfoil-proxy/releases/download/${TINFOIL_PROXY_VERSION}/tinfoil-proxy-linux-amd64" \
+    "$TINFOIL_PROXY_SHA256_X64" "$tmp/tinfoil-proxy" || { rm -rf "$tmp"; return 1; }
+  install -m755 "$tmp/tinfoil-proxy" /usr/local/bin/tinfoil-proxy || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  echo "    tinfoil-proxy ${TINFOIL_PROXY_VERSION} installed"
 }
 
 step "Installing system packages"
@@ -177,6 +216,27 @@ EOF
   note "Templated $ENV_FILE with placeholders"
 fi
 
+# Attestation: when the Tinfoil rail is active and TINFOIL_BASE_URL is UNSET, default it to the local verifying proxy
+# (the real upgrade path — the earlier template never wrote this line). Any EXPLICIT value is respected and
+# survives re-runs — there's no self-reverting flip of a value the operator can see: http://127.0.0.1:3301 routes
+# through the attesting proxy; the public endpoint forwards directly (unverified) and is flagged each run. Done
+# here, BEFORE the app (re)start below, so the app reads the value; the proxy itself is installed + started in its
+# own step further down (also before the app restart). Append is in-place (`>>`), preserving the file's 600/owner.
+if tinfoil_active; then
+  _tbu="$(grep -E '^TINFOIL_BASE_URL=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  if [ -z "$_tbu" ]; then
+    { echo "# Tinfoil enclave attestation: the local verifying proxy (tinfoil-proxy.service). Set to"
+      echo "# https://inference.tinfoil.sh to forward directly, WITHOUT attestation (respected on re-runs)."
+      echo "TINFOIL_BASE_URL=http://127.0.0.1:3301"
+    } >> "$ENV_FILE"
+    note "TINFOIL_BASE_URL defaulted to the local attesting proxy (http://127.0.0.1:3301)"
+  elif [ "$_tbu" = "http://127.0.0.1:3301" ]; then
+    : # already routing through the local proxy — nothing to do
+  else
+    note "TINFOIL_BASE_URL=$_tbu — Tinfoil is forwarding UNVERIFIED (not via the attesting proxy); set it to http://127.0.0.1:3301 to enable attestation"
+  fi
+fi
+
 step "Installing systemd units"
 # One glob-based install of every deploy/*.service + *.timer (via lib.sh's install_units, shared with
 # deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
@@ -202,6 +262,24 @@ else
   todo "client UI not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — Caddy 404s the site until $WEB_BASE/current-web exists"
 fi
 
+step "Configuring tinfoil-proxy (enclave attestation sidecar)"
+# Install + enable the local verifying proxy when the Tinfoil rail is active, BEFORE the app (re)start below so
+# the app's first Tinfoil request reaches a ready proxy (and the flipped TINFOIL_BASE_URL resolves). The unit
+# was refreshed by install_units above. GUARDED like the binary install: a transient GitHub/Tinfoil fetch
+# failure must NOT abort the bootstrap — Tinfoil simply fails closed until it's installed; OpenAI/Anthropic are
+# unaffected. To bump the proxy, bump the pin above + re-run setup.sh (the rail-daemon model — deploy.sh refreshes
+# the unit but never installs this binary).
+if tinfoil_active; then
+  if install_verified_tinfoil_proxy; then
+    systemctl enable tinfoil-proxy
+    systemctl restart tinfoil-proxy   # restart so a unit/binary change takes effect
+  else
+    todo "tinfoil-proxy not installed (network/release issue; re-run setup.sh) — Tinfoil requests fail closed until it's up; OpenAI/Anthropic unaffected"
+  fi
+else
+  echo "    skip tinfoil-proxy (TINFOIL_API_KEY not set — Tinfoil rail inactive)"
+fi
+
 step "Installing systemd service"
 # The unit's ExecStart points at the binary (/usr/local/lib/nullsink/current), installed in the step above.
 systemctl enable "$SVC_NAME"
@@ -216,7 +294,7 @@ if [ "$FRESH_ENV" -eq 0 ]; then
     todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $SVC_NAME"
   fi
 else
-  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY and/or OPENAI_API_KEY — at least one), then: systemctl start $SVC_NAME"
+  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $SVC_NAME"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"

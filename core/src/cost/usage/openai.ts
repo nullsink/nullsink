@@ -62,7 +62,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   let buf = "";
   let model: string | null = null;
   let finalUsage: Usage | null = null; // exact, from the include_usage final chunk
-  let contentChars = 0; // accumulated streamed output text length, for the disconnect estimate
+  let contentChars = 0; // accumulated streamed output text (content + reasoning/reasoning_content), for the disconnect estimate
   let sawAny = false; // any parseable event → generation started (bill the partial, not a full refund)
   let failed = false; // upstream signalled an error mid-stream (not a client disconnect) → full refund
 
@@ -89,8 +89,17 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
         const choices = evt.choices;
         if (Array.isArray(choices)) {
           for (const ch of choices) {
-            const c = ch?.delta?.content;
+            const d = ch?.delta;
+            const c = d?.content;
             if (typeof c === "string") contentChars += c.length;
+            // Reasoning streams in a side field on OpenAI-compatible hosts and bills as output — count it too,
+            // or a disconnect estimate would be blind to it. Tinfoil/vLLM uses `reasoning` (verified live);
+            // DeepSeek-style hosts use `reasoning_content`. Genuine OpenAI emits NEITHER on chat (its reasoning
+            // is hidden, billed as a count only), so this is a strict no-op there — o-series/gpt-5 stay on the
+            // isReasoningModel output-cap path in disconnectOutput. (Tinfoil models that reason in `content`,
+            // e.g. deepseek/gemma, are already covered by the content count above.)
+            const r = d?.reasoning ?? d?.reasoning_content;
+            if (typeof r === "string") contentChars += r.length;
           }
         }
       }
@@ -116,12 +125,13 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   };
 }
 
-// Output-token estimate for a mid-stream disconnect (no final usage chunk). Normally the char heuristic;
-// but for a REASONING model the billed thinking tokens never appear as streamed text, so the char count is
-// blind to them and would massively under-bill — bill the output CAP instead (a sound upper bound, since
-// reasoning can fill it). This can OVER-bill an honest early disconnect of a reasoning stream up to the cap
-// (≤ the hold already reserved) — the accepted price of closing the under-bill exploit, since reasoning is
-// unmeasurable mid-stream. maxTokens absent (e.g. tests) → falls back to the char estimate.
+// Output-token estimate for a mid-stream disconnect (no final usage chunk): the char heuristic over all
+// streamed text (content + any reasoning_content, both summed into contentChars above). For a model whose
+// reasoning is HIDDEN from the stream (ctx.reasoning — OpenAI's o-series / gpt-5, where thinking tokens bill
+// as output but never stream), the char count is systematically blind, so bill the output CAP instead (a
+// sound upper bound). Open-weight models that STREAM their reasoning (reasoning_content, counted above) are
+// not flagged reasoning, so they take the char path like any model. The cap can OVER-bill an honest early
+// disconnect (≤ the hold already reserved). maxTokens absent (e.g. tests) → falls back to the char estimate.
 function disconnectOutput(contentChars: number, ctx: ScannerCtx): number {
   const est = Math.ceil(contentChars / CHARS_PER_TOKEN);
   return ctx.reasoning ? Math.max(est, ctx.maxTokens ?? 0) : est;
