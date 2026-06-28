@@ -593,8 +593,11 @@ button:disabled { cursor: not-allowed; }
 .trust-copy { flex: 1; min-width: 230px; }
 .trust-q { margin: 0 0 16px; }
 .trust-q .hl { font-size: 14px; letter-spacing: 0.01em; padding: 0.14em 0.45ch; }
-.trust-lede { margin: 0; max-width: 42ch; font-size: 13px; line-height: 1.7; color: var(--ns-muted); }
-.trust-lede strong { color: var(--ns-bone); font-weight: 400; }
+/* the lede as a dash-bullet list (design-system dash list): one claim per line, all in muted. */
+.trust-points { list-style: none; margin: 0; padding: 0; max-width: 42ch; display: flex; flex-direction: column; gap: 10px; }
+.trust-points li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ns-muted); }
+.trust-points li::before { content: "–"; position: absolute; left: 0; color: var(--ns-muted); }
+.trust-points li.lead { color: var(--ns-bone); }
 .trust-path { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .trust-path .node {
   display: inline-flex;
@@ -620,9 +623,11 @@ button:disabled { cursor: not-allowed; }
    node stays muted, the enclave node + its wire take --ns-seal. */
 .trust-branch { display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--ns-line); }
 .branch-row { display: inline-flex; align-items: center; }
-.branch-row .wire { width: 16px; }
+.branch-row .wire { width: 16px; background: var(--ns-acid); }
 .branch-row.sealed .wire { background: var(--ns-seal); }
-.trust-branch .node { color: var(--ns-muted); }
+/* the two branches take their tier's accent: frontier (→ the closed/policy tier) in acid, enclave (→ the
+   open/silicon tier) in seal — so the diagram colour-matches the tier headers below. */
+.trust-branch .node { border-color: var(--ns-acid); color: var(--ns-acid); }
 .trust-branch .node.sealed { border-color: var(--ns-seal); color: var(--ns-seal); }
 
 /* tier header: a glyph + label + tagline over a hairline that takes the tier's accent — acid for the

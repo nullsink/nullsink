@@ -37,7 +37,7 @@ const TIERS = [
   { key: "sealed", label: "Open weight", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Closed source",
+    label: "Closed weight",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
@@ -110,10 +110,11 @@ export function Models() {
             <p className="trust-q">
               <span className="hl">who can read your messages</span>
             </p>
-            <p className="trust-lede">
-              Every route strips your identity — no account, no logs. Frontier providers still process your
-              text; a sealed enclave <strong>can&apos;t read it at all</strong>.
-            </p>
+            <ul className="trust-points">
+              <li className="lead">Every route strips your identity — no account, no logs.</li>
+              <li>Frontier providers still process your text.</li>
+              <li>A sealed enclave can&apos;t read it at all.</li>
+            </ul>
           </div>
           <div className="trust-path" aria-hidden="true">
             <span className="node">you</span>
@@ -124,16 +125,16 @@ export function Models() {
             </span>
             <span className="wire" />
             <span className="trust-branch">
-              <span className="branch-row">
-                <span className="wire" />
-                <span className="node">
-                  <SquareGlyph /> frontier · reads your text
-                </span>
-              </span>
               <span className="branch-row sealed">
                 <span className="wire" />
                 <span className="node sealed">
                   <SquareGlyph sealed /> enclave · sealed
+                </span>
+              </span>
+              <span className="branch-row">
+                <span className="wire" />
+                <span className="node">
+                  <SquareGlyph /> frontier · reads your text
                 </span>
               </span>
             </span>
