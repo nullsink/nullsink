@@ -56,6 +56,15 @@ button:disabled { cursor: not-allowed; }
   font-size: 19px;
 }
 .wordmark .mark { height: 1cap; width: 1cap; color: var(--ns-acid); display: inline-block; }
+/* the deployed build tag trailing the name — the acid highlighter chip (same ink-on-acid as .hl), sized
+   down and with the tight display tracking reset so it reads as a small tag beside the name. "dev" locally. */
+.wordmark-ver {
+  font-size: 0.6em;
+  letter-spacing: 0;
+  padding: 0.04em 0.4ch;
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+}
 
 /* ---- section scaffolding ------------------------------------------------ */
 .section { margin-top: 40px; }

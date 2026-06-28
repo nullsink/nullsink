@@ -37,8 +37,10 @@ jobs:
         with:
           bun-version: 1.3.14   # pin: matches the box runtime + the version pinned in core/deploy/setup.sh
       - run: bun install --frozen-lockfile
-      - name: stamp the release tag into the version module
-        run: printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > core/src/version.ts   # baked into both binaries
+      - name: stamp the release tag into the version modules
+        run: |
+          printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > core/src/version.ts     # baked into both binaries
+          printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > client/src/version.ts   # baked into the client UI bundle (shown by the wordmark)
       - name: build server + operator-CLI binaries (linux-x64)
         run: |
           bun --filter './core' build       # -> core/nullsink-linux-x64 (same script CI smoke-checks on every PR)

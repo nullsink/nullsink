@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { qrSvg } from "./lib/qr.ts";
+import { BUILD_VERSION } from "./version.ts";
 
 // The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
 // so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
@@ -108,6 +109,7 @@ export function Wordmark() {
     <span className="wordmark">
       <Mark className="mark" />
       <span>nullsink</span>
+      <span className="wordmark-ver">{BUILD_VERSION}</span>
     </span>
   );
 }
