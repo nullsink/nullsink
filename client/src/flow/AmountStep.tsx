@@ -107,8 +107,8 @@ export function AmountStep({
       </div>
       {/* Pay-rail picker — the coin is chosen HERE, before quoting, so one /buy fires with the right rail and
           the pay screen never has to re-quote a live single-use address. Renders only when ≥2 rails are active
-          (one rail → single-coin flow, picker hidden). The .seg control + acid-on-select matches the key
-          toggle; the marks are currentColor so they take the same ink/acid. */}
+          (one rail → single-coin flow, picker hidden). The .seg control marks the selected coin acid; the
+          marks are currentColor so they take the same ink/acid. */}
       {rails.length >= 2 && (
         <div className="coin-pick">
           <div className="custom-label">pay with</div>

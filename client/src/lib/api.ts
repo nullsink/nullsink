@@ -32,11 +32,6 @@ export const MARKUP_PCT = Math.round((MARGIN - 1) * 100);
 // lives in one place (and can later become Intl.NumberFormat).
 export const usd = (n: number): string => `$${n.toFixed(2)}`;
 
-// The human-facing base URL a developer points their SDK/tools at — one source so the home quick-start and
-// any docs agree. (The proxy is reached same-origin via the relative endpoints above; this is the host a
-// user puts in their SDK config.)
-export const BASE_URL = "https://nullsink.is";
-
 export interface Quote {
   pay_to: string;
   amount: string; // verbatim coin amount string (8dp for BTC) — display AS-IS, never reformat/round

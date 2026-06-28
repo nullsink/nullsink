@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
 import { buyErrorMessage, checkBalance, getRails, requestQuote, usd } from "../lib/api.ts";
-import { generateToken, hashToken, isValidTokenFormat } from "../lib/token.ts";
+import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import { AmountStep } from "./AmountStep.tsx";
@@ -137,10 +137,10 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     [amount, rail],
   );
 
-  const pasteValid = isValidTokenFormat(paste);
+  const keyState = keyFieldState(paste);
 
   async function check() {
-    if (!pasteValid) return;
+    if (!keyState.willTopUp) return;
     setChecking(true);
     setCheckError(false);
     try {
@@ -171,8 +171,8 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
       return;
     }
     // A non-blank but malformed key blocks the purchase (the CTA is also disabled in that state).
-    if (paste.trim().length > 0 && !pasteValid) return;
-    const useExisting = pasteValid; // blank field → mint a new key; a valid token → top it up
+    if (keyState.malformed) return;
+    const useExisting = keyState.willTopUp; // blank field → mint a new key; a valid token → top it up
     const tok = useExisting ? paste : generateToken();
     const wasNew = !useExisting;
     setBusy(true);
@@ -253,10 +253,10 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
           />
           {/* the check-balance control is always visible; it's disabled until a valid key is present. */}
           <div className="balance-check">
-            <button type="button" className="check-btn" disabled={!pasteValid || checking} onClick={check}>
+            <button type="button" className="check-btn" disabled={!keyState.willTopUp || checking} onClick={check}>
               {checking ? "checking…" : "check balance"}
             </button>
-            {pasteValid &&
+            {keyState.willTopUp &&
               didCheck &&
               (checkError ? (
                 <span className="check-line none">couldn't check, try again in a moment</span>
@@ -268,7 +268,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
                 </span>
               ))}
           </div>
-          {paste && !pasteValid ? (
+          {keyState.malformed ? (
             <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
           ) : !paste ? (
             <p className="hint">Leave blank to mint a fresh key in your browser.</p>
@@ -318,9 +318,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         <button
           className="btn-primary"
           type="submit"
-          disabled={busy || (paste.trim().length > 0 && !pasteValid)}
+          disabled={busy || keyState.malformed}
         >
-          {busy ? "requesting…" : pasteValid ? "add credit →" : "mint key →"}
+          {busy ? "requesting…" : keyState.willTopUp ? "add credit →" : "mint key →"}
         </button>
 
       </form>
