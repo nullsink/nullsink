@@ -126,6 +126,8 @@ button:disabled { cursor: not-allowed; }
 .avail-row dd.on .avail-dot { background: var(--ns-acid); }
 .avail-row dd.soon { color: var(--ns-muted); }
 .avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
+.avail-row dd.prov-marks { gap: 12px; text-transform: none; letter-spacing: normal; }
+.prov-mark { width: 18px; height: 18px; color: var(--ns-bone); }
 
 .home-fine { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ns-faint); }
 

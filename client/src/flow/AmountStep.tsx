@@ -17,14 +17,12 @@ const COIN_DESC: Record<string, string> = {
 export function AmountStep({
   amount,
   setAmount,
-  unit,
   rails,
   rail,
   setRail,
 }: {
   amount: number;
   setAmount: (n: number) => void;
-  unit: string; // the selected rail's display ticker, for the price-line estimate
   rails: Rail[]; // active rails from /rails — the picker renders only when there are ≥2
   rail: string; // the selected rail name
   setRail: (r: string) => void;
@@ -105,7 +103,7 @@ export function AmountStep({
 
       <div className="price-line">
         {usd(amount)} credit + ~{MARKUP_PCT}% markup ≈{" "}
-        <span className="hl">{usd(amount * MARGIN)} in {unit}</span>
+        <span className="hl">{usd(amount * MARGIN)}</span>
       </div>
       {/* Pay-rail picker — the coin is chosen HERE, before quoting, so one /buy fires with the right rail and
           the pay screen never has to re-quote a live single-use address. Renders only when ≥2 rails are active

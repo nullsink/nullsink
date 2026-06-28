@@ -280,7 +280,6 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         <AmountStep
           amount={amount}
           setAmount={setAmount}
-          unit={rails.find((r) => r.name === rail)?.unit ?? rails[0]?.unit ?? "BTC"}
           rails={rails}
           rail={rail}
           setRail={setRail}
