@@ -17,7 +17,7 @@ import { HomeOrient } from "./flow/HomeOrient.tsx";
 export function App() {
   const [checkout, setCheckout] = useState(false);
   return (
-    <Layout wide>
+    <Layout>
       <div className={"home" + (checkout ? " checkout" : "")}>
         <main id="buy" className="home-buy">
           <KeyFlow onCheckoutChange={setCheckout} />

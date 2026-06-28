@@ -34,11 +34,6 @@ button:disabled { cursor: not-allowed; }
   margin: 0 auto;
   padding: 0 20px 80px;
 }
-/* the landing takes a wider measure for its two-column layout (see .home). */
-.shell.wide { max-width: 1000px; }
-/* keep the header + footer at the standard shell width on the wide landing, so they read the same on every page. */
-.shell.wide .bar,
-.shell.wide .foot { max-width: 760px; margin-inline: auto; }
 
 .bar {
   display: flex;
@@ -91,6 +86,12 @@ button:disabled { cursor: not-allowed; }
    width and centers, morphing in place through pay → done. The grid + the .checkout class flip in one
    frame (KeyFlow's useLayoutEffect; no animation). Mobile is one column with the orient above the card. */
 .home {
+  /* Break out of the standard 760 shell to a wider measure for the two columns. The header + footer stay in
+     the shell, so they're pixel-identical to every other page (no width jump when navigating). The
+     margin-left/translate pair centers it on the viewport regardless of the shell's own width. */
+  width: min(1000px, calc(100vw - 40px));
+  margin-left: 50%;
+  transform: translateX(-50%);
   margin-top: 40px;
   display: grid;
   grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
@@ -98,9 +99,8 @@ button:disabled { cursor: not-allowed; }
   align-items: start;
 }
 .home.checkout {
+  width: min(620px, calc(100vw - 40px));
   grid-template-columns: 1fr;
-  max-width: 620px;
-  margin-inline: auto;
 }
 .home-buy { min-width: 0; }
 
@@ -126,8 +126,26 @@ button:disabled { cursor: not-allowed; }
 .avail-row dd.on .avail-dot { background: var(--ns-acid); }
 .avail-row dd.soon { color: var(--ns-muted); }
 .avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
-.avail-row dd.prov-marks { gap: 12px; text-transform: none; letter-spacing: normal; }
-.prov-mark { width: 18px; height: 18px; color: var(--ns-bone); }
+/* the Models row: overlapping circular discs (like the coin stack), linking to /models. First disc on top. */
+.model-stack { display: inline-flex; align-items: center; }
+.stack-disc {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--ns-void); /* page-bg disc so each front mark cleanly cuts the one behind it */
+  border: 1px solid var(--ns-line);
+  transition: border-color 120ms ease-out;
+}
+.stack-disc:not(:first-child) { margin-left: -9px; }
+.stack-disc:nth-child(1) { z-index: 3; }
+.stack-disc:nth-child(2) { z-index: 2; }
+.stack-disc:nth-child(3) { z-index: 1; }
+.stack-ico { width: 14px; height: 14px; color: var(--ns-bone); }
+.model-stack:hover .stack-disc { border-color: var(--ns-muted); }
 
 .home-fine { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ns-faint); }
 
@@ -886,6 +904,7 @@ button:disabled { cursor: not-allowed; }
 /* the bold lead-in word of a bullet (e.g. "A token hash.") — bone, not acid, so the list stays calm.
    Shared by the legal lists and the about page's how-it-works steps (a deliberate, calm echo). */
 .lead-term { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
+.lead-term.acid { color: var(--ns-acid); }
 
 /* calm prose line — a plain bone paragraph, no markers/acid. Used by the 404 body and the error boundary. */
 .about-copy { margin: 0 0 14px; color: var(--ns-bone); font-size: 15px; line-height: 1.65; }

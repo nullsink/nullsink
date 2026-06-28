@@ -8,10 +8,10 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 // never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
 // (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
-// <a> navigations are unaffected by the strict CSP. `wide` widens the shell for the two-column landing.
-export function Layout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+// <a> navigations are unaffected by the strict CSP.
+export function Layout({ children }: { children: ReactNode }) {
   return (
-    <div className={"shell" + (wide ? " wide" : "")}>
+    <div className="shell">
       <header className="bar">
         <a className="brand" href="/" aria-label="nullsink home">
           <Wordmark />

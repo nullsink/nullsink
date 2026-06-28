@@ -11,11 +11,11 @@ export function Terms() {
           <span className="hl danger">Refunds aren&apos;t possible</span>; payment is final.
         </li>
         <li>
-          <span className="lead-term">Credit is for API use only</span>; it can&apos;t be cashed out or
+          <span className="lead-term acid">Credit is for API use only</span>; it can&apos;t be cashed out or
           transferred.
         </li>
         <li>
-          Each address is single-use; <span className="lead-term">pay the full amount in one transaction</span>.
+          Each address is single-use; <span className="lead-term acid">pay the full amount in one transaction</span>.
         </li>
         <li>
           <span className="hl danger">Lose your key and the credit is gone</span>.

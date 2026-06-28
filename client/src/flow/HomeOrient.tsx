@@ -2,7 +2,7 @@ import { Ns, AnthropicMark, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { Terms } from "./Terms.tsx";
 import { BUY_MAX_USD, BUY_MIN_USD } from "../lib/api.ts";
 
-// The landing's orient column (right of the buy card): the pitch, the providers + service status, and the
+// The landing's orient column (right of the buy card): the pitch, the models + service status, and the
 // terms. Static — no fetch, prerenders and reads with JS off. Unmounts once a purchase is in flight (see
 // App.tsx). The status rows are plain copy, not provider data — so they can't drift.
 export function HomeOrient() {
@@ -10,16 +10,24 @@ export function HomeOrient() {
     <aside className="home-orient">
       <p className="home-intro">
         <Ns /> is an API proxy for frontier and open-weight models. Buy a prepaid key here, then point your
-        own tools at it. No sign-up, nothing to log in to.
+        own tools at it. No sign-up.
       </p>
 
       <dl className="avail">
         <div className="avail-row">
-          <dt>Providers</dt>
-          <dd className="prov-marks">
-            <AnthropicMark className="prov-mark" />
-            <OpenAiMark className="prov-mark" />
-            <TinfoilMark className="prov-mark" />
+          <dt>Models</dt>
+          <dd>
+            <a className="model-stack" href="/models/" aria-label="supported models">
+              <span className="stack-disc">
+                <TinfoilMark className="stack-ico" />
+              </span>
+              <span className="stack-disc">
+                <AnthropicMark className="stack-ico" />
+              </span>
+              <span className="stack-disc">
+                <OpenAiMark className="stack-ico" />
+              </span>
+            </a>
           </dd>
         </div>
         <div className="avail-row">
