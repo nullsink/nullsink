@@ -2,8 +2,8 @@ import { Ns, AnthropicMark, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { Terms } from "./Terms.tsx";
 import { BUY_MAX_USD, BUY_MIN_USD } from "../lib/api.ts";
 
-// The landing's orient column (right of the buy card): the pitch, the models + service status, and the
-// terms. Static — no fetch, prerenders and reads with JS off. Unmounts once a purchase is in flight (see
+// The landing's orient column (right of the buy card): the pitch, the terms, then the models + service
+// status. Static — no fetch, prerenders and reads with JS off. Unmounts once a purchase is in flight (see
 // App.tsx). The status rows are plain copy, not provider data — so they can't drift.
 export function HomeOrient() {
   return (
@@ -13,11 +13,17 @@ export function HomeOrient() {
         own tools at it. No sign-up.
       </p>
 
+      <Terms />
+
       <dl className="avail">
         <div className="avail-row">
-          <dt>Models</dt>
+          <dt>
+            <a className="model-link" href="/models/">
+              models
+            </a>
+          </dt>
           <dd>
-            <a className="model-stack" href="/models/" aria-label="supported models">
+            <span className="model-stack" aria-hidden="true">
               <span className="stack-disc">
                 <TinfoilMark className="stack-ico" />
               </span>
@@ -27,7 +33,7 @@ export function HomeOrient() {
               <span className="stack-disc">
                 <OpenAiMark className="stack-ico" />
               </span>
-            </a>
+            </span>
           </dd>
         </div>
         <div className="avail-row">
@@ -45,8 +51,6 @@ export function HomeOrient() {
           </dd>
         </div>
       </dl>
-
-      <Terms />
 
       <p className="home-fine">
         Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase while we scale. Brief outages may be

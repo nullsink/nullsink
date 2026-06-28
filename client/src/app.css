@@ -103,6 +103,9 @@ button:disabled { cursor: not-allowed; }
   grid-template-columns: 1fr;
 }
 .home-buy { min-width: 0; }
+/* the column is already placed by the grid + .home margin; the form's own .section top-margin would push the
+   left column ~40px below the orient column (misaligned tops). Zero it inside the home. */
+.home-buy .section { margin-top: 0; }
 
 /* the orient column. */
 .home-orient { min-width: 0; display: flex; flex-direction: column; gap: 28px; }
@@ -126,7 +129,10 @@ button:disabled { cursor: not-allowed; }
 .avail-row dd.on .avail-dot { background: var(--ns-acid); }
 .avail-row dd.soon { color: var(--ns-muted); }
 .avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
-/* the Models row: overlapping circular discs (like the coin stack), linking to /models. First disc on top. */
+/* the models row: a "models" text link, plus overlapping circular discs (the coin-stack pattern) as a
+   decorative provider cue. First disc on top. */
+.model-link { color: var(--ns-bone); text-decoration: underline; text-underline-offset: 3px; transition: color 120ms ease-out; }
+.model-link:hover { color: var(--ns-acid); }
 .model-stack { display: inline-flex; align-items: center; }
 .stack-disc {
   position: relative;
@@ -145,7 +151,6 @@ button:disabled { cursor: not-allowed; }
 .stack-disc:nth-child(2) { z-index: 2; }
 .stack-disc:nth-child(3) { z-index: 1; }
 .stack-ico { width: 14px; height: 14px; color: var(--ns-bone); }
-.model-stack:hover .stack-disc { border-color: var(--ns-muted); }
 
 .home-fine { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ns-faint); }
 
