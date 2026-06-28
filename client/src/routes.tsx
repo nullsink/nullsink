@@ -71,7 +71,7 @@ export const ROUTES: Route[] = [
     url: `${PROD}/models/`,
     title: "nullsink: supported models",
     description:
-      "Models you can call through the nullsink proxy, grouped by who can read your text: open-weight models in a sealed enclave (Tinfoil), and frontier models from Anthropic and OpenAI under a no-logs policy. Catalogue derived from models.dev.",
+      "Models you can call through the nullsink proxy, grouped by provider. Catalogue derived from models.dev.",
     Component: Models,
   },
   {
