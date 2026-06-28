@@ -118,9 +118,6 @@ export function Models() {
             words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
         <div className="trust">
           <div className="trust-copy">
-            <p className="trust-q">
-              <span className="hl">who can read your messages</span>
-            </p>
             <ul className="trust-points">
               <li className="lead">nullsink strips your identity.</li>
               <li>Frontier providers still process your text.</li>

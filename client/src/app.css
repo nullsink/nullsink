@@ -696,8 +696,6 @@ button:disabled { cursor: not-allowed; }
    enclave} diagram. The diagram is decorative (aria-hidden); the lede carries the meaning. */
 .trust { margin-top: 26px; display: flex; gap: 36px; align-items: center; flex-wrap: wrap; }
 .trust-copy { flex: 1; min-width: 230px; }
-.trust-q { margin: 0 0 16px; }
-.trust-q .hl { font-size: 14px; letter-spacing: 0.01em; padding: 0.14em 0.45ch; }
 /* the lede as a dash-bullet list (design-system dash list): one claim per line, all in muted. */
 .trust-points { list-style: none; margin: 0; padding: 0; max-width: 42ch; display: flex; flex-direction: column; gap: 10px; }
 .trust-points li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ns-bone); }
