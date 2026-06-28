@@ -387,6 +387,26 @@ button:disabled { cursor: not-allowed; }
 }
 .check-line { margin-top: 16px; font-size: 14px; color: var(--ns-bone); }
 .check-line.none { color: var(--ns-muted); }
+
+/* the inline balance check: a small bordered button + the result beside it. */
+.balance-check { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 14px; }
+.balance-check .check-line { margin-top: 0; }
+.check-btn {
+  flex: none;
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+  background: transparent;
+  border: 1px solid var(--ns-line);
+  padding: 6px 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease-out, color 120ms ease-out;
+}
+.check-btn:hover { border-color: var(--ns-muted); color: var(--ns-bone); }
+.check-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
+.check-btn:disabled { color: var(--ns-faint); cursor: not-allowed; }
 .delta { color: var(--ns-muted); font-size: 18px; font-weight: 400; margin-left: 8px; }
 
 /* ---- notice strip (errors, register C) ---------------------------------- */

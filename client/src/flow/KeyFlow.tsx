@@ -259,27 +259,26 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
               setDidCheck(false);
               setCheckError(false);
             }}
-            onBlur={() => {
-              if (pasteValid && !didCheck && !checking) check();
-            }}
             aria-label="your 0sink_ token — leave blank to mint a new key"
           />
           {paste && !pasteValid ? (
             <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
           ) : pasteValid ? (
-            checking ? (
-              <div className="check-line">checking…</div>
-            ) : didCheck ? (
-              checkError ? (
-                <div className="check-line none">couldn't check right now, try again in a moment</div>
-              ) : (
-                <div className={"check-line" + (checkedBalance === null ? " none" : "")}>
-                  {checkedBalance !== null
-                    ? `balance: ${usd(checkedBalance)}`
-                    : "no balance for this key. a deposit can take ~20-45 min to confirm"}
-                </div>
-              )
-            ) : null
+            <div className="balance-check">
+              <button type="button" className="check-btn" disabled={checking} onClick={check}>
+                {checking ? "checking…" : "check balance"}
+              </button>
+              {didCheck &&
+                (checkError ? (
+                  <span className="check-line none">couldn't check, try again in a moment</span>
+                ) : (
+                  <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
+                    {checkedBalance !== null
+                      ? `balance: ${usd(checkedBalance)}`
+                      : "no balance for this key. deposits confirm in ~20-45 min"}
+                  </span>
+                ))}
+            </div>
           ) : (
             <p className="hint">Leave blank to mint a fresh key in your browser.</p>
           )}
