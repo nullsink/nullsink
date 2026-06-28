@@ -433,7 +433,7 @@ button:disabled { cursor: not-allowed; }
   cursor: pointer;
   transition: border-color 120ms ease-out, color 120ms ease-out;
 }
-.check-btn:hover { border-color: var(--ns-muted); color: var(--ns-bone); }
+.check-btn:not(:disabled):hover { border-color: var(--ns-muted); color: var(--ns-bone); }
 .check-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
 .check-btn:disabled { color: var(--ns-faint); cursor: not-allowed; }
 .delta { color: var(--ns-muted); font-size: 18px; font-weight: 400; margin-left: 8px; }
@@ -700,9 +700,9 @@ button:disabled { cursor: not-allowed; }
 .trust-q .hl { font-size: 14px; letter-spacing: 0.01em; padding: 0.14em 0.45ch; }
 /* the lede as a dash-bullet list (design-system dash list): one claim per line, all in muted. */
 .trust-points { list-style: none; margin: 0; padding: 0; max-width: 42ch; display: flex; flex-direction: column; gap: 10px; }
-.trust-points li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ns-muted); }
+.trust-points li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ns-bone); }
 .trust-points li::before { content: "–"; position: absolute; left: 0; color: var(--ns-muted); }
-.trust-points li.lead { color: var(--ns-bone); }
+.trust-points li.lead { color: var(--ns-acid); }
 .trust-path { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .trust-path .node {
   display: inline-flex;

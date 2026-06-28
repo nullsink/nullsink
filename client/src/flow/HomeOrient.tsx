@@ -16,7 +16,7 @@ export function HomeOrient() {
       <p className="note">
         <span className="marker" aria-hidden="true">!</span>
         <span>
-          Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase while we scale. Brief outages may be
+          Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase. Brief outages may be
           frequent.
         </span>
       </p>
