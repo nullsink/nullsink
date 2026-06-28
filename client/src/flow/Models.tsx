@@ -1,122 +1,183 @@
-import type { ComponentType } from "react";
+import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { Ns, OpenAiMark, AnthropicMark, GeminiMark, KimiMark, DeepSeekMark, MistralMark } from "../ui.tsx";
+import { PulseMark, AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
-import { MARKUP_PCT } from "../lib/api.ts";
 
-// The supported-models page: provider rows with the model list behind a native <details> disclosure.
-// The live providers come from the vendored src/models.json snapshot (see sync-models.ts) — no fetch, no
-// state, and <details> is plain HTML, so the page still prerenders and reads (and expands) with JS off.
-// Collapsed it stays a provider-level summary; expanded it answers "is MY model on here?" without a model
-// dump dominating the page. On-roadmap providers are marked coming soon. No pricing: the per-model rate is
-// the upstream rate × margin, locked server-side, so it lives with the buy flow.
+// The supported-models page. Models are grouped by the question that actually matters for a privacy proxy:
+// WHO CAN READ YOUR MESSAGES. A sealed TEE (Tinfoil) can't read your text at all — privacy by silicon; a
+// frontier provider (Anthropic, OpenAI) still processes it, under a no-logs policy — privacy by policy. The
+// ids come from the vendored models.json snapshot (sync-models.ts ← core prices.json, newest-first), so the
+// page can't list a model the proxy would reject. Each id is a copy-on-click chip. The page prerenders and
+// reads with JS off: it ships the preview chips as plain text; the "all N models" reveal needs JS.
 
-// provider id → inline logo mark (currentColor, so it takes the row's text color).
+type Provider = (typeof models.providers)[number];
+
+const byId = new Map<string, Provider>(models.providers.map((p) => [p.id, p]));
+
+// provider id → inline logo mark. The data carries ids + labels; this adds the mark the JSON can't.
 const LOGO: Record<string, ComponentType<{ className?: string }>> = {
+  tinfoil: TinfoilMark,
   anthropic: AnthropicMark,
   openai: OpenAiMark,
-  google: GeminiMark,
 };
 
-// Providers on the roadmap but not yet wired up: shown dimmed so the page sets expectations. They aren't
-// in models.json (the proxy doesn't price them yet); move one here → live by adding it to sync-models.ts.
-const COMING_SOON = [{ id: "google", label: "Google Gemini" }];
-
-// Models that are listed/priced but that the live upstream 404s for our account right now (e.g. a model in
-// staged rollout we don't have access to yet). Shown but flagged, so the page doesn't promise a route that
-// 404s. DISPLAY-ONLY: the proxy still prices these (core prices.json), so a request gets a clean refund on
-// the upstream 404 — gating them at the proxy is a separate core change (cli/sync-prices.ts ANTHROPIC_RETIRED).
-// Flagged RED at the operator's request: a deliberate exception to the money-only red reservation noted in
-// app.css (red elsewhere means "this can cost you"); here it means "down".
+// Listed/priced but the live upstream 404s for our account right now (a staged rollout we don't have access
+// to yet). Shown, flagged "down" in the danger register, still copyable — the proxy prices it, so a request
+// gets a clean refund on the 404. DISPLAY-ONLY: gating it at the proxy is a separate core change.
 const UNAVAILABLE = new Set(["claude-fable-5"]);
 
-function Logo({ id }: { id: string }) {
-  const Mark = LOGO[id];
-  return Mark ? <Mark className="provider-logo" /> : <span className="provider-logo" aria-hidden="true" />;
+// Chips shown before the "all N models" reveal. A card with more than this collapses to the newest PREVIEW;
+// the rest expand in place below (the toggle stays under the chips, so the list never splits around it).
+const PREVIEW = 6;
+
+// The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
+// provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
+const TIERS = [
+  { key: "sealed", label: "Open weight", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
+  {
+    key: "policy",
+    label: "Closed weight",
+    tagline: "privacy by policy",
+    sealed: false,
+    providers: ["anthropic", "openai"],
+  },
+] as const;
+
+// On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
+const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
+  { id: "groq", name: "Groq", meta: "open-weight", Logo: GroqMark },
+  { id: "gemini", name: "Google Gemini", meta: "frontier", Logo: GeminiMark },
+];
+
+function Chips({ ids }: { ids: string[] }) {
+  return (
+    <div className="model-chips">
+      {ids.map((id) => (
+        <ModelChip key={id} id={id} down={UNAVAILABLE.has(id)} />
+      ))}
+    </div>
+  );
+}
+
+function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolean }) {
+  const [open, setOpen] = useState(false);
+  const Logo = LOGO[provider.id];
+  const collapses = provider.models.length > PREVIEW;
+  const visible = open || !collapses ? provider.models : provider.models.slice(0, PREVIEW);
+  return (
+    <div className={"pcard" + (sealed ? " sealed" : "")}>
+      <div className="pcard-rail" aria-hidden="true" />
+      <div className="pcard-body">
+        <div className="pcard-head">
+          {Logo && <Logo className="pcard-logo" />}
+          <div className="pcard-name">
+            <span className="pcard-title">{provider.label}</span>
+            <span className="pcard-count">{provider.models.length} models</span>
+          </div>
+          <div className="pcard-tags">
+            {sealed && (
+              <span className="pill tee">
+                <SquareGlyph sealed className="tee-mark" />
+                TEE-attested
+              </span>
+            )}
+            <span className="pill avail">available</span>
+          </div>
+        </div>
+        <Chips ids={visible} />
+        {collapses && (
+          <button type="button" className="model-more-btn" onClick={() => setOpen((o) => !o)}>
+            {open ? "show less" : `all ${provider.models.length} models`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function Models() {
   return (
     <Layout>
-      <section className="section">
+      <section className="section models">
         <h1 className="page-h1">Supported models</h1>
 
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            The providers the <Ns /> proxy routes to. The list is derived from{" "}
-            <a href="https://models.dev" {...EXT}>
-              models.dev
-            </a>
-            .
-          </span>
-        </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">$</span>
-          <span>
-            Usage is billed at the provider&apos;s published per-token rate. The ~{MARKUP_PCT}% markup is paid
-            once, when you buy credit — <a href="/start/">pricing details</a>.
-          </span>
-        </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">+</span>
-          <span>More providers and models are added as capacity allows.</span>
-        </p>
-
-        <ul className="providers">
-          {models.providers.map((p) => (
-            <li className="provider" key={p.id}>
-              <details className="provider-details">
-                <summary className="provider-row">
-                  <Logo id={p.id} />
-                  <div className="provider-main">
-                    <span className="provider-name">{p.label}</span>
-                    <span className="provider-meta">{p.models.length} models</span>
-                  </div>
-                  <span className="provider-tag">available</span>
-                  <span className="provider-toggle" aria-hidden="true" />
-                </summary>
-                <ul className="provider-models">
-                  {p.models.map((id) => (
-                    <li key={id} className={UNAVAILABLE.has(id) ? "unavailable" : undefined}>
-                      {id}
-                      {UNAVAILABLE.has(id) && <span className="model-tag-unavailable">unavailable</span>}
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </li>
-          ))}
-          {COMING_SOON.map((p) => (
-            <li className="provider soon" key={p.id}>
-              <div className="provider-row">
-                <Logo id={p.id} />
-                <div className="provider-main">
-                  <span className="provider-name">{p.label}</span>
-                  <span className="provider-meta">not yet available</span>
-                </div>
-                <span className="provider-tag soon">coming soon</span>
-              </div>
-            </li>
-          ))}
-          {/* Open-source / open-weight tier on the roadmap: three overlapping model marks instead of one
-              provider logo, to signal breadth. Self-hosted is a future direction (see the competitive note). */}
-          <li className="provider soon">
-            <div className="provider-row">
-              <span className="provider-logos" aria-hidden="true">
-                <span className="stack-disc"><DeepSeekMark className="stack-ico" /></span>
-                <span className="stack-disc"><KimiMark className="stack-ico" /></span>
-                <span className="stack-disc"><MistralMark className="stack-ico" /></span>
+        {/* The trust framing: the "who can read your messages" lede beside a static you → nullsink →
+            {frontier | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
+            words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
+        <div className="trust">
+          <div className="trust-copy">
+            <p className="trust-q">
+              <span className="hl">who can read your messages</span>
+            </p>
+            <ul className="trust-points">
+              <li className="lead">Every route strips your identity — no account, no logs.</li>
+              <li>Frontier providers still process your text.</li>
+              <li>A sealed enclave can&apos;t read it at all.</li>
+            </ul>
+          </div>
+          <div className="trust-path" aria-hidden="true">
+            <span className="node">you</span>
+            <span className="wire" />
+            <span className="node sink">
+              <PulseMark className="sink-mark" />
+              <span className="node-cap">nullsink</span>
+            </span>
+            <span className="wire" />
+            <span className="trust-branch">
+              <span className="branch-row sealed">
+                <span className="wire" />
+                <span className="node sealed">
+                  <SquareGlyph sealed /> enclave · sealed
+                </span>
               </span>
-              <div className="provider-main">
-                <span className="provider-name">Open-source models</span>
-                <span className="provider-meta">self-hosted · not yet available</span>
+              <span className="branch-row">
+                <span className="wire" />
+                <span className="node">
+                  <SquareGlyph /> frontier · reads your text
+                </span>
+              </span>
+            </span>
+          </div>
+        </div>
+
+        {TIERS.map((tier) => {
+          const provs = tier.providers.map((id) => byId.get(id)).filter((p): p is Provider => p != null);
+          if (provs.length === 0) return null;
+          return (
+            <section className={"tier" + (tier.sealed ? " sealed" : "")} key={tier.key}>
+              <div className="tier-head">
+                <SquareGlyph sealed={tier.sealed} className="tier-mark" />
+                <span className="tier-label">{tier.label}</span>
+                <span className="tier-tag">{tier.tagline}</span>
               </div>
-              <span className="provider-tag soon">coming soon</span>
+              {provs.map((p) => (
+                <ProviderCard key={p.id} provider={p} sealed={tier.sealed} />
+              ))}
+            </section>
+          );
+        })}
+
+        <section className="tier roadmap">
+          <div className="roadmap-head">On the roadmap</div>
+          {ROADMAP.map(({ id, name, meta, Logo }) => (
+            <div className="rm-row" key={id}>
+              <Logo className="rm-logo" />
+              <div className="rm-name">
+                <span className="rm-title">{name}</span>
+                <span className="rm-meta">{meta}</span>
+              </div>
             </div>
-          </li>
-        </ul>
+          ))}
+        </section>
+
+        <p className="models-credit">
+          Catalogue derived from{" "}
+          <a href="https://models.dev" {...EXT}>
+            models.dev
+          </a>
+          .
+        </p>
       </section>
     </Layout>
   );

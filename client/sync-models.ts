@@ -19,11 +19,13 @@ const HERE = import.meta.dir;
 const PRICES = join(HERE, "../core/src/cost/prices.json");
 const OUT = join(HERE, "src/models.json");
 
-// Display order + label per provider. Anthropic first: the proxy is Anthropic-compatible at its core.
-// A provider absent from prices.json simply yields no group (filtered out below).
+// The providers to vendor, with display labels. This is just the data source; the /models page groups them
+// into trust tiers itself (see flow/Models.tsx). A provider absent from prices.json yields no group
+// (filtered out below), so a key here that the proxy doesn't price yet costs nothing.
 const PROVIDERS = [
   { key: "anthropic", label: "Anthropic" },
   { key: "openai", label: "OpenAI" },
+  { key: "tinfoil", label: "Tinfoil" },
 ];
 
 const prices = JSON.parse(readFileSync(PRICES, "utf8")) as Record<string, { provider: string }>;
@@ -38,10 +40,62 @@ function isDatedAlias(id: string): boolean {
   return m != null && priced.has(id.slice(0, m.index));
 }
 
+// Display order within a provider: a curated FAMILY rank (flagship → small) is the primary key, then newest
+// version first, then a variant tier (pro → base → mini → nano). Curated because a model's tier isn't in its
+// id or its price — Anthropic priced legacy Opus *above* the current one, and "claude-fable-5"'s version
+// would otherwise top the list. New versions sort themselves; only a brand-new family needs a line here.
+// Families not listed (and "fable") fall to the bottom; the /models preview shows the head of this order.
+const FAMILY: Record<string, string[]> = {
+  anthropic: ["claude-opus", "claude-sonnet", "claude-haiku"],
+  openai: ["gpt-5", "o4", "o3", "o1", "gpt-4.1", "gpt-4o", "gpt-4", "gpt-3"],
+  tinfoil: ["glm", "kimi", "gpt-oss-120b", "llama", "gemma", "gpt-oss"],
+};
+
+// First (longest) matching family prefix wins; an unlisted family sorts last.
+function familyRank(id: string, fams: string[]): number {
+  let rank = fams.length;
+  let len = -1;
+  fams.forEach((p, i) => {
+    if (id.startsWith(p) && p.length > len) {
+      rank = i;
+      len = p.length;
+    }
+  });
+  return rank;
+}
+
+// Variant tier inside one version: pro → base → codex* → chat → mini → nano.
+function variantRank(id: string): number {
+  if (id.includes("pro")) return 0;
+  if (id.includes("codex")) return id.includes("max") ? 2 : id.includes("mini") ? 4 : 3;
+  if (id.includes("chat")) return 5;
+  if (id.includes("mini")) return 6;
+  if (id.includes("nano")) return 7;
+  return 1; // base
+}
+
+function ordered(modelIds: string[], fams: string[]): string[] {
+  return [...modelIds].sort((a, b) => {
+    const byFamily = familyRank(a, fams) - familyRank(b, fams);
+    if (byFamily !== 0) return byFamily;
+    const na = a.match(/\d+/g)?.map(Number) ?? [];
+    const nb = b.match(/\d+/g)?.map(Number) ?? [];
+    for (let i = 0; i < Math.max(na.length, nb.length); i++) {
+      const x = na[i] ?? -1;
+      const y = nb[i] ?? -1;
+      if (x !== y) return y - x; // newer version first
+    }
+    return variantRank(a) - variantRank(b);
+  });
+}
+
 const providers = PROVIDERS.map(({ key, label }) => ({
   id: key,
   label,
-  models: ids.filter((id) => prices[id].provider === key && !isDatedAlias(id)).sort(),
+  models: ordered(
+    ids.filter((id) => prices[id].provider === key && !isDatedAlias(id)),
+    FAMILY[key] ?? [],
+  ),
 })).filter((p) => p.models.length > 0);
 
 const total = providers.reduce((n, p) => n + p.models.length, 0);
