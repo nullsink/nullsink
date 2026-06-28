@@ -34,10 +34,10 @@ const PREVIEW = 6;
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
-  { key: "sealed", label: "Open weight", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
+  { key: "sealed", label: "TEE-attested", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Frontier",
+    label: "Proprietary",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
@@ -47,7 +47,7 @@ const TIERS = [
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
   { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
-  { id: "gemini", name: "Google Gemini", meta: "frontier", Logo: GeminiMark },
+  { id: "gemini", name: "Google Gemini", meta: "proprietary", Logo: GeminiMark },
 ];
 
 function Chips({ ids }: { ids: string[] }) {
@@ -79,7 +79,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
             {sealed && (
               <span className="pill tee">
                 <SquareGlyph sealed className="tee-mark" />
-                TEE-attested
+                Open weight
               </span>
             )}
             <span className="pill avail">available</span>
