@@ -1,5 +1,5 @@
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { DISCORD_URL, EXT, MATRIX_URL } from "../lib/links.ts";
 import { MARGIN, MARKUP_PCT, usd } from "../lib/api.ts";
 
@@ -47,6 +47,17 @@ const OPENAI_CURL = `curl https://nullsink.is/v1/chat/completions \\
 const OPENAI_ENV = `export OPENAI_BASE_URL=https://nullsink.is/v1
 export OPENAI_API_KEY=0sink_YOUR_KEY`;
 
+// Tinfoil — open-weight models on the same OpenAI-compatible surface (same base url + Bearer key as OpenAI),
+// so the only thing that changes from the OpenAI tab is the model id.
+const TINFOIL_CURL = `curl https://nullsink.is/v1/chat/completions \\
+  -H "authorization: Bearer 0sink_YOUR_KEY" \\
+  -H "content-type: application/json" \\
+  -d '{
+    "model": "glm-5-2",
+    "max_completion_tokens": 1024,
+    "messages": [{"role": "user", "content": "hello"}]
+  }'`;
+
 const BALANCE_CURL = `curl https://nullsink.is/balance -H "x-api-key: 0sink_YOUR_KEY"
 # -> {"balance_usd": 20}`;
 
@@ -93,6 +104,7 @@ export function Start() {
               Anthropic is the default. */}
           <input className="useit-radio" type="radio" name="start-tab" id="start-anthropic" defaultChecked />
           <input className="useit-radio" type="radio" name="start-tab" id="start-openai" />
+          <input className="useit-radio" type="radio" name="start-tab" id="start-tinfoil" />
           {/* No role="tablist": these are honestly labelled radios (focusable, arrow-key switchable). */}
           <div className="useit-tablist">
             <label className="useit-tab" htmlFor="start-anthropic">
@@ -100,6 +112,9 @@ export function Start() {
             </label>
             <label className="useit-tab" htmlFor="start-openai">
               <OpenAiMark className="useit-tab-logo" /> OpenAI
+            </label>
+            <label className="useit-tab" htmlFor="start-tinfoil">
+              <TinfoilMark className="useit-tab-logo" /> Tinfoil
             </label>
           </div>
 
@@ -137,6 +152,22 @@ export function Start() {
               <KvRow k="endpoints" values={["/chat/completions", "/responses"]} />
             </dl>
             <CodeBlock label="curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.2"]} />
+            <CodeBlock label="any openai sdk · env" code={OPENAI_ENV} highlights={["0sink_YOUR_KEY"]} />
+          </div>
+
+          <div className="useit-panel" id="start-panel-tinfoil">
+            <p className="section-copy">
+              Open-weight models (gpt-oss, Llama, GLM, Kimi, Gemma) run inside a sealed enclave that
+              can&apos;t read your prompts. They speak the same OpenAI Chat Completions API: same base url and
+              Bearer key as the OpenAI tab, just an open-weight model id (browse the{" "}
+              <a href="/models/">supported models</a>).
+            </p>
+            <dl className="kv">
+              <KvRow k="base url" values={["https://nullsink.is/v1"]} />
+              <KvRow k="auth header" values={["Authorization: Bearer"]} />
+              <KvRow k="endpoint" values={["/chat/completions"]} />
+            </dl>
+            <CodeBlock label="curl" code={TINFOIL_CURL} highlights={["0sink_YOUR_KEY", "glm-5-2"]} />
             <CodeBlock label="any openai sdk · env" code={OPENAI_ENV} highlights={["0sink_YOUR_KEY"]} />
           </div>
         </div>

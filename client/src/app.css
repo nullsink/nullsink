@@ -522,17 +522,20 @@ button:disabled { cursor: not-allowed; }
 .useit-tab-logo { width: 17px; height: 17px; flex: none; }
 .useit-tab + .useit-tab { border-left: 1px solid var(--ns-line); }
 #start-anthropic:checked ~ .useit-tablist label[for="start-anthropic"],
-#start-openai:checked ~ .useit-tablist label[for="start-openai"] {
+#start-openai:checked ~ .useit-tablist label[for="start-openai"],
+#start-tinfoil:checked ~ .useit-tablist label[for="start-tinfoil"] {
   background: var(--ns-acid);
   color: var(--ns-ink);
   font-weight: var(--ns-weight-display);
 }
 /* keyboard focus ring on a tab when its (hidden) radio is focused */
 #start-anthropic:focus-visible ~ .useit-tablist label[for="start-anthropic"],
-#start-openai:focus-visible ~ .useit-tablist label[for="start-openai"] { outline: 2px solid var(--ns-acid); outline-offset: -2px; }
+#start-openai:focus-visible ~ .useit-tablist label[for="start-openai"],
+#start-tinfoil:focus-visible ~ .useit-tablist label[for="start-tinfoil"] { outline: 2px solid var(--ns-acid); outline-offset: -2px; }
 .useit-panel { display: none; }
 #start-anthropic:checked ~ #start-panel-anthropic,
-#start-openai:checked ~ #start-panel-openai { display: block; }
+#start-openai:checked ~ #start-panel-openai,
+#start-tinfoil:checked ~ #start-panel-tinfoil { display: block; }
 
 .kv { margin-top: 16px; }
 .kv dd { margin: 0; } /* reset the UA dd indent — the row is laid out with flex */
@@ -767,9 +770,6 @@ button:disabled { cursor: not-allowed; }
 .rm-title { font-size: 15px; font-weight: var(--ns-weight-display); letter-spacing: -0.03em; color: var(--ns-muted); }
 .rm-meta { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 
-/* catalogue attribution — fine print; models.dev is the upstream source of the list. */
-.models-credit { margin-top: 28px; font-size: 12px; color: var(--ns-faint); }
-.models-credit a { color: var(--ns-muted); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---- legal pages (privacy, terms) — long-form prose -------------------- */
 /* Calm by design: the acid accent is reserved for the brand wordmark (<Ns/>) and the lead-in term of each
