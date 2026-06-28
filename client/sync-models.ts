@@ -19,11 +19,13 @@ const HERE = import.meta.dir;
 const PRICES = join(HERE, "../core/src/cost/prices.json");
 const OUT = join(HERE, "src/models.json");
 
-// Display order + label per provider. Anthropic first: the proxy is Anthropic-compatible at its core.
-// A provider absent from prices.json simply yields no group (filtered out below).
+// The providers to vendor, with display labels. This is just the data source; the /models page groups them
+// into trust tiers itself (see flow/Models.tsx). A provider absent from prices.json yields no group
+// (filtered out below), so a key here that the proxy doesn't price yet costs nothing.
 const PROVIDERS = [
   { key: "anthropic", label: "Anthropic" },
   { key: "openai", label: "OpenAI" },
+  { key: "tinfoil", label: "Tinfoil" },
 ];
 
 const prices = JSON.parse(readFileSync(PRICES, "utf8")) as Record<string, { provider: string }>;
@@ -38,10 +40,14 @@ function isDatedAlias(id: string): boolean {
   return m != null && priced.has(id.slice(0, m.index));
 }
 
+// Descending (newest-first): the /models cards collapse to a small preview, so the first chips need to be
+// the current flagships, not the retired ids an ascending sort would surface (claude-fable-5, gpt-3.5-turbo).
+// Lexicographic-descending is enough for these id schemes — within a family the higher version sorts first,
+// and the oldest/retired ids fall to the bottom (behind the "all N models" toggle).
 const providers = PROVIDERS.map(({ key, label }) => ({
   id: key,
   label,
-  models: ids.filter((id) => prices[id].provider === key && !isDatedAlias(id)).sort(),
+  models: ids.filter((id) => prices[id].provider === key && !isDatedAlias(id)).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)),
 })).filter((p) => p.models.length > 0);
 
 const total = providers.reduce((n, p) => n + p.models.length, 0);

@@ -18,6 +18,37 @@ export function Mark({ className }: { className?: string }) {
   );
 }
 
+// The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
+// phase so the funnel breathes instead of blinking in unison. The offsets are mulberry32(seed) * 2.2 from
+// the pattern generator — frozen here for SEED 4817, so it's deterministic and needs no runtime RNG. To
+// reseed: re-run the generator and paste the new delays. Decorative motion → yields to prefers-reduced-motion
+// (see .pulse-mark in app.css). Separate from <Mark> so the static brand wordmark never animates.
+const PULSE_GEO = [
+  { x: 0, y: 0, w: 70, h: 70 },
+  { x: 140, y: 0, w: 70, h: 70 },
+  { x: 280, y: 0, w: 70, h: 70 },
+  { x: 70, y: 70, w: 70, h: 70 },
+  { x: 210, y: 70, w: 70, h: 70 },
+  { x: 140, y: 140, w: 70, h: 70 },
+  { x: 0, y: 280, w: 350, h: 70 },
+];
+const PULSE_DELAYS = ["2.19s", "0.76s", "2.16s", "1.42s", "1.10s", "1.87s", "0.92s"]; // SEED 4817
+export function PulseMark({ className }: { className?: string }) {
+  return (
+    <svg
+      className={"pulse-mark" + (className ? " " + className : "")}
+      viewBox="0 0 350 350"
+      role="img"
+      aria-label="nullsink mark"
+      fill="currentColor"
+    >
+      {PULSE_GEO.map((g, i) => (
+        <rect key={i} x={g.x} y={g.y} width={g.w} height={g.h} style={{ animationDelay: PULSE_DELAYS[i] }} />
+      ))}
+    </svg>
+  );
+}
+
 // Provider marks for the /models page. Single-path, monochrome, fill=currentColor (viewBox 0 0 40 40) —
 // sourced from models.dev's logo set and inlined (NOT <img>) so they inherit `color` and stay on a
 // self-origin page under CSP `default-src 'self'`. Same inline + currentColor treatment as the brand Mark.
@@ -45,30 +76,30 @@ export function GeminiMark({ className }: { className?: string }) {
   );
 }
 
-// Open-weight model marks for the /models "coming soon" stack (Simple Icons, CC0; viewBox 0 0 24 24) —
-// same inline + currentColor treatment as the provider marks above. The Moonshot AI mark stands in for Kimi.
-export function KimiMark({ className }: { className?: string }) {
+export function GroqMark({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="Kimi" fill="currentColor">
-      <path d="m1.053 16.91 9.538 2.55a21 20.981 0 0 0 .06 2.031l5.956 1.592a12 11.99 0 0 1-15.554-6.172m-1.02-5.79 11.352 3.035a21 20.981 0 0 0-.469 2.01l10.817 2.89a12 11.99 0 0 1-1.845 2.004L.658 15.918a12 11.99 0 0 1-.625-4.796m1.593-5.146L13.573 9.17a21 20.981 0 0 0-1.01 1.874l11.297 3.02a21 20.981 0 0 1-.67 2.362l-11.55-3.087L.125 10.26a12 11.99 0 0 1 1.499-4.285ZM6.067 1.58l11.285 3.016a21 20.981 0 0 0-1.688 1.719l7.824 2.091a21 20.981 0 0 1 .513 2.664L2.107 5.218a12 11.99 0 0 1 3.96-3.638M21.68 4.866 7.222 1.003A12 11.99 0 0 1 21.68 4.866" />
+    <svg className={className} viewBox="0 0 40 40" role="img" aria-label="Groq" fill="currentColor">
+      <path d="M20.056 4.50022C14.0839 4.44597 9.20616 9.15015 9.15036 15.0106C9.09611 20.8726 13.8855 25.6621 19.8576 25.7163H23.6085V21.7391H20.056C16.3252 21.7825 13.2671 18.8468 13.2237 15.1827C13.1787 11.5216 16.1702 8.52086 19.901 8.47746H20.056C23.7868 8.47746 26.8108 11.4457 26.8216 15.1083V24.8809C26.8216 28.5109 23.8085 31.4683 20.1211 31.5132C18.3617 31.5007 16.6759 30.8049 15.42 29.5726L12.551 32.3905C14.5529 34.3571 17.239 35.4715 20.0451 35.4998H20.1877C26.0823 35.413 30.8175 30.7212 30.85 24.9351V14.8603C30.7059 9.0928 25.9165 4.50022 20.056 4.50022Z" />
     </svg>
   );
 }
 
-export function DeepSeekMark({ className }: { className?: string }) {
+// Tinfoil's mark (a crumpled-foil triangle; viewBox 0 0 960 960) — same inline + currentColor treatment as
+// the provider marks above, so it inherits the card's text colour and stays on a self-origin page under CSP.
+export function TinfoilMark({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="DeepSeek" fill="currentColor">
-      <path d="M23.748 4.651c-.254-.124-.364.113-.512.233-.051.04-.094.09-.137.137-.372.397-.806.657-1.373.626-.829-.046-1.537.214-2.163.848-.133-.782-.575-1.248-1.247-1.548-.352-.155-.708-.311-.955-.65-.172-.24-.219-.509-.305-.774-.055-.16-.11-.323-.293-.35-.2-.031-.278.136-.356.276-.313.572-.434 1.202-.422 1.84.027 1.436.633 2.58 1.838 3.393.137.094.172.187.129.323-.082.28-.18.553-.266.833-.055.179-.137.218-.328.14a5.5 5.5 0 0 1-1.737-1.179c-.857-.828-1.631-1.743-2.597-2.46a12 12 0 0 0-.689-.47c-.985-.957.13-1.743.387-1.836.27-.098.094-.433-.778-.428-.872.003-1.67.295-2.687.685a3 3 0 0 1-.465.136 9.6 9.6 0 0 0-2.883-.101c-1.885.21-3.39 1.1-4.497 2.622C.082 8.776-.231 10.854.152 13.02c.403 2.284 1.568 4.175 3.36 5.653 1.857 1.533 3.997 2.284 6.438 2.14 1.482-.085 3.132-.284 4.994-1.86.47.234.962.328 1.78.398.629.058 1.235-.031 1.705-.129.735-.155.684-.836.418-.961-2.155-1.004-1.682-.595-2.112-.926 1.095-1.295 2.768-3.598 3.284-6.733.05-.346.115-.834.108-1.114-.004-.171.035-.238.23-.257a4.2 4.2 0 0 0 1.545-.475c1.397-.763 1.96-2.016 2.093-3.517.02-.23-.004-.467-.247-.588M11.58 18.168c-2.088-1.642-3.101-2.183-3.52-2.16-.39.024-.32.472-.234.763.09.288.207.487.371.74.114.167.192.416-.113.603-.673.416-1.842-.14-1.897-.168-1.361-.801-2.5-1.86-3.301-3.306-.775-1.393-1.225-2.888-1.299-4.482-.02-.385.094-.522.477-.592a4.7 4.7 0 0 1 1.53-.038c2.131.311 3.946 1.264 5.467 2.774.868.86 1.525 1.887 2.202 2.89.72 1.066 1.494 2.082 2.48 2.915.348.291.626.513.892.677-.802.09-2.14.109-3.055-.615zm1.001-6.44a.306.306 0 0 1 .415-.287.3.3 0 0 1 .113.074.3.3 0 0 1 .086.214c0 .17-.136.307-.308.307a.303.303 0 0 1-.306-.307m3.11 1.596c-.2.081-.4.151-.591.16a1.25 1.25 0 0 1-.798-.254c-.274-.23-.47-.358-.551-.758a1.7 1.7 0 0 1 .015-.588c.07-.327-.007-.537-.238-.727-.188-.156-.426-.199-.689-.199a.6.6 0 0 1-.254-.078.253.253 0 0 1-.114-.358 1 1 0 0 1 .192-.21c.356-.202.767-.136 1.146.016.352.144.618.408 1.001.782.392.451.462.576.685.915.176.264.336.536.446.848.066.194-.02.353-.25.45" />
+    <svg className={className} viewBox="0 0 960 960" role="img" aria-label="Tinfoil" fill="currentColor">
+      <path d="M955.4,718.23l-674.69,205.77L6.34,708.97,268.9,35.01l686.5,683.22ZM164.94,665.52l143.05,112.11,397.97-121.37-387.26-385.41-153.76,394.66Z" />
     </svg>
   );
 }
 
-export function MistralMark({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" role="img" aria-label="Mistral" fill="currentColor">
-      <path d="M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z" />
-    </svg>
-  );
+// The square glyph the /models tiers are built on: a hairline square = a frontier provider that reads your
+// text; `sealed` fills an inner square — the enclave/TEE mark, "can't read it at all". 1em + currentColor,
+// so it scales and tints to its context (a tier header, a status badge, the trust diagram). Decorative —
+// the visible text label always carries the meaning, so it's aria-hidden.
+export function SquareGlyph({ sealed = false, className }: { sealed?: boolean; className?: string }) {
+  return <span className={"sqg" + (sealed ? " sealed" : "") + (className ? " " + className : "")} aria-hidden="true" />;
 }
 
 // Coin marks for the pay-rail picker (Simple Icons, CC0; viewBox 0 0 24 24) — same inline + currentColor
@@ -152,6 +183,27 @@ export function Copy({ value, label = "copy", filled = false }: { value: string;
   return (
     <button type="button" className={"copy" + (filled ? " acid" : "") + (copied ? " copied" : "")} onClick={copy}>
       {copied ? "copied ✓" : label}
+    </button>
+  );
+}
+
+// A model id as a copy-on-click chip, for the /models cards: a click copies the exact id to paste into a
+// config or SDK call, with a brief ✓. `down` flags an id the proxy prices but the upstream currently 404s
+// for us — the danger register (a red tag + red-tinted border), still copyable since a call just refunds.
+// Copy needs JS; with it off the chip still reads as the plain id (and is selectable). Same copy mechanics
+// as <Copy>, so the "copied" acknowledgement and timing match.
+export function ModelChip({ id, down = false }: { id: string; down?: boolean }) {
+  const { copied, copy } = useCopy(id);
+  return (
+    <button
+      type="button"
+      className={"model-chip" + (down ? " down" : "") + (copied ? " copied" : "")}
+      onClick={copy}
+      aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
+    >
+      {id}
+      {down && <span className="model-chip-down">down</span>}
+      {copied && <span className="model-chip-ok" aria-hidden="true">✓</span>}
     </button>
   );
 }

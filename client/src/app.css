@@ -27,7 +27,10 @@ button:disabled { cursor: not-allowed; }
 
 /* ---- layout shell ------------------------------------------------------- */
 .shell {
-  max-width: 600px;
+  /* Widened from 600 to give the reference content (the /models tiers, the trust diagram) room to sit
+     side-by-side rather than wrap. Applied site-wide for now; the buy/start flows can take a narrower
+     per-page measure later if the wider column reads loose there. */
+  max-width: 760px;
   margin: 0 auto;
   padding: 0 20px 80px;
 }
@@ -569,110 +572,199 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: var(--ns-tracking-display);
 }
 
-/* ---- supported models page — provider-level cards (logo + count + status) ---- */
-.providers { list-style: none; margin: 26px 0 0; padding: 0; }
-/* the <li> carries only the hairline; the row layout lives on .provider-row so it can sit on either a
-   <summary> (available providers, expandable) or a plain <div> (coming-soon rows, nothing to expand) */
-.provider { border-bottom: 1px solid var(--ns-line); }
-.provider:last-child { border-bottom: none; }
-/* one row per provider: logo, name + model count, then a status tag on the right */
-.provider-row {
+/* ---- supported models page — trust tiers, provider cards, copy-chips ------ */
+
+/* The square glyph the tiers are built on (see SquareGlyph in ui.tsx): a hairline square = a frontier
+   provider that reads your text; `.sealed` fills an inner square — the enclave/TEE mark. 1em + currentColor
+   so it scales and tints to whatever context it sits in. */
+.sqg {
+  position: relative;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex: none;
+  border: 1px solid currentColor;
+}
+.sqg.sealed::before { content: ""; position: absolute; inset: 22%; background: currentColor; }
+
+/* the trust framing: the "who can read your messages" lede beside a static you → nullsink → {frontier |
+   enclave} diagram. The diagram is decorative (aria-hidden); the lede carries the meaning. */
+.trust { margin-top: 26px; display: flex; gap: 36px; align-items: center; flex-wrap: wrap; }
+.trust-copy { flex: 1; min-width: 230px; }
+.trust-q { margin: 0 0 16px; }
+.trust-q .hl { font-size: 14px; letter-spacing: 0.01em; padding: 0.14em 0.45ch; }
+.trust-lede { margin: 0; max-width: 42ch; font-size: 13px; line-height: 1.7; color: var(--ns-muted); }
+.trust-lede strong { color: var(--ns-bone); font-weight: 400; }
+.trust-path { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.trust-path .node {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--ns-line);
+  color: var(--ns-bone);
+  white-space: nowrap;
+}
+.trust-path .node .sqg { font-size: 11px; }
+.trust-path .wire { width: 18px; height: 1px; flex: none; background: var(--ns-line); }
+.trust-path .node.sink { flex-direction: column; gap: 7px; padding: 0; border: none; }
+.sink-mark { width: 34px; height: 34px; color: var(--ns-acid); }
+/* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
+   per-rect animation-delay, frozen from the pattern generator — SEED 4817). Decorative, so it yields to
+   reduced-motion (then it just holds the brand mark, full-opacity). */
+@keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
+.pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
+.node-cap { font-size: 11px; letter-spacing: 0.04em; color: var(--ns-muted); }
+/* the right branch: a vertical spine (border-left) with a short wire teeing into each node — the frontier
+   node stays muted, the enclave node + its wire take --ns-seal. */
+.trust-branch { display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--ns-line); }
+.branch-row { display: inline-flex; align-items: center; }
+.branch-row .wire { width: 16px; }
+.branch-row.sealed .wire { background: var(--ns-seal); }
+.trust-branch .node { color: var(--ns-muted); }
+.trust-branch .node.sealed { border-color: var(--ns-seal); color: var(--ns-seal); }
+
+/* tier header: a glyph + label + tagline over a hairline that takes the tier's accent — acid for the
+   policy tier, --ns-seal for the sealed (silicon) tier. */
+.tier { margin-top: 48px; }
+.tier-head {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 0;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ns-acid);
+  flex-wrap: wrap;
 }
-/* available rows expand via native <details>: no JS, survives prerender. Suppress the UA marker — the
-   +/− toggle on the right is the affordance instead. */
-summary.provider-row { cursor: pointer; list-style: none; }
-summary.provider-row::-webkit-details-marker { display: none; }
-.provider-toggle {
-  flex: none;
-  width: 16px;
-  text-align: center;
-  font-size: 15px;
-  color: var(--ns-muted);
+.tier.sealed .tier-head { border-bottom-color: var(--ns-seal); }
+.tier-mark { font-size: 13px; color: var(--ns-acid); }
+.tier.sealed .tier-mark { color: var(--ns-seal); }
+.tier-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-bone);
 }
-.provider-toggle::before { content: "+"; }
-.provider-details[open] > summary .provider-toggle::before { content: "\2212"; }
-/* the expanded model list: ids straight from models.json, indented past the logo column */
-.provider-models {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 18px 44px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 7px 18px;
-  font-size: 13px;
-  color: var(--ns-muted);
-}
-.provider-logo { width: 28px; height: 28px; flex: none; color: var(--ns-bone); }
-.provider-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.provider-name {
+.tier-tag { margin-left: auto; font-size: 13px; color: var(--ns-muted); }
+
+/* provider card: a hairline box with a left accent rail (acid, or --ns-seal when sealed), a head row
+   (logo + name + count + status tags), then the model chips. */
+.pcard { display: flex; border: 1px solid var(--ns-line); margin-top: 16px; }
+.pcard-rail { width: 3px; flex: none; background: var(--ns-acid); }
+.pcard.sealed .pcard-rail { background: var(--ns-seal); }
+.pcard-body { flex: 1; min-width: 0; padding: 18px 20px; }
+.pcard-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.pcard-logo { width: 26px; height: 26px; flex: none; color: var(--ns-bone); }
+.pcard-name { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
+.pcard-title {
   font-size: 16px;
   font-weight: var(--ns-weight-display);
   letter-spacing: var(--ns-tracking-display);
   color: var(--ns-bone);
 }
-.provider-meta {
-  font-size: 12px;
+.pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
+.pcard-tags {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* status pills (named .pill, not .tag, to stay clear of the KeyBlock "unrecoverable" .tag badge): available =
+   the acid block (use it now); TEE-attested = the seal block, sealed tier only. */
+.pill {
+  font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--ns-muted);
+  font-weight: var(--ns-weight-display);
+  padding: 4px 9px;
+  white-space: nowrap;
 }
-/* available = the acid highlighter tag (this is what you can use now); the brand's "the point" mark */
-.provider-tag {
-  flex: none;
+.pill.avail { color: var(--ns-ink); background: var(--ns-acid); }
+.pill.tee { display: inline-flex; align-items: center; gap: 6px; color: var(--ns-void); background: var(--ns-seal); }
+.pill.tee .tee-mark { font-size: 10px; }
+
+/* model chips: each id copies on click. Hairline default; hover wakes the border (muted → bone); copied →
+   acid border + text; an unroutable id (.down) takes a red-tinted border and a red "down" tag. */
+.model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ns-bone);
+  background: transparent;
+  border: 1px solid var(--ns-line);
+  cursor: pointer;
+  transition: border-color 120ms ease-out, color 120ms ease-out;
+}
+.model-chip:hover { border-color: var(--ns-muted); }
+.model-chip.down { border-color: color-mix(in srgb, var(--ns-red) 45%, transparent); color: var(--ns-muted); }
+.model-chip.copied { border-color: var(--ns-acid); color: var(--ns-acid); }
+/* one focus ring everywhere (the design-system "states are decided" rule): 2px acid, offset 2px. */
+.model-chip:focus-visible,
+.model-more-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
+/* the red "down" tag — the danger register (ink-on-red). Red is otherwise reserved for the money warnings;
+   this is the one deliberate exception, so an unroutable model reads as "down". */
+.model-chip-down {
   font-size: 11px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   font-weight: var(--ns-weight-display);
   color: var(--ns-ink);
-  background: var(--ns-acid);
-  padding: 4px 9px;
-}
-/* coming-soon: the whole row dims, and the tag drops to a faint outline (not the live acid block) */
-.provider.soon .provider-logo,
-.provider.soon .provider-name { color: var(--ns-muted); }
-.provider-tag.soon {
-  color: var(--ns-muted);
-  background: transparent;
-  border: 1px solid var(--ns-line);
-  padding: 3px 8px;
-}
-/* unavailable model — the model id dims and gets a RED highlighter chip (the danger register, ink-on-red
-   like .hl.danger). Red is otherwise reserved for the money warnings (see notes near .hl.danger); this is
-   a deliberate exception so an unroutable model reads as "down". See UNAVAILABLE in flow/Models.tsx. */
-.provider-models li.unavailable { color: var(--ns-muted); }
-.model-tag-unavailable {
-  margin-left: 8px;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-weight: var(--ns-weight-display);
-  color: var(--ns-ink);
   background: var(--ns-red);
-  padding: 2px 6px;
+  padding: 1px 5px;
 }
-/* coming-soon open-source row: three overlapping model logos in place of one provider mark */
-.provider-logos { flex: none; display: inline-flex; align-items: center; }
-.stack-disc {
-  position: relative;
-  display: inline-flex;
+.model-chip-ok { font-size: 11px; }
+
+/* the "all N models" / "show less" toggle: sits BELOW the chips so the list never splits around it. State-
+   driven (the card hydrates); a muted underline that wakes to bone. With JS off it shows the preview. */
+.model-more-btn {
+  margin-top: 14px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ns-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 120ms ease-out;
+}
+.model-more-btn:hover { color: var(--ns-bone); }
+
+/* roadmap: dimmed rows — listed but not yet routable. */
+.roadmap-head {
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ns-muted);
+  border-bottom: 1px solid var(--ns-line);
+  padding-bottom: 12px;
+}
+.rm-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: var(--ns-void); /* page-bg disc so each front logo cleanly cuts the one behind it */
-  border: 1px solid var(--ns-line);
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ns-line);
+  opacity: 0.65;
 }
-.stack-disc:not(:first-child) { margin-left: -10px; }
-/* first logo sits ON TOP, the rest tuck behind it left-to-right */
-.stack-disc:nth-child(1) { z-index: 3; }
-.stack-disc:nth-child(2) { z-index: 2; }
-.stack-disc:nth-child(3) { z-index: 1; }
-.stack-ico { width: 15px; height: 15px; color: var(--ns-muted); }
+.rm-row:last-child { border-bottom: none; }
+.rm-logo { width: 22px; height: 22px; flex: none; color: var(--ns-muted); }
+.rm-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.rm-title { font-size: 15px; font-weight: var(--ns-weight-display); letter-spacing: -0.03em; color: var(--ns-muted); }
+.rm-meta { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
+
+/* catalogue attribution — fine print; models.dev is the upstream source of the list. */
+.models-credit { margin-top: 28px; font-size: 12px; color: var(--ns-faint); }
+.models-credit a { color: var(--ns-muted); text-decoration: underline; text-underline-offset: 2px; }
 
 /* ---- legal pages (privacy, terms) — long-form prose -------------------- */
 /* Calm by design: the acid accent is reserved for the brand wordmark (<Ns/>) and the lead-in term of each
