@@ -261,27 +261,28 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
             }}
             aria-label="your 0sink_ token — leave blank to mint a new key"
           />
+          {/* the check-balance control is always visible; it's disabled until a valid key is present. */}
+          <div className="balance-check">
+            <button type="button" className="check-btn" disabled={!pasteValid || checking} onClick={check}>
+              {checking ? "checking…" : "check balance"}
+            </button>
+            {pasteValid &&
+              didCheck &&
+              (checkError ? (
+                <span className="check-line none">couldn't check, try again in a moment</span>
+              ) : (
+                <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
+                  {checkedBalance !== null
+                    ? `balance: ${usd(checkedBalance)}`
+                    : "no balance for this key. deposits confirm in ~20-45 min"}
+                </span>
+              ))}
+          </div>
           {paste && !pasteValid ? (
             <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
-          ) : pasteValid ? (
-            <div className="balance-check">
-              <button type="button" className="check-btn" disabled={checking} onClick={check}>
-                {checking ? "checking…" : "check balance"}
-              </button>
-              {didCheck &&
-                (checkError ? (
-                  <span className="check-line none">couldn't check, try again in a moment</span>
-                ) : (
-                  <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
-                    {checkedBalance !== null
-                      ? `balance: ${usd(checkedBalance)}`
-                      : "no balance for this key. deposits confirm in ~20-45 min"}
-                  </span>
-                ))}
-            </div>
-          ) : (
+          ) : !paste ? (
             <p className="hint">Leave blank to mint a fresh key in your browser.</p>
-          )}
+          ) : null}
         </div>
 
         {/* Environmental /buy errors (rate/wallet/busy/rate-limit) surface here, pre-navigation. */}
