@@ -4,14 +4,14 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 
 // The shell shared by every route: the centered column, the header bar with the brand (a home link) and
 // the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
-// adoption pages in the order a new user needs them (start → models → about). The footer opens with the
+// adoption pages in the order a new user needs them (start → models). The footer opens with the
 // never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
 // (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
-// <a> navigations are unaffected by the strict CSP.
-export function Layout({ children }: { children: ReactNode }) {
+// <a> navigations are unaffected by the strict CSP. `wide` widens the shell for the two-column landing.
+export function Layout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return (
-    <div className="shell">
+    <div className={"shell" + (wide ? " wide" : "")}>
       <header className="bar">
         <a className="brand" href="/" aria-label="nullsink home">
           <Wordmark />

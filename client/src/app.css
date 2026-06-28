@@ -34,6 +34,8 @@ button:disabled { cursor: not-allowed; }
   margin: 0 auto;
   padding: 0 20px 80px;
 }
+/* the landing takes a wider measure for its two-column layout (see .home). */
+.shell.wide { max-width: 1000px; }
 
 .bar {
   display: flex;
@@ -78,8 +80,56 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: var(--ns-tracking-display);
 }
 
-/* ---- hero (two annotation notes: ? = what, ! = experimental) ------------ */
+/* ---- hero — top padding for a bare centered section (the 404 + error boundary) ---- */
 .hero { padding: 32px 0 0; }
+
+/* ---- landing — two-column home: buy card (left) + orient column (right) -- */
+/* On checkout (KeyFlow leaves "home") the orient column unmounts and the card collapses to the focused
+   width and centers, morphing in place through pay → done. The grid + the .checkout class flip in one
+   frame (KeyFlow's useLayoutEffect; no animation). Mobile is one column with the orient above the card. */
+.home {
+  margin-top: 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+  gap: 56px;
+  align-items: start;
+}
+.home.checkout {
+  grid-template-columns: 1fr;
+  max-width: 620px;
+  margin-inline: auto;
+}
+.home-buy { min-width: 0; }
+
+/* the orient column. */
+.home-orient { min-width: 0; display: flex; flex-direction: column; gap: 28px; }
+.home-intro { margin: 0; font-size: 16px; line-height: 1.6; color: var(--ns-bone); max-width: 46ch; }
+
+/* "point your tool here" quick-start: a hairline base-url row + a copy control, then a one-line note. */
+.qs-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); margin-bottom: 10px; }
+.qs-row { display: flex; align-items: center; gap: 12px; border: 1px solid var(--ns-line); padding: 10px 12px 10px 14px; }
+.qs-k { flex: none; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); }
+.qs-v { flex: 1; min-width: 0; font-size: 15px; color: var(--ns-bone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qs-note { margin: 11px 0 0; font-size: 13px; line-height: 1.55; color: var(--ns-muted); }
+.qs-note a { color: var(--ns-bone); }
+
+/* availability — static service status: live (acid) / roadmap (hollow). */
+.avail { margin: 0; border-top: 1px solid var(--ns-line); }
+.avail-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--ns-line); }
+.avail-row dt { font-size: 14px; color: var(--ns-bone); }
+.avail-row dd { margin: 0; display: inline-flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.avail-dot { width: 8px; height: 8px; flex: none; }
+.avail-row dd.on { color: var(--ns-acid); }
+.avail-row dd.on .avail-dot { background: var(--ns-acid); }
+.avail-row dd.soon { color: var(--ns-muted); }
+.avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
+
+.home-fine { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ns-faint); }
+
+@media (max-width: 860px) {
+  .home { grid-template-columns: 1fr; gap: 32px; }
+  .home-orient { order: -1; } /* orient/terms above the card on a phone */
+}
 /* .note is used on both a <p> (caveat) and the <h1> (lead proposition) — pin font-size/weight
    so the heading reads as body text, not a UA-styled h1. */
 .note {
