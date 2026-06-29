@@ -772,7 +772,7 @@ button:disabled { cursor: not-allowed; }
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
-.title-ext { width: 0.78em; height: 0.78em; margin-left: 0.45ch; vertical-align: -0.05em; opacity: 0; color: var(--ns-acid); }
+.title-ext { width: 0.78em; height: 0.78em; margin-left: 0.9ch; vertical-align: -0.05em; opacity: 0; color: var(--ns-acid); } /* clears the name's hover highlight (which bleeds ~0.4ch right) + a real gap */
 .pcard-title a:hover .title-ext { opacity: 1; }
 /* SEALED providers (Tinfoil, Privatemode) take the purple seal accent instead of acid — for the title
    highlight, its external glyph, and the copy-confirmation on their model chips. */
