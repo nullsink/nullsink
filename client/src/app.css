@@ -483,6 +483,30 @@ button:disabled { cursor: not-allowed; }
 .copy:hover { border-color: var(--ns-muted); color: var(--ns-bone); }
 .copy.copied { color: var(--ns-acid); border-color: var(--ns-acid); }
 .copy:disabled { opacity: 0.55; }
+
+/* inline click-to-copy (CopyText): plain mono until hovered, then the acid highlight; the "copied ✓" state
+   (.copytext.copied) locks that highlight for ~1.5s. The negative inline margin offsets the padding so the
+   surrounding text doesn't shift when the highlight paints. */
+.copytext {
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--ns-bone);
+  cursor: pointer;
+}
+.copytext:hover,
+.copytext.copied {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-weight: var(--ns-weight-display);
+  padding: 0.04em 0.4ch;
+  margin: 0 -0.4ch;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 /* highlight variant: the small "a highlight you can click" action (the on-demand check) */
 .copy.acid {
   background: var(--ns-acid);
@@ -616,8 +640,7 @@ button:disabled { cursor: not-allowed; }
 .ep-ico { width: 12px; height: 12px; color: var(--ns-bone); }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
-.ep-path { color: var(--ns-bone); }
-.ep .copy { margin-left: 4px; } /* sits just after the path; the coins get pushed to the far right (.ep-marks) */
+/* the path is the CopyText control (.copytext): plain bone, acid-highlights on hover, copies the full URL */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }
@@ -661,8 +684,7 @@ button:disabled { cursor: not-allowed; }
   min-width: 0;
   word-break: break-all;
 }
-/* one value + its copy button, kept together on a single line */
-.kvrow .kvval { display: inline-flex; align-items: center; gap: 10px; }
+/* each value is a CopyText control (.copytext): the value text itself copies on click */
 
 /* ---- shared page h1 (models / api / about) ------------------------------ */
 .page-h1 {
@@ -771,6 +793,9 @@ button:disabled { cursor: not-allowed; }
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
+/* the "opens externally" glyph, revealed on hover (space reserved so the title doesn't shift) */
+.title-ext { width: 0.78em; height: 0.78em; margin-left: 0.45ch; vertical-align: -0.05em; opacity: 0; }
+.pcard-title a:hover .title-ext { opacity: 1; }
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;

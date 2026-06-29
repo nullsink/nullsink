@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, CopyText, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
@@ -82,8 +82,9 @@ function Ep({
   return (
     <div className="ep">
       <span className="ep-method">{method}</span>
-      <span className="ep-path">{path}</span>
-      <Copy value={`https://nullsink.is${path}`} />
+      <CopyText value={`https://nullsink.is${path}`} label={path}>
+        {path}
+      </CopyText>
       <Marks marks={marks} />
     </div>
   );
