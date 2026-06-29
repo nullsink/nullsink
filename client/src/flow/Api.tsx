@@ -59,12 +59,16 @@ const ERROR_SHAPE = `# anthropic · 400 on POST /v1/messages
   }
 }`;
 
-// Provider mark(s) in acid-ringed coins — the page's signature accent, shared by the base-url and endpoint rows.
+// Tinfoil is the sealed-enclave provider, so its coin takes the purple seal ring instead of acid (same
+// semantic as the SquareGlyph sealed marker on /models).
+const SEALED = new Set<ComponentType<{ className?: string }>>([TinfoilMark]);
+
+// Provider mark(s) in coins — the page's signature accent, shared by the base-url and endpoint rows.
 function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   return (
     <span className="ep-marks" aria-hidden="true">
       {marks.map((M, i) => (
-        <span key={i} className="ep-disc">
+        <span key={i} className={"ep-disc" + (SEALED.has(M) ? " sealed" : "")}>
           <M className="ep-ico" />
         </span>
       ))}
@@ -147,14 +151,12 @@ export function Api() {
             <span className="ep-path">
               https://nullsink.is <Copy value="https://nullsink.is" />
             </span>
-            <span className="ep-desc">anthropic</span>
           </div>
           <div className="ep">
             <Marks marks={[OpenAiMark, TinfoilMark]} />
             <span className="ep-path">
               https://nullsink.is/v1 <Copy value="https://nullsink.is/v1" />
             </span>
-            <span className="ep-desc">openai · tinfoil</span>
           </div>
         </div>
         <dl className="kv">
