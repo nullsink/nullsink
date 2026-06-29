@@ -701,13 +701,7 @@ button:disabled { cursor: not-allowed; }
 
 /* the trust framing: the "who can read your messages" lede beside a static you → nullsink → {frontier |
    enclave} diagram. The diagram is decorative (aria-hidden); the lede carries the meaning. */
-.trust { margin-top: 26px; display: flex; gap: 36px; align-items: center; flex-wrap: wrap; }
-.trust-copy { flex: 1; min-width: 230px; }
-/* the lede as a dash-bullet list (design-system dash list): one claim per line, all in muted. */
-.trust-points { list-style: none; margin: 0; padding: 0; max-width: 42ch; display: flex; flex-direction: column; gap: 10px; }
-.trust-points li { position: relative; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--ns-bone); }
-.trust-points li::before { content: "–"; position: absolute; left: 0; color: var(--ns-muted); }
-.trust-points li.lead { color: var(--ns-acid); }
+.trust { margin-top: 26px; display: flex; justify-content: center; gap: 36px; align-items: center; flex-wrap: wrap; }
 .trust-path { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
 .trust-path .node {
   display: inline-flex;

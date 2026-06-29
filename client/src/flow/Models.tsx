@@ -113,17 +113,11 @@ export function Models() {
           </span>
         </p>
 
-        {/* The trust framing: the "who can read your messages" lede beside a static you → nullsink →
-            {proprietary | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
-            words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
+        {/* The trust framing as a static you → nullsink → {proprietary | enclave} diagram. Decorative
+            (aria-hidden): the tier headers below carry the "who can read your messages" framing in words
+            (their labels + the privacy-by-silicon / privacy-by-policy taglines). The right branch is a
+            spine with a short wire into each node (sealed branch in seal). */}
         <div className="trust">
-          <div className="trust-copy">
-            <ul className="trust-points">
-              <li className="lead">nullsink strips your identity.</li>
-              <li>Proprietary models — the provider reads your text.</li>
-              <li>Sealed models — even the provider can&apos;t read it.</li>
-            </ul>
-          </div>
           <div className="trust-path" aria-hidden="true">
             <span className="node">you</span>
             <span className="wire" />
