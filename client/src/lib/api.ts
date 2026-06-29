@@ -134,7 +134,7 @@ export const RAILS_OPTIMISTIC: Rails = {
   default: "monero",
   rails: [
     { name: "monero", unit: "XMR", confirmations: 10 },
-    { name: "bitcoin", unit: "BTC", confirmations: 1 },
+    { name: "bitcoin", unit: "BTC", confirmations: 3 },
   ],
 };
 
