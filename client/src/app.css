@@ -130,8 +130,8 @@ button:disabled { cursor: not-allowed; }
 .avail-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--ns-line); }
 .avail-row dt { font-size: 14px; color: var(--ns-bone); }
 .avail-row dd { margin: 0; display: inline-flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
-.avail-row dd a { color: inherit; text-decoration: underline; text-underline-offset: 3px; } /* the roadmap link stays in the row's muted register */
-.avail-row dd a:hover { color: var(--ns-acid); }
+.avail-row dd a { color: var(--ns-gh); text-decoration: underline; text-underline-offset: 3px; } /* GitHub blue — the roadmap issue link */
+.avail-row dd a:hover { filter: brightness(1.15); }
 .avail-dot { width: 8px; height: 8px; flex: none; }
 .avail-row dd.on { color: var(--ns-acid); }
 .avail-row dd.on .avail-dot { background: var(--ns-acid); }

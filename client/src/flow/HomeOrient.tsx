@@ -60,9 +60,13 @@ export function HomeOrient() {
           <dt>web chat</dt>
           <dd className="soon">
             <span className="avail-dot" aria-hidden="true" />
-            <a href={`${GITHUB_URL}/issues/21`} {...EXT}>
-              roadmap
-            </a>
+            <span>
+              roadmap (
+              <a href={`${GITHUB_URL}/issues/21`} {...EXT}>
+                #21
+              </a>
+              )
+            </span>
           </dd>
         </div>
       </dl>
