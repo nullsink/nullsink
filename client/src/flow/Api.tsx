@@ -208,8 +208,8 @@ export function Api() {
           <Err code="invalid_token">the key is unknown or malformed</Err>
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
-        <CodeBlock label="error response · openai · tinfoil" code={ERROR_SHAPE} />
-        <CodeBlock label="error response · anthropic" code={ANTHROPIC_ERROR_SHAPE} />
+        <CodeBlock label="openai · tinfoil" code={ERROR_SHAPE} />
+        <CodeBlock label="anthropic" code={ANTHROPIC_ERROR_SHAPE} />
       </section>
     </Layout>
   );
