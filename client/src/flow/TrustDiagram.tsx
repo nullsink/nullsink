@@ -1,8 +1,8 @@
 import { PulseMark, SquareGlyph } from "../ui.tsx";
 
-// The trust framing as a static you → nullsink → {proprietary | enclave} diagram (decorative, aria-hidden).
-// EXTRACTED from /models and NOT currently rendered anywhere — parked here for a planned rework of the trust
-// section. The .trust* styles in app.css still back it. Re-import + render when the section returns.
+// The trust framing as a static you → nullsink → {sealed | closed source} diagram (decorative, aria-hidden):
+// who can read your messages. Rendered on /models under the price note; the tier sections below carry the
+// meaning. The .trust* styles (app.css) lay it out as a full-width band, wires flexing to fill the column.
 export function TrustDiagram() {
   return (
     <div className="trust">
@@ -24,7 +24,7 @@ export function TrustDiagram() {
           <span className="branch-row">
             <span className="wire" />
             <span className="node">
-              <SquareGlyph /> proprietary · receives plaintext
+              <SquareGlyph /> closed source · receives plaintext
             </span>
           </span>
         </span>

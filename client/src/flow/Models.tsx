@@ -1,5 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
+import { TrustDiagram } from "./TrustDiagram.tsx";
 import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, PrivatemodeMark, TinfoilMark, SquareGlyph, ModelChip, ExtMark } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
@@ -131,6 +132,8 @@ export function Models() {
             . You pay each provider&apos;s published rate.
           </span>
         </p>
+
+        <TrustDiagram />
 
         {TIERS.map((tier) => {
           const provs = tier.providers.map((id) => byId.get(id)).filter((p): p is Provider => p != null);
