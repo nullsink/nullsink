@@ -1,14 +1,20 @@
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { CodeBlock, KvRow, Ns } from "../ui.tsx";
-import { MARKUP_PCT } from "../lib/api.ts";
+import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { EXT } from "../lib/links.ts";
 
-// /api — the API reference. nullsink is an HTTP proxy that speaks the Anthropic and OpenAI wire formats, so a
-// stock SDK works once the base URL + key change. Minimal prose: the served routes, what each does, and the
-// few snippets any caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts +
-// endpoints/) — if the served surface changes, change this page. Static: prerenders and reads with JS off
-// (the copy buttons are the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key
-// and the model id — acid.
+// /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
+// the base URL + key change. Minimal prose: the served routes, what each does, and the few snippets any
+// caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/ + endpoints/)
+// — if the served surface changes, change this page. Static: prerenders and reads with JS off (the copy
+// buttons are the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the
+// model id — acid.
+
+// Provider docs: the request/response bodies are each provider's native schema, so their reference applies
+// verbatim (see the note under the endpoints). Linked off the inference rows.
+const ANTHROPIC_DOCS = "https://docs.anthropic.com/en/api/messages";
+const OPENAI_CHAT_DOCS = "https://platform.openai.com/docs/api-reference/chat";
+const OPENAI_RESPONSES_DOCS = "https://platform.openai.com/docs/api-reference/responses";
 
 const ANTHROPIC_CURL = `curl https://nullsink.is/v1/messages \\
   -H "x-api-key: 0sink_YOUR_KEY" \\
@@ -33,17 +39,39 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
-const BALANCE_CURL = `curl https://nullsink.is/balance -H "x-api-key: 0sink_YOUR_KEY"
-# -> {"balance_usd": 20}`;
-
-// One endpoint row: method · path · a one-line note. The whole site is monospace, so the path needs no
-// special face — bone weight against the muted note carries it.
-function Ep({ method, path, children }: { method: string; path: string; children: ReactNode }) {
+// One endpoint row: provider mark(s) · method · path · a one-line note (a provider-doc link on the inference
+// rows). The whole site is monospace, so the path needs no special face — bone against the muted note.
+function Ep({
+  marks = [],
+  method,
+  path,
+  href,
+  children,
+}: {
+  marks?: ComponentType<{ className?: string }>[];
+  method: string;
+  path: string;
+  href?: string;
+  children: ReactNode;
+}) {
   return (
     <div className="ep">
+      <span className="ep-marks" aria-hidden="true">
+        {marks.map((M, i) => (
+          <M key={i} className="ep-mark" />
+        ))}
+      </span>
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
-      <span className="ep-desc">{children}</span>
+      <span className="ep-desc">
+        {href ? (
+          <a href={href} {...EXT}>
+            {children}
+          </a>
+        ) : (
+          children
+        )}
+      </span>
     </div>
   );
 }
@@ -66,7 +94,7 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">→</span>
           <span>
-            <Ns /> speaks the Anthropic and OpenAI APIs. Point a stock SDK at it — only the base URL and the
+            <Ns /> mirrors the Anthropic and OpenAI APIs. Point a stock SDK at it — only the base URL and the
             key change. <a href="/#buy">Mint a key</a>; model ids are on the <a href="/models/">models</a>{" "}
             page.
           </span>
@@ -82,8 +110,9 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
           <span>
-            Anthropic SDKs use the bare host; OpenAI SDKs add <code>/v1</code>. Your key authenticates you to{" "}
-            <Ns /> and is never forwarded to the provider.
+            Two base URLs because the SDKs build paths differently — Anthropic from the bare host, OpenAI adds{" "}
+            <code>/v1</code>. Use either auth header, whichever your SDK sends. Your key identifies you to{" "}
+            <Ns /> and is never forwarded upstream.
           </span>
         </p>
       </section>
@@ -92,24 +121,36 @@ export function Api() {
         <h2>endpoints</h2>
         <div className="ep-group">
           <div className="ep-group-label">inference · spends credit</div>
-          <Ep method="POST" path="/v1/messages">Anthropic Messages</Ep>
-          <Ep method="POST" path="/v1/chat/completions">OpenAI Chat Completions</Ep>
-          <Ep method="POST" path="/v1/responses">OpenAI Responses</Ep>
+          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
+            Anthropic Messages
+          </Ep>
+          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" href={OPENAI_CHAT_DOCS}>
+            OpenAI Chat Completions
+          </Ep>
+          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" href={OPENAI_RESPONSES_DOCS}>
+            OpenAI Responses
+          </Ep>
         </div>
         <div className="ep-group">
           <div className="ep-group-label">account · free</div>
           <Ep method="GET" path="/balance">
             remaining credit → <code>{"{ balance_usd }"}</code>
           </Ep>
-          <Ep method="POST" path="/buy">quote a crypto top-up for a key</Ep>
-          <Ep method="POST" path="/order-status">progress of an in-flight payment</Ep>
-          <Ep method="GET" path="/rails">the coins you can pay with</Ep>
         </div>
         <p className="note">
           <span className="marker" aria-hidden="true">!</span>
           <span>
-            Inference request and response bodies are the provider&apos;s native schema. Open-weight model ids
-            run in a sealed enclave on the OpenAI surface — same endpoints, an open-weight id.
+            Request and response bodies are each provider&apos;s native schema — the linked docs apply
+            verbatim. <Ns /> only constrains what metering needs: a max output tokens, a model it prices (
+            <a href="/models/">models</a>), and a few rejected options (<code>n</code>, <code>best_of</code>,
+            premium betas).
+          </span>
+        </p>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Open-weight ids route to Tinfoil — a sealed enclave sharing the OpenAI{" "}
+            <code>/v1/chat/completions</code> surface, selected by the model id.
           </span>
         </p>
       </section>
@@ -142,11 +183,6 @@ export function Api() {
       </section>
 
       <section className="section">
-        <h2>check a balance</h2>
-        <CodeBlock label="curl" code={BALANCE_CURL} highlights={["0sink_YOUR_KEY"]} />
-      </section>
-
-      <section className="section">
         <h2>errors</h2>
         <ul className="err-list">
           <Err code="max_tokens_required">set a max output tokens (above)</Err>
@@ -156,14 +192,6 @@ export function Api() {
           <Err code="invalid_token">the key is unknown or malformed</Err>
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Inference errors arrive in the provider&apos;s native envelope so a stock SDK classifies them;{" "}
-            <Ns />&apos;s own endpoints return <code>{"{ error }"}</code>. Buying credit adds ~{MARKUP_PCT}% to
-            the provider list price; spending debits their exact per-token rate.
-          </span>
-        </p>
       </section>
     </Layout>
   );

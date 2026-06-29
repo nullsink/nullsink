@@ -594,9 +594,13 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; width: 38px; } /* fixed slot — keeps method/path aligned even on the markless account rows */
+.ep-mark { width: 14px; height: 14px; color: var(--ns-bone); }
 .ep-method { flex: none; min-width: 34px; color: var(--ns-faint); font-size: 11px; letter-spacing: 0.06em; }
 .ep-path { color: var(--ns-bone); }
 .ep-desc { margin-left: auto; color: var(--ns-muted); } /* right-aligned on a wide row; wraps under on narrow */
+.ep-desc a { color: var(--ns-bone); } /* the provider's own API docs */
+.ep-desc a:hover { color: var(--ns-acid); }
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }

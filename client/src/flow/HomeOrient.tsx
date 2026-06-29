@@ -45,7 +45,11 @@ export function HomeOrient() {
           </dd>
         </div>
         <div className="avail-row">
-          <dt>api access</dt>
+          <dt>
+            <a className="model-link" href="/api/">
+              api
+            </a>
+          </dt>
           <dd className="on">
             <span className="avail-dot" aria-hidden="true" />
             live
