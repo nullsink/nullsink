@@ -85,7 +85,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
             <span className="pcard-title">
               {SITE[provider.id] ? (
                 <a href={SITE[provider.id]} {...EXT}>
-                  {provider.label}
+                  <span className="title-name">{provider.label}</span>
                   <ExtMark className="title-ext" />
                 </a>
               ) : (

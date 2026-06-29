@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
 
@@ -189,24 +189,6 @@ export function Copy({ value, label = "copy", filled = false }: { value: string;
   );
 }
 
-// Inline click-to-copy: the value text IS the control — no separate button. It reads as plain mono until
-// hovered, then takes the acid highlight (.copytext:hover); a click copies and, for ~1.5s, LOCKS that
-// highlight and swaps the text to "copied ✓" (same useCopy timing as <Copy>). No toast. The label swap is
-// brief, so the momentary width change is fine for short values (a URL, a header name, an endpoint path).
-export function CopyText({ value, label, children }: { value: string; label?: string; children: ReactNode }) {
-  const { copied, copy } = useCopy(value);
-  return (
-    <button
-      type="button"
-      className={"copytext" + (copied ? " copied" : "")}
-      onClick={copy}
-      aria-label={copied ? "copied" : `copy ${label ?? value}`}
-    >
-      {copied ? "copied ✓" : children}
-    </button>
-  );
-}
-
 // "Opens in a new tab" glyph — a box with an arrow leaving it. A generic UI mark (not a brand logo),
 // stroked in currentColor so it tints to context. Shown on hover beside an external link.
 export function ExtMark({ className }: { className?: string }) {
@@ -258,9 +240,9 @@ export function KvRow({ k, values }: { k: string; values: string[] }) {
       <dt className="kvk">{k}</dt>
       <dd className="kvv">
         {values.map((v) => (
-          <CopyText value={v} key={v}>
-            {v}
-          </CopyText>
+          <span className="kvval" key={v}>
+            {v} <Copy value={v} />
+          </span>
         ))}
       </dd>
     </div>
