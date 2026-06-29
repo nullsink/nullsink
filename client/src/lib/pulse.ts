@@ -4,7 +4,7 @@
 // server prerender and on the client — no hydration drift. PulseMark (ui.tsx) consumes pulseDelays().
 
 // The seed the live wordmark breathes on. Change here to reseed the whole site's mark.
-export const WORDMARK_SEED = 4297;
+export const WORDMARK_SEED = 9628;
 
 // The mark has seven squares (see PULSE_GEO in ui.tsx); one delay each.
 const SQUARES = 7;
