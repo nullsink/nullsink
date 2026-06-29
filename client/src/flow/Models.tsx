@@ -44,15 +44,20 @@ const TIERS = [
   { key: "sealed", label: "Sealed", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Proprietary",
+    label: "Closed source",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
   },
 ] as const;
 
+// Privatemode AI has no vendored brand mark yet — it's a confidential-compute (TEE) provider, so the sealed
+// square glyph stands in until a real logo is added to ui.tsx. PLACEHOLDER: swap for a PrivatemodeMark SVG.
+const PrivatemodeMark = ({ className }: { className?: string }) => <SquareGlyph sealed className={className} />;
+
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
+  { id: "privatemode", name: "Privatemode AI", meta: "confidential", Logo: PrivatemodeMark },
   { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
   { id: "gemini", name: "Google Gemini", meta: "proprietary", Logo: GeminiMark },
 ];
@@ -113,7 +118,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
 
 export function Models() {
   return (
-    <Layout>
+    <Layout nav="models">
       <section className="section models">
         <h1 className="page-h1">Supported models</h1>
 

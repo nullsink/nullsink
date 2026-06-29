@@ -9,7 +9,15 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
 // (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
 // <a> navigations are unaffected by the strict CSP.
-export function Layout({ children, center = false }: { children: ReactNode; center?: boolean }) {
+export function Layout({
+  children,
+  center = false,
+  nav,
+}: {
+  children: ReactNode;
+  center?: boolean;
+  nav?: "api" | "models";
+}) {
   return (
     <div className="shell">
       <header className="bar">
@@ -17,8 +25,16 @@ export function Layout({ children, center = false }: { children: ReactNode; cent
           <Wordmark />
         </a>
         <nav className="links">
-          <a href="/api/">api</a>
-          <a href="/models/">models</a>
+          <a href="/api/" className={nav === "api" ? "on" : undefined} aria-current={nav === "api" ? "page" : undefined}>
+            api
+          </a>
+          <a
+            href="/models/"
+            className={nav === "models" ? "on" : undefined}
+            aria-current={nav === "models" ? "page" : undefined}
+          >
+            models
+          </a>
         </nav>
       </header>
       <div className={"content" + (center ? " center" : "")}>{children}</div>

@@ -96,7 +96,7 @@ function Err({ code, children }: { code: string; children: ReactNode }) {
 
 export function Api() {
   return (
-    <Layout>
+    <Layout nav="api">
       <section className="section">
         <h1 className="page-h1">api</h1>
         <p className="note">

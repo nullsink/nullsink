@@ -57,6 +57,7 @@ button:disabled { cursor: not-allowed; }
 }
 .bar .links { font-size: 13px; color: var(--ns-muted); display: flex; gap: 18px; }
 .bar .links a { text-decoration: none; }
+.bar .links a.on { color: var(--ns-acid); } /* the nav item for the current route */
 /* the brand wraps the wordmark in a home link; keep the wordmark's exact look (no underline, and the
    text doesn't flip to acid on hover the way body links do — the mark is already the accent) */
 .brand { text-decoration: none; color: inherit; }
@@ -572,6 +573,9 @@ button:disabled { cursor: not-allowed; }
   margin-bottom: 14px;
 }
 .terms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.terms-full { margin-top: 14px; font-size: 12px; color: var(--ns-muted); }
+.terms-full a { color: var(--ns-bone); }
+.terms-full a:hover { color: var(--ns-acid); }
 .terms-list li {
   position: relative;
   padding-left: 18px; /* room for the absolutely-positioned dash bullet; row spacing is the list's gap */

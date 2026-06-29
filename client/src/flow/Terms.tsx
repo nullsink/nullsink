@@ -1,3 +1,5 @@
+import { EXT } from "../lib/links.ts";
+
 // The policy / warning label, kept light: a left acid rail (the only frame) beside a small "terms" header
 // and a plain dash list, no box. ONLY the two non-recoverable warnings (no refunds; lose the key, lose the
 // balance) are highlighted (.hl.danger) — a warning label where every line shouts is a label where nothing
@@ -25,6 +27,13 @@ export function Terms() {
           </li>
           <li>Payments typically confirm in 20–45 minutes, depending on the coin.</li>
         </ul>
+        <p className="terms-full">
+          Summary only — the full{" "}
+          <a href="/terms/" {...EXT}>
+            terms of service
+          </a>{" "}
+          apply.
+        </p>
       </div>
     </div>
   );
