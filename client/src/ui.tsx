@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
+import { pulseDelays, WORDMARK_SEED } from "./lib/pulse.ts";
 
 // The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
 // so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
@@ -19,10 +20,10 @@ export function Mark({ className }: { className?: string }) {
 }
 
 // The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
-// phase so the funnel breathes instead of blinking in unison. The offsets are mulberry32(seed) * 2.2,
-// frozen here for SEED 9628, so it's deterministic and needs no runtime RNG. To reseed: re-run mulberry32(s)
-// and paste the new delays. Decorative motion → yields to prefers-reduced-motion (see .pulse-mark in
-// app.css). This IS the brand wordmark's mark now — it breathes in the header.
+// phase (animation-delay) so the funnel breathes instead of blinking in unison. The phases come from
+// pulseDelays(seed) in lib/pulse.ts — deterministic, so prerender and client agree (no hydration drift).
+// Default seed is the live WORDMARK_SEED; the /seeds page passes others to compare. Decorative motion →
+// yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
 const PULSE_GEO = [
   { x: 0, y: 0, w: 70, h: 70 },
   { x: 140, y: 0, w: 70, h: 70 },
@@ -32,8 +33,8 @@ const PULSE_GEO = [
   { x: 140, y: 140, w: 70, h: 70 },
   { x: 0, y: 280, w: 350, h: 70 },
 ];
-const PULSE_DELAYS = ["1.81s", "1.39s", "1.17s", "2.16s", "1.85s", "2.05s", "1.44s"]; // SEED 9628
-export function PulseMark({ className, delays = PULSE_DELAYS }: { className?: string; delays?: string[] }) {
+export function PulseMark({ className, seed = WORDMARK_SEED }: { className?: string; seed?: number }) {
+  const delays = pulseDelays(seed);
   return (
     <svg
       className={"pulse-mark" + (className ? " " + className : "")}

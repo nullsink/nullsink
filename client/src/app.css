@@ -711,8 +711,8 @@ button:disabled { cursor: not-allowed; }
 .trust-path .node.sink { flex-direction: column; gap: 8px; padding: 0; border: none; }
 .sink-mark { width: 42px; height: 42px; color: var(--ns-acid); }
 /* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
-   per-rect animation-delay, frozen from mulberry32 — SEED 9628). Decorative, so it yields to reduced-motion
-   (then it just holds the brand mark, full-opacity). It powers the wordmark mark in the header. */
+   per-rect animation-delay from pulseDelays(seed) — see lib/pulse.ts). Decorative, so it yields to
+   reduced-motion (then it just holds the brand mark, full-opacity). It powers the wordmark mark. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
