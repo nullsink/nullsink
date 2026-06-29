@@ -761,8 +761,7 @@ button:disabled { cursor: not-allowed; }
   color: var(--ns-bone);
 }
 .pcard-title a { color: inherit; text-decoration: none; } /* the title links to the provider's site */
-/* hover reads as a LINK, not an acid-highlighted term: keep the bone text, add an acid underline only */
-.pcard-title a:hover { text-decoration: underline; text-decoration-color: var(--ns-acid); text-underline-offset: 3px; }
+.pcard-title a:hover { color: var(--ns-acid); } /* full acid on hover, like the site's other links */
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;
