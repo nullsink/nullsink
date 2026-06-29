@@ -1,6 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { PulseMark, AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
+import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
@@ -112,36 +112,6 @@ export function Models() {
             . You pay each provider&apos;s published rate.
           </span>
         </p>
-
-        {/* The trust framing as a static you → nullsink → {proprietary | enclave} diagram. Decorative
-            (aria-hidden): the tier headers below carry the "who can read your messages" framing in words
-            (their labels + the privacy-by-silicon / privacy-by-policy taglines). The right branch is a
-            spine with a short wire into each node (sealed branch in seal). */}
-        <div className="trust">
-          <div className="trust-path" aria-hidden="true">
-            <span className="node">you</span>
-            <span className="wire" />
-            <span className="node sink">
-              <PulseMark className="sink-mark" />
-              <span className="node-cap">nullsink</span>
-            </span>
-            <span className="wire" />
-            <span className="trust-branch">
-              <span className="branch-row sealed">
-                <span className="wire" />
-                <span className="node sealed">
-                  <SquareGlyph sealed /> enclave · sealed
-                </span>
-              </span>
-              <span className="branch-row">
-                <span className="wire" />
-                <span className="node">
-                  <SquareGlyph /> proprietary · receives plaintext
-                </span>
-              </span>
-            </span>
-          </div>
-        </div>
 
         {TIERS.map((tier) => {
           const provs = tier.providers.map((id) => byId.get(id)).filter((p): p is Provider => p != null);

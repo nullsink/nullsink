@@ -43,16 +43,16 @@ export function HomeOrient() {
             </a>
           </dt>
           <dd>
-            <span className="model-stack" aria-hidden="true">
-              <span className="stack-disc sealed">
+            <span className="model-stack">
+              <a className="stack-disc sealed" href="https://tinfoil.sh" {...EXT} title="Tinfoil" aria-label="Tinfoil">
                 <TinfoilMark className="stack-ico" />
-              </span>
-              <span className="stack-disc">
+              </a>
+              <a className="stack-disc" href="https://www.anthropic.com" {...EXT} title="Anthropic" aria-label="Anthropic">
                 <AnthropicMark className="stack-ico" />
-              </span>
-              <span className="stack-disc">
+              </a>
+              <a className="stack-disc" href="https://openai.com" {...EXT} title="OpenAI" aria-label="OpenAI">
                 <OpenAiMark className="stack-ico" />
-              </span>
+              </a>
             </span>
           </dd>
         </div>

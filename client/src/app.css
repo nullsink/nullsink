@@ -160,6 +160,7 @@ button:disabled { cursor: not-allowed; }
 .stack-disc:nth-child(2) { z-index: 2; }
 .stack-disc:nth-child(3) { z-index: 1; }
 .stack-ico { width: 14px; height: 14px; color: var(--ns-bone); }
+.stack-disc:hover { filter: brightness(1.4); } /* the discs are provider links — brighten on hover (title shows which) */
 
 
 @media (max-width: 860px) {
