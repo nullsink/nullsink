@@ -4,7 +4,7 @@ import { KeyFlow } from "./flow/KeyFlow.tsx";
 import { HomeOrient } from "./flow/HomeOrient.tsx";
 
 // The landing page. Two columns: the buy card (LEFT) is the page's one job; the orient column (RIGHT)
-// carries the pitch, the quick-start, what's live, and the terms. Once a purchase is in flight (KeyFlow
+// carries the pitch, what's live, and the terms. Once a purchase is in flight (KeyFlow
 // leaves "home"), the orient column unmounts and the card morphs in place through pay → done, centering at
 // the focused width — no competing exits while money is moving. Mobile is one column (orient above the
 // card; the card alone during checkout). The prerendered (JS-off) page is the full two-column landing:

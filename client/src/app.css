@@ -270,18 +270,9 @@ button:disabled { cursor: not-allowed; }
 .range-inline { display: inline-flex; gap: 14px; }
 .range-inline.flash { color: var(--ns-acid); }
 .price-line { margin-top: 8px; font-size: 15px; line-height: 1.9; color: var(--ns-bone); letter-spacing: 0.04em; }
-.src-note {
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--ns-muted);
-  letter-spacing: 0.04em;
-}
 /* venue names in the rate-source caption: bright bone, so the reputable sources read as a
    trust signal without the loud acid block (acid is reserved for short key words like min/max). */
 .src-name { color: var(--ns-bone); font-weight: var(--ns-weight-display); }
-/* the up-front reassurance, just below the price line: "any coin works" leads in acid, the rest in white */
-.pay-note { margin-top: 8px; font-size: 13px; color: var(--ns-bone); letter-spacing: 0.04em; }
-.pay-note .lead { color: var(--ns-acid); font-weight: var(--ns-weight-display); }
 
 /* simplified payment card */
 .pay { display: flex; gap: 18px; align-items: flex-start; margin-top: 22px; flex-wrap: wrap; }
@@ -594,13 +585,10 @@ button:disabled { cursor: not-allowed; }
   left: 0;
   color: var(--ns-muted);
 }
-/* the Monero-specific timing line keeps the dash bullet; the ɱ mark sits inline before the text */
-.terms-list li.terms-xmr .mono-mark { width: 1em; height: 1em; vertical-align: -0.12em; margin-right: 9px; color: var(--ns-bone); }
 
 /* ---- /api endpoint + error reference — method · path · note in hairline rows --- */
 .ep-group { margin-top: 16px; }
 .ep-group + .ep-group { margin-top: 22px; }
-.ep-group-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); margin-bottom: 4px; }
 .ep {
   display: flex;
   flex-wrap: wrap;
