@@ -39,19 +39,10 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
-// The two error envelopes — each provider's native shape (so a stock SDK classifies the failure), our code
-// riding in `message` (Anthropic, no code field) / `code` (OpenAI). max_tokens_required shown as the example.
-const ERROR_SHAPE = `# anthropic · 400 on POST /v1/messages
-{
-  "type": "error",
-  "error": {
-    "type": "invalid_request_error",
-    "message": "max_tokens_required"
-  }
-}
-
-# openai · 400 on POST /v1/chat/completions
-{
+// The error envelope is each provider's native shape (so a stock SDK classifies the failure). The OpenAI form
+// is shown — it covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible). Anthropic's /v1/messages
+// wears its own, carrying the reason in `message` rather than `code` (see the note). The code is the same in both.
+const ERROR_SHAPE = `{
   "error": {
     "message": "max_tokens_required",
     "type": "invalid_request_error",
@@ -239,7 +230,15 @@ export function Api() {
           <Err code="invalid_token">the key is unknown or malformed</Err>
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
-        <CodeBlock label="error response" code={ERROR_SHAPE} />
+        <CodeBlock label="error response · openai · tinfoil" code={ERROR_SHAPE} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            The envelope matches the provider you called — Anthropic puts the reason in <code>message</code>,
+            OpenAI and Tinfoil in <code>code</code> — but the code is the same, so a stock SDK reads it
+            natively.
+          </span>
+        </p>
       </section>
     </Layout>
   );
