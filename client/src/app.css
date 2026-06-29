@@ -814,13 +814,6 @@ button:disabled { cursor: not-allowed; }
 
 /* model chips: each id copies on click. Hairline default; hover wakes the border (muted → bone); copied →
    acid border + text; an unroutable id (.down) takes a red-tinted border and a red "down" tag. */
-/* TEMP: the /seeds comparison grid — delete with the Seeds page once a seed is chosen */
-.seed-grid { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 26px; }
-.seed-cell { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 28px; border: 1px solid var(--ns-line); }
-.seed-cell.on { border-color: var(--ns-acid); }
-.seed-mark { width: 68px; height: 68px; color: var(--ns-acid); }
-.seed-label { font-size: 12px; letter-spacing: 0.05em; color: var(--ns-muted); }
-
 .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .model-chip {
   position: relative; /* anchor for the floating "copied" badge */

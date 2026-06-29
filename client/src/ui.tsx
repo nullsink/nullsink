@@ -22,7 +22,7 @@ export function Mark({ className }: { className?: string }) {
 // The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
 // phase (animation-delay) so the funnel breathes instead of blinking in unison. The phases come from
 // pulseDelays(seed) in lib/pulse.ts — deterministic, so prerender and client agree (no hydration drift).
-// Default seed is the live WORDMARK_SEED; the /seeds page passes others to compare. Decorative motion →
+// Default seed is the live WORDMARK_SEED; pass `seed` to render any other. Decorative motion →
 // yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
 const PULSE_GEO = [
   { x: 0, y: 0, w: 70, h: 70 },

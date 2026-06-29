@@ -1,14 +1,10 @@
 // The wordmark mark's "alive" pulse, as data. A seed deterministically yields the seven per-square CSS
 // animation-delays that phase-offset the breathing so the funnel doesn't blink in unison. mulberry32 is a
 // tiny integer PRNG (public domain); integer-only and seeded, so the SAME seed gives the SAME delays on the
-// server prerender and on the client — no hydration drift. PulseMark (ui.tsx) consumes pulseDelays(); the
-// /seeds comparison page reuses it to preview any candidate without hardcoding delay arrays.
+// server prerender and on the client — no hydration drift. PulseMark (ui.tsx) consumes pulseDelays().
 
 // The seed the live wordmark breathes on. Change here to reseed the whole site's mark.
-export const WORDMARK_SEED = 9628;
-
-// Candidate seeds surfaced on the temp /seeds page for side-by-side comparison.
-export const SEED_CANDIDATES = [4817, 7194, 5686, 6425, 4297, 6493, 6464, 7589, 9628, 5334, 8760];
+export const WORDMARK_SEED = 4297;
 
 // The mark has seven squares (see PULSE_GEO in ui.tsx); one delay each.
 const SQUARES = 7;
