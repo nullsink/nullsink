@@ -1,6 +1,7 @@
 import { Ns, AnthropicMark, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { Terms } from "./Terms.tsx";
 import { BUY_MAX_USD, BUY_MIN_USD } from "../lib/api.ts";
+import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // The landing's orient column (right of the buy card): the pitch, the terms, then the models + service
 // status. Static — no fetch, prerenders and reads with JS off. Unmounts once a purchase is in flight (see
@@ -43,7 +44,7 @@ export function HomeOrient() {
           </dt>
           <dd>
             <span className="model-stack" aria-hidden="true">
-              <span className="stack-disc">
+              <span className="stack-disc sealed">
                 <TinfoilMark className="stack-ico" />
               </span>
               <span className="stack-disc">
@@ -59,7 +60,9 @@ export function HomeOrient() {
           <dt>web chat</dt>
           <dd className="soon">
             <span className="avail-dot" aria-hidden="true" />
-            roadmap
+            <a href={`${GITHUB_URL}/issues/21`} {...EXT}>
+              roadmap
+            </a>
           </dd>
         </div>
       </dl>

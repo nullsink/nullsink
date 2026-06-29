@@ -130,6 +130,8 @@ button:disabled { cursor: not-allowed; }
 .avail-row { display: flex; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--ns-line); }
 .avail-row dt { font-size: 14px; color: var(--ns-bone); }
 .avail-row dd { margin: 0; display: inline-flex; align-items: center; gap: 9px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+.avail-row dd a { color: inherit; text-decoration: underline; text-underline-offset: 3px; } /* the roadmap link stays in the row's muted register */
+.avail-row dd a:hover { color: var(--ns-acid); }
 .avail-dot { width: 8px; height: 8px; flex: none; }
 .avail-row dd.on { color: var(--ns-acid); }
 .avail-row dd.on .avail-dot { background: var(--ns-acid); }
@@ -149,9 +151,10 @@ button:disabled { cursor: not-allowed; }
   height: 26px;
   border-radius: 50%;
   background: var(--ns-void); /* page-bg disc so each front mark cleanly cuts the one behind it */
-  border: 1px solid var(--ns-line);
+  border: 1px solid var(--ns-acid); /* acid ring to match the /api coins; Tinfoil takes the seal variant */
   transition: border-color 120ms ease-out;
 }
+.stack-disc.sealed { border-color: var(--ns-seal); }
 .stack-disc:not(:first-child) { margin-left: -9px; }
 .stack-disc:nth-child(1) { z-index: 3; }
 .stack-disc:nth-child(2) { z-index: 2; }
