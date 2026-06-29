@@ -13,7 +13,7 @@ import { HomeOrient } from "./flow/HomeOrient.tsx";
 // INVARIANT: <KeyFlow/> is mounted ONCE. The .home grid and <main id="buy"> render unconditionally in both
 // states; only <HomeOrient/> is conditional and only the .checkout class flips. Never put KeyFlow behind a
 // conditional/ternary parent or give it a state-dependent key — a remount would wipe the in-flight quote +
-// polling mid-payment. `id="buy"` serves the /#buy deep-link from /start.
+// polling mid-payment. `id="buy"` serves the /#buy deep-link from /api.
 export function App() {
   const [checkout, setCheckout] = useState(false);
   return (

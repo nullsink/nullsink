@@ -388,12 +388,12 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         <KeyBlock token={order.token} />
       </div>
 
-      {/* The hand-off: the next thing a funded first-timer needs is "now what?" — /start has the SDK
+      {/* The hand-off: the next thing a funded first-timer needs is "now what?" — /api has the SDK
           examples. New tab: the key is still on screen, and losing it loses the credit. */}
       <p className="hint">
         Save your key, then point your SDK at it.{" "}
-        <a href="/start/" {...EXT}>
-          get started
+        <a href="/api/" {...EXT}>
+          api reference
         </a>
         .
       </p>

@@ -4,7 +4,7 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 
 // The shell shared by every route: the centered column, the header bar with the brand (a home link) and
 // the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
-// adoption pages in the order a new user needs them (start → models). The footer opens with the
+// adoption pages in the order a new user needs them (api → models). The footer opens with the
 // never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
 // (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
@@ -17,7 +17,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <Wordmark />
         </a>
         <nav className="links">
-          <a href="/start/">start</a>
+          <a href="/api/">api</a>
           <a href="/models/">models</a>
         </nav>
       </header>

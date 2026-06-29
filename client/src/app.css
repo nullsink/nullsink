@@ -28,7 +28,7 @@ button:disabled { cursor: not-allowed; }
 /* ---- layout shell ------------------------------------------------------- */
 .shell {
   /* Widened from 600 to give the reference content (the /models tiers, the trust diagram) room to sit
-     side-by-side rather than wrap. Applied site-wide for now; the buy/start flows can take a narrower
+     side-by-side rather than wrap. Applied site-wide for now; the buy flow can take a narrower
      per-page measure later if the wider column reads loose there. */
   max-width: 760px;
   margin: 0 auto;
@@ -580,42 +580,38 @@ button:disabled { cursor: not-allowed; }
 /* the Monero-specific timing line keeps the dash bullet; the ɱ mark sits inline before the text */
 .terms-list li.terms-xmr .mono-mark { width: 1em; height: 1em; vertical-align: -0.12em; margin-right: 9px; color: var(--ns-bone); }
 
-/* ---- use it — integration reference (per-provider tabs over a <dl> of key/value rows) --- */
-/* CSS-only tabs: hidden radios drive the panels via :checked ~, so the reference reads with JS off.
-   Visually matches the .seg segmented control (acid-highlighted active). */
-.useit-tabs { position: relative; } /* anchor the absolutely-positioned (visually hidden) radios */
-.useit-radio { position: absolute; width: 1px; height: 1px; opacity: 0; } /* hidden but keyboard-focusable */
-.useit-tablist { display: flex; border: 1px solid var(--ns-line); margin-top: 16px; }
-.useit-tab {
-  flex: 1;
+/* ---- /api endpoint + error reference — method · path · note in hairline rows --- */
+.ep-group { margin-top: 16px; }
+.ep-group + .ep-group { margin-top: 22px; }
+.ep-group-label { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); margin-bottom: 4px; }
+.ep {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 13px;
+}
+.ep:last-child { border-bottom: none; }
+.ep-method { flex: none; min-width: 34px; color: var(--ns-faint); font-size: 11px; letter-spacing: 0.06em; }
+.ep-path { color: var(--ns-bone); }
+.ep-desc { margin-left: auto; color: var(--ns-muted); } /* right-aligned on a wide row; wraps under on narrow */
+
+/* the error table shares the endpoint rhythm: the code, then its cause */
+.err-list { list-style: none; margin: 16px 0 0; padding: 0; }
+.err-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--ns-line);
+  font-size: 13px;
   color: var(--ns-muted);
-  padding: 12px;
-  font-size: 14px;
-  cursor: pointer;
-  user-select: none;
 }
-/* logo inherits the label's color (currentColor): ink on the active acid tab, muted when inactive */
-.useit-tab-logo { width: 17px; height: 17px; flex: none; }
-.useit-tab + .useit-tab { border-left: 1px solid var(--ns-line); }
-#start-anthropic:checked ~ .useit-tablist label[for="start-anthropic"],
-#start-openai:checked ~ .useit-tablist label[for="start-openai"],
-#start-tinfoil:checked ~ .useit-tablist label[for="start-tinfoil"] {
-  background: var(--ns-acid);
-  color: var(--ns-ink);
-  font-weight: var(--ns-weight-display);
-}
-/* keyboard focus ring on a tab when its (hidden) radio is focused */
-#start-anthropic:focus-visible ~ .useit-tablist label[for="start-anthropic"],
-#start-openai:focus-visible ~ .useit-tablist label[for="start-openai"],
-#start-tinfoil:focus-visible ~ .useit-tablist label[for="start-tinfoil"] { outline: 2px solid var(--ns-acid); outline-offset: -2px; }
-.useit-panel { display: none; }
-#start-anthropic:checked ~ #start-panel-anthropic,
-#start-openai:checked ~ #start-panel-openai,
-#start-tinfoil:checked ~ #start-panel-tinfoil { display: block; }
+.err-list li:last-child { border-bottom: none; }
+.err-code { flex: none; color: var(--ns-bone); border: none; padding: 0; } /* plain mono, matching .ep-path — no inline-code chip */
 
 .kv { margin-top: 16px; }
 .kv dd { margin: 0; } /* reset the UA dd indent — the row is laid out with flex */
@@ -647,7 +643,7 @@ button:disabled { cursor: not-allowed; }
 /* one value + its copy button, kept together on a single line */
 .kvrow .kvval { display: inline-flex; align-items: center; gap: 10px; }
 
-/* ---- shared page h1 (about / models / start / how it works) ------------- */
+/* ---- shared page h1 (models / api / about) ------------------------------ */
 .page-h1 {
   margin: 8px 0 18px;
   font-size: 22px;
@@ -919,7 +915,7 @@ button:disabled { cursor: not-allowed; }
   color: var(--ns-bone);
 }
 
-/* ---- get started (/start) — the developer on-ramp ----------------------- */
+/* ---- docs prose + inline code — /api and the landing explainers --------- */
 /* short explanatory paragraph inside a docs section — sized between the body prose and the legal fine print */
 .section-copy { margin: 10px 0 0; color: var(--ns-bone); font-size: 14px; line-height: 1.6; }
 /* inline code — a hairline chip, echoing the site's existing "bordered = literal/control" language

@@ -5,13 +5,12 @@
 // solve a problem we don't have. See prerender.tsx for how `file`/`url`/the head fields are consumed.
 import type { ReactElement } from "react";
 import { App } from "./App.tsx";
-import { MARKUP_PCT } from "./lib/api.ts";
 import { AnonymousClaudeApi } from "./flow/AnonymousClaudeApi.tsx";
+import { Api } from "./flow/Api.tsx";
 import { Models } from "./flow/Models.tsx";
 import { NotFound } from "./flow/NotFound.tsx";
 import { OpenAiApiNoPhone } from "./flow/OpenAiApiNoPhone.tsx";
 import { Privacy } from "./flow/Privacy.tsx";
-import { Start } from "./flow/Start.tsx";
 import { Tos } from "./flow/Tos.tsx";
 
 const PROD = "https://nullsink.is";
@@ -37,13 +36,13 @@ export const ROUTES: Route[] = [
     Component: App,
   },
   {
-    path: "/start",
-    file: "start/index.html",
-    url: `${PROD}/start/`,
-    title: "nullsink: get started",
+    path: "/api",
+    file: "api/index.html",
+    url: `${PROD}/api/`,
+    title: "nullsink: api reference",
     description:
-      `Point any Anthropic or OpenAI SDK at nullsink: base URLs, copy-paste curl examples, pricing (provider list price + ~${MARKUP_PCT}% at purchase), and the limits to know before your first request.`,
-    Component: Start,
+      "The nullsink HTTP API: Anthropic and OpenAI endpoints, base URLs and auth, copy-paste curl, and the error codes. Point a stock SDK at it by changing only the base URL and the key.",
+    Component: Api,
   },
   {
     path: "/models",
