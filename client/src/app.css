@@ -140,7 +140,7 @@ button:disabled { cursor: not-allowed; }
 .avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
 /* the models row: a "models" text link, plus overlapping circular discs (the coin-stack pattern) as a
    decorative provider cue. First disc on top. */
-.model-link { color: var(--ns-bone); text-decoration: underline; text-underline-offset: 3px; transition: color 120ms ease-out; }
+.model-link { color: var(--ns-bone); text-decoration: underline; text-underline-offset: 3px; }
 .model-link:hover { color: var(--ns-acid); }
 .model-stack { display: inline-flex; align-items: center; }
 .stack-disc {
@@ -153,7 +153,6 @@ button:disabled { cursor: not-allowed; }
   border-radius: 50%;
   background: var(--ns-void); /* page-bg disc so each front mark cleanly cuts the one behind it */
   border: 1px solid var(--ns-acid); /* acid ring to match the /api coins; Tinfoil takes the seal variant */
-  transition: border-color 120ms ease-out;
 }
 .stack-disc.sealed { border-color: var(--ns-seal); }
 .stack-disc:not(:first-child) { margin-left: -9px; }
@@ -222,7 +221,6 @@ button:disabled { cursor: not-allowed; }
   padding: 14px 0;
   text-align: center;
   font-size: 15px;
-  transition: border-color 0.12s, color 0.12s;
 }
 .preset:hover { color: var(--ns-bone); border-color: var(--ns-muted); }
 .preset[aria-pressed="true"] {
@@ -418,7 +416,6 @@ button:disabled { cursor: not-allowed; }
   border: 1px solid var(--ns-line);
   padding: 6px 11px;
   cursor: pointer;
-  transition: border-color 120ms ease-out, color 120ms ease-out;
 }
 .check-btn:not(:disabled):hover { border-color: var(--ns-muted); color: var(--ns-bone); }
 .check-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
@@ -804,7 +801,6 @@ button:disabled { cursor: not-allowed; }
   background: transparent;
   border: 1px solid var(--ns-line);
   cursor: pointer;
-  transition: border-color 120ms ease-out, color 120ms ease-out;
 }
 .model-chip:hover { border-color: var(--ns-muted); }
 .model-chip.down { border-color: color-mix(in srgb, var(--ns-red) 45%, transparent); color: var(--ns-muted); }
@@ -838,7 +834,6 @@ button:disabled { cursor: not-allowed; }
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
-  transition: color 120ms ease-out;
 }
 .model-more-btn:hover { color: var(--ns-bone); }
 
