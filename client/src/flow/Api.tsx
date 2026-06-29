@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
@@ -8,13 +8,6 @@ import { EXT, GITHUB_URL } from "../lib/links.ts";
 // caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if the
 // served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons are
 // the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id — acid.
-
-// Provider docs: the request/response bodies are each provider's native schema, so their reference applies
-// verbatim (see the note under the endpoints). Each links the provider's own "create" endpoint page.
-const ANTHROPIC_DOCS = "https://platform.claude.com/docs/en/api/messages/create";
-const OPENAI_CHAT_DOCS =
-  "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create";
-const OPENAI_RESPONSES_DOCS = "https://developers.openai.com/api/reference/resources/responses/methods/create";
 
 const ANTHROPIC_CURL = `curl https://nullsink.is/v1/messages \\
   -H "x-api-key: 0sink_YOUR_KEY" \\
@@ -39,14 +32,22 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
-// The error envelope is each provider's native shape (so a stock SDK classifies the failure). The OpenAI form
-// is shown — it covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible). Anthropic's /v1/messages
-// wears its own, carrying the reason in `message` rather than `code` (see the note). The code is the same in both.
+// The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
+// shown below. The OpenAI form covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible), carrying
+// the reason in `code`; Anthropic's /v1/messages wears its own, carrying the reason in `message`. Same reason
+// string either way.
 const ERROR_SHAPE = `{
   "error": {
     "message": "max_tokens_required",
     "type": "invalid_request_error",
     "code": "max_tokens_required"
+  }
+}`;
+const ANTHROPIC_ERROR_SHAPE = `{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "max_tokens_required"
   }
 }`;
 
@@ -67,34 +68,22 @@ function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   );
 }
 
-// One endpoint row: provider mark(s) · method · path · a one-line note (a provider-doc link on the inference
-// rows). The whole site is monospace, so the path needs no special face — bone against the muted note.
+// One endpoint row: method · path · a copy button for the full URL · the provider mark(s). The whole site is
+// monospace, so the path needs no special face — bone path against the muted method.
 function Ep({
   marks,
   method,
   path,
-  href,
-  children,
 }: {
   marks: ComponentType<{ className?: string }>[];
   method: string;
   path: string;
-  href?: string;
-  children: ReactNode;
 }) {
   return (
     <div className="ep">
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
-      <span className="ep-desc">
-        {href ? (
-          <a href={href} {...EXT}>
-            {children}
-          </a>
-        ) : (
-          children
-        )}
-      </span>
+      <Copy value={`https://nullsink.is${path}`} />
       <Marks marks={marks} />
     </div>
   );
@@ -112,7 +101,7 @@ function Err({ code, children }: { code: string; children: ReactNode }) {
 
 export function Api() {
   return (
-    <Layout>
+    <Layout nav="api">
       <section className="section">
         <h1 className="page-h1">api</h1>
         <p className="note">
@@ -155,20 +144,9 @@ export function Api() {
           <span>Request and response bodies are each provider&apos;s native schema.</span>
         </p>
         <div className="ep-group">
-          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
-            Anthropic Messages
-          </Ep>
-          <Ep
-            marks={[OpenAiMark, TinfoilMark]}
-            method="POST"
-            path="/v1/chat/completions"
-            href={OPENAI_CHAT_DOCS}
-          >
-            OpenAI Chat Completions
-          </Ep>
-          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" href={OPENAI_RESPONSES_DOCS}>
-            OpenAI Responses
-          </Ep>
+          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" />
+          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" />
+          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" />
         </div>
       </section>
 
@@ -230,15 +208,8 @@ export function Api() {
           <Err code="invalid_token">the key is unknown or malformed</Err>
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
-        <CodeBlock label="error response · openai · tinfoil" code={ERROR_SHAPE} />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            The envelope matches the provider you called — Anthropic puts the reason in <code>message</code>,
-            OpenAI and Tinfoil in <code>code</code> — but the code is the same, so a stock SDK reads it
-            natively.
-          </span>
-        </p>
+        <CodeBlock label="openai · tinfoil" code={ERROR_SHAPE} />
+        <CodeBlock label="anthropic" code={ANTHROPIC_ERROR_SHAPE} />
       </section>
     </Layout>
   );

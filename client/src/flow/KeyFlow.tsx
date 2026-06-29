@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
-import { buyErrorMessage, checkBalance, getRails, requestQuote, usd } from "../lib/api.ts";
+import { buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, usd } from "../lib/api.ts";
 import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
@@ -23,10 +23,11 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   const [phase, setPhase] = useState<Phase>("home");
   const [amount, setAmount] = useState(10);
   const [agreed, setAgreed] = useState(false);
-  // Active pay rails (GET /rails) + the selected one. getRails() never throws (it falls back to a one-rail
-  // default), so the form is always usable; the picker (AmountStep) renders only when ≥2 come back.
-  const [rails, setRails] = useState<Rail[]>([]);
-  const [rail, setRail] = useState("");
+  // Active pay rails + the selected one. Seeded OPTIMISTICALLY (RAILS_OPTIMISTIC) so the picker is present at
+  // first paint — including in the prerendered/JS-off page — instead of popping in after GET /rails resolves.
+  // getRails() (below) reconciles against the server's authoritative set; the picker renders only when ≥2 rails.
+  const [rails, setRails] = useState<Rail[]>(RAILS_OPTIMISTIC.rails);
+  const [rail, setRail] = useState(RAILS_OPTIMISTIC.default);
 
   // Layout effect, NOT a passive effect: a passive effect fires after paint, so one frame of the
   // pay screen still sandwiched between the (not-yet-unmounted) marketing sections reaches the
@@ -47,12 +48,14 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     prevPhase.current = phase;
   }, [phase]);
 
-  // Fetch the active pay rails once on mount. Read-only + privacy-neutral; getRails() falls back to a
-  // one-rail default on any failure, so this never blocks the form. Picker shows only when ≥2 come back.
+  // Reconcile the optimistic seed against the server's authoritative set once on mount. Read-only +
+  // privacy-neutral; getRails() falls back to a one-rail default on any failure, so this never blocks the form.
+  // Keep the user's current coin if it survived into the reconciled set (they may have picked one before /rails
+  // resolved); otherwise take the server default. Picker shows only when ≥2 rails.
   useEffect(() => {
     getRails().then((r) => {
       setRails(r.rails);
-      setRail(r.default);
+      setRail((cur) => (r.rails.some((x) => x.name === cur) ? cur : r.default));
     });
   }, []);
 

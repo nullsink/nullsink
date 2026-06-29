@@ -1,6 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
+import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, PrivatemodeMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
@@ -22,6 +22,13 @@ const LOGO: Record<string, ComponentType<{ className?: string }>> = {
   openai: OpenAiMark,
 };
 
+// provider id → homepage. The card title links out to it (the same provider sites the home page links).
+const SITE: Record<string, string> = {
+  tinfoil: "https://tinfoil.sh",
+  anthropic: "https://www.anthropic.com",
+  openai: "https://openai.com",
+};
+
 // Listed/priced but the live upstream 404s for our account right now (a staged rollout we don't have access
 // to yet). Shown, flagged "down" in the danger register, still copyable — the proxy prices it, so a request
 // gets a clean refund on the 404. DISPLAY-ONLY: gating it at the proxy is a separate core change.
@@ -37,7 +44,7 @@ const TIERS = [
   { key: "sealed", label: "Sealed", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Proprietary",
+    label: "Closed source",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
@@ -45,9 +52,12 @@ const TIERS = [
 ] as const;
 
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
+// Privatemode AI is a sealed-enclave provider (attested TEE, open-weight models) — the SAME class as Tinfoil,
+// so it reads "sealed · open weight", not "confidential".
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
+  { id: "privatemode", name: "Privatemode AI", meta: "sealed · open weight", Logo: PrivatemodeMark },
   { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
-  { id: "gemini", name: "Google Gemini", meta: "proprietary", Logo: GeminiMark },
+  { id: "gemini", name: "Google Gemini", meta: "closed source", Logo: GeminiMark },
 ];
 
 function Chips({ ids }: { ids: string[] }) {
@@ -72,7 +82,15 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <div className="pcard-head">
           {Logo && <Logo className="pcard-logo" />}
           <div className="pcard-name">
-            <span className="pcard-title">{provider.label}</span>
+            <span className="pcard-title">
+              {SITE[provider.id] ? (
+                <a href={SITE[provider.id]} {...EXT}>
+                  {provider.label}
+                </a>
+              ) : (
+                provider.label
+              )}
+            </span>
             <span className="pcard-count">{provider.models.length} models</span>
           </div>
           <div className="pcard-tags">
@@ -98,7 +116,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
 
 export function Models() {
   return (
-    <Layout>
+    <Layout nav="models">
       <section className="section models">
         <h1 className="page-h1">Supported models</h1>
 

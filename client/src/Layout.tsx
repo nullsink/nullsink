@@ -4,12 +4,20 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 
 // The shell shared by every route: the centered column, the header bar with the brand (a home link) and
 // the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
-// adoption pages (api → models) with GitHub pulled up front. The footer opens with the
+// adoption pages (api → models). The footer opens with the
 // never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
-// (privacy + terms) on the left and the community links (Discord, Matrix) on the right; external
+// (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
 // <a> navigations are unaffected by the strict CSP.
-export function Layout({ children, center = false }: { children: ReactNode; center?: boolean }) {
+export function Layout({
+  children,
+  center = false,
+  nav,
+}: {
+  children: ReactNode;
+  center?: boolean;
+  nav?: "api" | "models";
+}) {
   return (
     <div className="shell">
       <header className="bar">
@@ -17,11 +25,16 @@ export function Layout({ children, center = false }: { children: ReactNode; cent
           <Wordmark />
         </a>
         <nav className="links">
-          <a href={GITHUB_URL} {...EXT}>
-            github
+          <a href="/api/" className={nav === "api" ? "on" : undefined} aria-current={nav === "api" ? "page" : undefined}>
+            api
           </a>
-          <a href="/api/">api</a>
-          <a href="/models/">models</a>
+          <a
+            href="/models/"
+            className={nav === "models" ? "on" : undefined}
+            aria-current={nav === "models" ? "page" : undefined}
+          >
+            models
+          </a>
         </nav>
       </header>
       <div className={"content" + (center ? " center" : "")}>{children}</div>
@@ -32,6 +45,9 @@ export function Layout({ children, center = false }: { children: ReactNode; cent
             <a href="/terms/">terms</a>
           </nav>
           <nav className="foot-links">
+            <a href={GITHUB_URL} {...EXT}>
+              github
+            </a>
             <a href={DISCORD_URL} {...EXT}>
               discord
             </a>

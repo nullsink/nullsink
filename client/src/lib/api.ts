@@ -124,6 +124,20 @@ export interface Rails {
 // hides and the flow is single-coin, exactly as before multi-rail.
 const RAILS_FALLBACK: Rails = { default: "monero", rails: [{ name: "monero", unit: "XMR", confirmations: 10 }] };
 
+// The picker's OPTIMISTIC first-paint set — seeded into KeyFlow's initial state so the coin picker is present
+// in the prerendered HTML (and at first client paint) instead of popping in after getRails() resolves. This is
+// only the opening guess: getRails() reconciles it against the server's authoritative set (the same map /buy
+// validates against), so a deployment whose rails differ self-corrects on the /rails response. The JS-off page
+// is the one place this set stays final, so seed it to match PRODUCTION (Monero + Bitcoin). Distinct from
+// RAILS_FALLBACK, the conservative single-rail value shown only when /rails never answers.
+export const RAILS_OPTIMISTIC: Rails = {
+  default: "monero",
+  rails: [
+    { name: "monero", unit: "XMR", confirmations: 10 },
+    { name: "bitcoin", unit: "BTC", confirmations: 3 },
+  ],
+};
+
 export async function getRails(): Promise<Rails> {
   try {
     const res = await fetch("/rails");

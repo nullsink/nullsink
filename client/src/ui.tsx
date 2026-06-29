@@ -84,6 +84,18 @@ export function GroqMark({ className }: { className?: string }) {
   );
 }
 
+// Privatemode AI's mark (sourced from models.dev's logo set, like the others) — a sealed-enclave provider;
+// same inline + currentColor treatment so it inherits the row's ink and stays self-origin under CSP.
+export function PrivatemodeMark({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 61 63" role="img" aria-label="Privatemode AI" fill="currentColor">
+      <path d="M13.2167 6.71884C13.2167 10.4296 10.258 13.4377 6.60833 13.4377C2.95865 13.4377 0 10.4296 0 6.71884C0 3.00813 2.95865 0 6.60833 0C10.258 0 13.2167 3.00813 13.2167 6.71884Z" />
+      <path d="M16.2667 22.7407H28.4667V62.0201H16.2667V22.7407Z" />
+      <path fillRule="evenodd" clipRule="evenodd" d="M38.6333 33.0774C44.2482 33.0774 48.8 28.4495 48.8 22.7407C48.8 17.0319 44.2482 12.404 38.6333 12.404C33.0184 12.404 28.4667 17.0319 28.4667 22.7407C28.4667 28.4495 33.0184 33.0774 38.6333 33.0774ZM38.6333 45.4814C50.9861 45.4814 61 35.3 61 22.7407C61 10.1814 50.9861 0 38.6333 0C26.2806 0 16.2667 10.1814 16.2667 22.7407C16.2667 35.3 26.2806 45.4814 38.6333 45.4814Z" />
+    </svg>
+  );
+}
+
 // Tinfoil's mark (a crumpled-foil triangle; viewBox 0 0 960 960) — same inline + currentColor treatment as
 // the provider marks above, so it inherits the card's text colour and stays on a self-origin page under CSP.
 export function TinfoilMark({ className }: { className?: string }) {
