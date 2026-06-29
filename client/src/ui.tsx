@@ -20,7 +20,7 @@ export function Mark({ className }: { className?: string }) {
 
 // The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
 // phase so the funnel breathes instead of blinking in unison. The offsets are mulberry32(seed) * 2.2,
-// frozen here for SEED 6425, so it's deterministic and needs no runtime RNG. To reseed: re-run mulberry32(s)
+// frozen here for SEED 9628, so it's deterministic and needs no runtime RNG. To reseed: re-run mulberry32(s)
 // and paste the new delays. Decorative motion → yields to prefers-reduced-motion (see .pulse-mark in
 // app.css). This IS the brand wordmark's mark now — it breathes in the header.
 const PULSE_GEO = [
@@ -32,7 +32,7 @@ const PULSE_GEO = [
   { x: 140, y: 140, w: 70, h: 70 },
   { x: 0, y: 280, w: 350, h: 70 },
 ];
-const PULSE_DELAYS = ["0.30s", "0.37s", "0.29s", "0.24s", "1.02s", "0.40s", "0.04s"]; // SEED 6425
+const PULSE_DELAYS = ["1.81s", "1.39s", "1.17s", "2.16s", "1.85s", "2.05s", "1.44s"]; // SEED 9628
 export function PulseMark({ className, delays = PULSE_DELAYS }: { className?: string; delays?: string[] }) {
   return (
     <svg
@@ -217,8 +217,9 @@ export function ExtMark({ className }: { className?: string }) {
 // Copy needs JS; with it off the chip still reads as the plain id (and is selectable). Same copy mechanics
 // as <Copy>, so the "copied" acknowledgement and timing match.
 export function ModelChip({ id, down = false }: { id: string; down?: boolean }) {
-  // a very short-lived "copied" flash: the chip's id is briefly REPLACED by "copied", then reverts.
-  const { copied, copy } = useCopy(id, 600);
+  // copy feedback floats a small acid "copied" badge ABOVE the chip (.chip-copied, absolutely positioned),
+  // so the chip text never moves — no layout shift in the row. Short-lived.
+  const { copied, copy } = useCopy(id, 800);
   return (
     <button
       type="button"
@@ -226,8 +227,9 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
       onClick={copy}
       aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
     >
-      {copied ? "copied" : id}
-      {down && !copied && <span className="model-chip-down">down</span>}
+      {id}
+      {down && <span className="model-chip-down">down</span>}
+      {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
     </button>
   );
 }

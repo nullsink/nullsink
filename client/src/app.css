@@ -711,7 +711,7 @@ button:disabled { cursor: not-allowed; }
 .trust-path .node.sink { flex-direction: column; gap: 8px; padding: 0; border: none; }
 .sink-mark { width: 42px; height: 42px; color: var(--ns-acid); }
 /* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
-   per-rect animation-delay, frozen from mulberry32 — SEED 6425). Decorative, so it yields to reduced-motion
+   per-rect animation-delay, frozen from mulberry32 — SEED 9628). Decorative, so it yields to reduced-motion
    (then it just holds the brand mark, full-opacity). It powers the wordmark mark in the header. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
@@ -823,6 +823,7 @@ button:disabled { cursor: not-allowed; }
 
 .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .model-chip {
+  position: relative; /* anchor for the floating "copied" badge */
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -836,7 +837,24 @@ button:disabled { cursor: not-allowed; }
 }
 .model-chip:hover { border-color: var(--ns-muted); }
 .model-chip.down { border-color: color-mix(in srgb, var(--ns-red) 45%, transparent); color: var(--ns-muted); }
-.model-chip.copied { border-color: var(--ns-acid); color: var(--ns-acid); }
+.model-chip.copied { border-color: var(--ns-acid); }
+/* copy feedback: a small acid-highlight "COPIED" floats just ABOVE the chip — absolutely positioned, so it
+   never shifts the chip row (the chip text stays put). Brief. */
+.chip-copied {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-size: 10px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 /* one focus ring everywhere (the design-system "states are decided" rule): 2px acid, offset 2px. */
 .model-chip:focus-visible,
 .model-more-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }

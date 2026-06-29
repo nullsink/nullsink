@@ -18,7 +18,7 @@ const SEEDS: { seed: number; delays: string[] }[] = [
   { seed: 8760, delays: ["0.96s", "2.04s", "1.91s", "1.82s", "1.13s", "1.06s", "0.22s"] },
 ];
 
-const CURRENT = 6425; // the seed the live wordmark uses
+const CURRENT = 9628; // the seed the live wordmark uses
 
 export function Seeds() {
   return (
