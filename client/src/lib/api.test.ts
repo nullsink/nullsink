@@ -2,7 +2,7 @@
 // test (QuotePay.test mocks the whole module away). Each request's body/headers and each status/error branch
 // is exercised against a stubbed global fetch. Privacy-critical: the raw token may appear ONLY in /balance.
 import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { requestQuote, checkBalance, getRails, fetchOrderStatus } from "./api.ts";
+import { requestQuote, checkBalance, getRails, fetchOrderStatus, buyErrorMessage, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
 
 type Call = { url: string; init?: RequestInit };
 let calls: Call[] = [];
@@ -106,4 +106,34 @@ test("fetchOrderStatus POSTs the hash and returns parsed status; throws order_st
 
   stubFetch(() => new Response("x", { status: 404 }));
   await expect(fetchOrderStatus("HASH")).rejects.toThrow("order_status_404");
+});
+
+// --- trocadorSwapUrl (pure URL builder; no fetch) ---------------------------
+test("trocadorSwapUrl prefills AnonPay: lowercased ticker, verbatim amount, no ref while the code is empty", () => {
+  const quote = { pay_to: "8AbCdEf", amount: "0.12345678", unit: "XMR", pay_uri: "monero:8AbCdEf", rate_usd: 150, confirmations_required: 10, expires_at: 1 };
+  const url = new URL(trocadorSwapUrl(quote));
+  expect(url.href.startsWith(TROCADOR_ANONPAY_URL)).toBe(true);
+  const p = url.searchParams;
+  expect(p.get("ticker_to")).toBe("xmr"); // destination coin lowercased for Trocador
+  expect(p.get("network_to")).toBe("Mainnet");
+  expect(p.get("address")).toBe("8AbCdEf"); // destination = the order's address
+  expect(p.get("amount")).toBe("0.12345678"); // verbatim — a money string is never reformatted
+  expect(p.get("name")).toBe("nullsink");
+  expect(p.get("description")).toBe("api credit");
+  expect(p.has("ref")).toBe(false); // TROCADOR_REF === "" → the param is omitted entirely
+});
+
+// --- buyErrorMessage (pure code → copy) -------------------------------------
+test("buyErrorMessage maps known codes to calm copy and falls back for the rest", () => {
+  expect(buyErrorMessage("rate_unavailable")).toMatch(/price/i);
+  expect(buyErrorMessage("unknown_rail")).toMatch(/coin/i);
+  expect(buyErrorMessage("network")).toMatch(/connection/i);
+  // the busy/limit/wallet codes (429s + transient wallet outage) each get their own calm, distinct copy
+  expect(buyErrorMessage("busy_try_later")).toMatch(/system is busy/i);
+  expect(buyErrorMessage("rate_limited")).toMatch(/busy right now/i);
+  expect(buyErrorMessage("wallet_unavailable")).toMatch(/temporarily unavailable/i);
+  // an unmapped code (a 500/proxy_error, or a validation code the client should never emit) → generic retry
+  const fallback = buyErrorMessage("proxy_error");
+  expect(fallback).toBe("Something went wrong. Try again.");
+  expect(buyErrorMessage("invalid_hash")).toBe(fallback);
 });

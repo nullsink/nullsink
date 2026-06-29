@@ -3,7 +3,7 @@ import { Ns } from "../ui.tsx";
 
 // SEO landing (route /openai-api-no-phone): captures "OpenAI API without phone number" / "OpenAI API no
 // credit card" (OpenAI's own sign-up requires a phone + a card on file). A real explainer (how the proxy
-// solves it, the 3 steps, what we don't keep), not a doorway — CTA to /start. Honest, not absolute —
+// solves it, the 3 steps, what we don't keep), not a doorway — CTA to /api. Honest, not absolute —
 // don't overclaim. Claims mirror the proxy contract (no account, prepaid crypto, key hashed in-browser,
 // OpenAI "do not store" forced on); prerenders, reads JS-off.
 export function OpenAiApiNoPhone() {
@@ -36,8 +36,7 @@ export function OpenAiApiNoPhone() {
           </li>
         </ul>
         <p className="section-copy">
-          The proxy swaps your key for ours, so OpenAI never sees your token. The request lifecycle is in{" "}
-          <a href="/how-it-works/">how it works</a>; the models you can call are on{" "}
+          The proxy swaps your key for ours, so OpenAI never sees your token. The models you can call are on{" "}
           <a href="/models/">supported models</a>.
         </p>
       </section>
@@ -58,10 +57,10 @@ export function OpenAiApiNoPhone() {
       </section>
 
       <section className="section">
-        <h2>start</h2>
+        <h2>api</h2>
         <p className="section-copy">
-          Base URLs and copy-paste examples are on{" "}
-          <a href="/start/">get started</a>.
+          Base URLs and copy-paste examples are in the{" "}
+          <a href="/api/">api reference</a>.
         </p>
       </section>
     </Layout>

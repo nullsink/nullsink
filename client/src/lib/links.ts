@@ -1,7 +1,7 @@
 // Outbound-link helpers, centralized so a rotated invite or a missed security attribute
 // is a one-line change rather than a hunt across pages.
 
-// Community links — used in the footer (Layout) and the get-started page (Start).
+// Community links — used in the Layout header/footer and the home orient column (HomeOrient).
 export const GITHUB_URL = "https://github.com/nullsink/nullsink";
 export const DISCORD_URL = "https://discord.gg/sFK36yrBq";
 export const MATRIX_URL = "https://matrix.to/#/#nullsink:matrix.org";

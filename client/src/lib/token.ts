@@ -11,8 +11,8 @@
 // The FORMAT + checksum + paste-validation live in the shared pure leaf core/src/token-format.ts, imported
 // here AND by the core CLI minter (core/cli/mint.ts) so a UI-minted token and a CLI-minted one are
 // byte-identical to the backend. Only the random-bytes encoding differs (browser btoa here, Bun Buffer in core).
-import { tokenChecksum } from "../../../core/src/token-format.ts";
-export { isValidTokenFormat } from "../../../core/src/token-format.ts";
+import { isValidTokenFormat, tokenChecksum } from "../../../core/src/token-format.ts";
+export { isValidTokenFormat };
 
 // base64url, no padding — matches Node's Buffer.toString("base64url").
 function base64url(bytes: Uint8Array): string {
@@ -29,4 +29,13 @@ export function generateToken(): string {
 export async function hashToken(token: string): Promise<string> {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// The home key field's two meaningful states, derived from the raw input so KeyFlow's render and its submit()
+// guard share one rule: a non-blank value that doesn't parse (malformed — show the typo warning, block the
+// buy) vs. a valid token (willTopUp — the CTA becomes "add credit"). Blank is neither: the form mints a key.
+export function keyFieldState(raw: string): { malformed: boolean; willTopUp: boolean } {
+  const v = raw.trim();
+  const valid = isValidTokenFormat(v);
+  return { malformed: v.length > 0 && !valid, willTopUp: valid };
 }

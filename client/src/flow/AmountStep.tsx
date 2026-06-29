@@ -17,14 +17,12 @@ const COIN_DESC: Record<string, string> = {
 export function AmountStep({
   amount,
   setAmount,
-  unit,
   rails,
   rail,
   setRail,
 }: {
   amount: number;
   setAmount: (n: number) => void;
-  unit: string; // the selected rail's display ticker, for the price-line estimate
   rails: Rail[]; // active rails from /rails — the picker renders only when there are ≥2
   rail: string; // the selected rail name
   setRail: (r: string) => void;
@@ -53,7 +51,7 @@ export function AmountStep({
   }
 
   return (
-    <div>
+    <div className="amount-step">
       <div className="field-label">
         <span>amount</span>
         <span className={"range-inline" + (flash ? " flash" : "")}>
@@ -105,12 +103,12 @@ export function AmountStep({
 
       <div className="price-line">
         {usd(amount)} credit + ~{MARKUP_PCT}% markup ≈{" "}
-        <span className="hl">{usd(amount * MARGIN)} in {unit}</span>
+        <span className="hl">{usd(amount * MARGIN)}</span>
       </div>
       {/* Pay-rail picker — the coin is chosen HERE, before quoting, so one /buy fires with the right rail and
           the pay screen never has to re-quote a live single-use address. Renders only when ≥2 rails are active
-          (one rail → single-coin flow, picker hidden). The .seg control + acid-on-select matches the key
-          toggle; the marks are currentColor so they take the same ink/acid. */}
+          (one rail → single-coin flow, picker hidden). The .seg control marks the selected coin acid; the
+          marks are currentColor so they take the same ink/acid. */}
       {rails.length >= 2 && (
         <div className="coin-pick">
           <div className="custom-label">pay with</div>
@@ -130,13 +128,6 @@ export function AmountStep({
             ))}
           </div>
           <p className="coin-desc">{COIN_DESC[rail] ?? "paid on-chain"}</p>
-          {/* Bitcoin honesty, footnote register — its ledger is public; never shame the choice, just inform. */}
-          {rail === "bitcoin" && (
-            <p className="coin-caveat">
-              bitcoin&apos;s ledger is public. amounts and addresses are visible on-chain. nullsink keeps no
-              request logs and ties no payment to your key.
-            </p>
-          )}
         </div>
       )}
     </div>

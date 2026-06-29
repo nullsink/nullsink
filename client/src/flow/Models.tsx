@@ -1,6 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { PulseMark, AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
+import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
@@ -34,10 +34,10 @@ const PREVIEW = 6;
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
-  { key: "sealed", label: "Open weight", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
+  { key: "sealed", label: "Sealed", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
-    label: "Frontier",
+    label: "Proprietary",
     tagline: "privacy by policy",
     sealed: false,
     providers: ["anthropic", "openai"],
@@ -47,7 +47,7 @@ const TIERS = [
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
   { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
-  { id: "gemini", name: "Google Gemini", meta: "frontier", Logo: GeminiMark },
+  { id: "gemini", name: "Google Gemini", meta: "proprietary", Logo: GeminiMark },
 ];
 
 function Chips({ ids }: { ids: string[] }) {
@@ -79,7 +79,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
             {sealed && (
               <span className="pill tee">
                 <SquareGlyph sealed className="tee-mark" />
-                TEE-attested
+                Open weight
               </span>
             )}
             <span className="pill avail">available</span>
@@ -112,45 +112,6 @@ export function Models() {
             . You pay each provider&apos;s published rate.
           </span>
         </p>
-
-        {/* The trust framing: the "who can read your messages" lede beside a static you → nullsink →
-            {frontier | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
-            words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
-        <div className="trust">
-          <div className="trust-copy">
-            <p className="trust-q">
-              <span className="hl">who can read your messages</span>
-            </p>
-            <ul className="trust-points">
-              <li className="lead">nullsink strips your identity.</li>
-              <li>Frontier providers still process your text.</li>
-              <li>A sealed enclave can&apos;t read it at all.</li>
-            </ul>
-          </div>
-          <div className="trust-path" aria-hidden="true">
-            <span className="node">you</span>
-            <span className="wire" />
-            <span className="node sink">
-              <PulseMark className="sink-mark" />
-              <span className="node-cap">nullsink</span>
-            </span>
-            <span className="wire" />
-            <span className="trust-branch">
-              <span className="branch-row sealed">
-                <span className="wire" />
-                <span className="node sealed">
-                  <SquareGlyph sealed /> enclave · sealed
-                </span>
-              </span>
-              <span className="branch-row">
-                <span className="wire" />
-                <span className="node">
-                  <SquareGlyph /> frontier · receives plaintext
-                </span>
-              </span>
-            </span>
-          </div>
-        </div>
 
         {TIERS.map((tier) => {
           const provs = tier.providers.map((id) => byId.get(id)).filter((p): p is Provider => p != null);

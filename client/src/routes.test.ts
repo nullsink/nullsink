@@ -19,7 +19,7 @@ test("a known subpage resolves, with or without a trailing slash", () => {
 test("an unknown path resolves to the not-found view, not the landing", () => {
   expect(routeFor("/does-not-exist")).toBe(NOT_FOUND);
   expect(routeFor("/models/extra")).toBe(NOT_FOUND);
-  expect(routeFor("/start/deeper/still")).toBe(NOT_FOUND);
+  expect(routeFor("/api/deeper/still")).toBe(NOT_FOUND);
 });
 
 test("NOT_FOUND stays out of the navigable route table", () => {

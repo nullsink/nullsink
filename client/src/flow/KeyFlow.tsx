@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
 import { buyErrorMessage, checkBalance, getRails, requestQuote, usd } from "../lib/api.ts";
-import { generateToken, hashToken, isValidTokenFormat } from "../lib/token.ts";
+import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import { AmountStep } from "./AmountStep.tsx";
@@ -12,7 +12,6 @@ import { QuotePay } from "./QuotePay.tsx";
 // whether the key is generated or pasted. Checking a balance is an instant inline lookup, never
 // a new screen. Then: pay → done. No key-management detour.
 type Phase = "home" | "pay" | "done";
-type Mode = "new" | "existing";
 
 // The active purchase, frozen at submit time: which key, whether it was freshly minted, and the
 // balance captured at quote time (so a top-up's success is a real delta, not just "> 0").
@@ -22,7 +21,6 @@ type Order = { token: string; wasNew: boolean; baseline: number };
 // switch to the focused checkout — hiding the marketing sections while money is moving.
 export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: boolean) => void }) {
   const [phase, setPhase] = useState<Phase>("home");
-  const [mode, setMode] = useState<Mode>("new");
   const [amount, setAmount] = useState(10);
   const [agreed, setAgreed] = useState(false);
   // Active pay rails (GET /rails) + the selected one. getRails() never throws (it falls back to a one-rail
@@ -139,10 +137,10 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     [amount, rail],
   );
 
-  const pasteValid = isValidTokenFormat(paste);
+  const keyState = keyFieldState(paste);
 
   async function check() {
-    if (!pasteValid) return;
+    if (!keyState.willTopUp) return;
     setChecking(true);
     setCheckError(false);
     try {
@@ -172,9 +170,11 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
       agreeRef.current?.focus();
       return;
     }
-    if (mode === "existing" && !pasteValid) return;
-    const tok = mode === "new" ? generateToken() : paste;
-    const wasNew = mode === "new";
+    // A non-blank but malformed key blocks the purchase (the CTA is also disabled in that state).
+    if (keyState.malformed) return;
+    const useExisting = keyState.willTopUp; // blank field → mint a new key; a valid token → top it up
+    const tok = useExisting ? paste : generateToken();
+    const wasNew = !useExisting;
     setBusy(true);
     setErrorCode(null);
     // Top-up: snapshot the existing balance first — the baseline a success delta is measured against.
@@ -224,80 +224,64 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
           submit();
         }}
       >
-        <h2>Buy credit</h2>
+        {/* The optional key field leads the form: a returning user tops up here; a new user sees it once,
+            leaves it blank, and continues straight down through amount → terms. Blank mints a fresh key; a
+            valid token tops it up (check its balance with the button). */}
+        <div className="have-key-inline">
+          <div className="keyfield-head">
+            <span>have a key?</span>
+            <span className="keyfield-opt">optional</span>
+          </div>
+          <input
+            className="paste-input"
+            type="text"
+            name="nullsink-key"
+            placeholder="0sink_…"
+            autoCapitalize="off"
+            autoComplete="off"
+            spellCheck={false}
+            data-1p-ignore
+            data-lpignore="true"
+            data-form-type="other"
+            value={paste}
+            onChange={(e) => {
+              setPaste(e.target.value.trim());
+              setDidCheck(false);
+              setCheckError(false);
+            }}
+            aria-label="your 0sink_ token — leave blank to mint a new key"
+          />
+          {/* the check-balance control is always visible; it's disabled until a valid key is present. */}
+          <div className="balance-check">
+            <button type="button" className="check-btn" disabled={!keyState.willTopUp || checking} onClick={check}>
+              {checking ? "checking…" : "check balance"}
+            </button>
+            {keyState.willTopUp &&
+              didCheck &&
+              (checkError ? (
+                <span className="check-line none">couldn't check, try again in a moment</span>
+              ) : (
+                <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
+                  {checkedBalance !== null
+                    ? `balance: ${usd(checkedBalance)}`
+                    : "no balance for this key. deposits confirm in ~20-45 min"}
+                </span>
+              ))}
+          </div>
+          {keyState.malformed ? (
+            <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
+          ) : !paste ? (
+            <p className="hint">Leave blank to mint a fresh key in your browser.</p>
+          ) : null}
+        </div>
 
         <AmountStep
           amount={amount}
           setAmount={setAmount}
-          unit={rails.find((r) => r.name === rail)?.unit ?? rails[0]?.unit ?? "BTC"}
           rails={rails}
           rail={rail}
           setRail={setRail}
         />
-
-        <div className="seg">
-          <button
-            type="button"
-            className={mode === "new" ? "on" : ""}
-            onClick={() => {
-              setMode("new");
-              setErrorCode(null);
-            }}
-          >
-            new key
-          </button>
-          <button
-            type="button"
-            className={mode === "existing" ? "on" : ""}
-            onClick={() => {
-              setMode("existing");
-              setErrorCode(null);
-            }}
-          >
-            I have a key
-          </button>
-        </div>
-
-        {mode === "new" && (
-          <p className="hint">A new key is generated in your browser and shown before you pay.</p>
-        )}
-
-        {mode === "existing" && (
-          <div className="have-key-inline">
-            <input
-              className="paste-input"
-              type="text"
-              name="nullsink-key"
-              placeholder="0sink_…"
-              autoCapitalize="off"
-              autoComplete="off"
-              spellCheck={false}
-              data-1p-ignore
-              data-lpignore="true"
-              data-form-type="other"
-              value={paste}
-              onChange={(e) => {
-                setPaste(e.target.value.trim());
-                setDidCheck(false);
-                setCheckError(false);
-              }}
-              aria-label="your 0sink_ token"
-            />
-            {paste && !pasteValid && (
-              <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
-            )}
-            {didCheck &&
-              (checkError ? (
-                <div className="check-line none">couldn't check right now, try again in a moment</div>
-              ) : (
-                <div className={"check-line" + (checkedBalance === null ? " none" : "")}>
-                  {checkedBalance !== null
-                    ? `balance: ${usd(checkedBalance)}`
-                    : "no balance for this key. a deposit can take ~20-45 min to confirm"}
-                </div>
-              ))}
-          </div>
-        )}
 
         {/* Environmental /buy errors (rate/wallet/busy/rate-limit) surface here, pre-navigation. */}
         {errorCode && <div className="notice">{buyErrorMessage(errorCode)}</div>}
@@ -331,25 +315,13 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
           </div>
         )}
 
-        {mode === "new" ? (
-          <button className="btn-primary" type="submit" disabled={busy}>
-            {busy ? "requesting…" : "mint key →"}
-          </button>
-        ) : (
-          <div className="btn-row">
-            <button
-              className="btn-ghost"
-              type="button"
-              disabled={!pasteValid || checking || busy}
-              onClick={check}
-            >
-              {checking ? "checking…" : "check balance"}
-            </button>
-            <button className="btn-primary" type="submit" disabled={!pasteValid || busy}>
-              {busy ? "requesting…" : "add credit →"}
-            </button>
-          </div>
-        )}
+        <button
+          className="btn-primary"
+          type="submit"
+          disabled={busy || keyState.malformed}
+        >
+          {busy ? "requesting…" : keyState.willTopUp ? "add credit →" : "mint key →"}
+        </button>
 
       </form>
     );
@@ -416,12 +388,12 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         <KeyBlock token={order.token} />
       </div>
 
-      {/* The hand-off: the next thing a funded first-timer needs is "now what?" — /start has the SDK
+      {/* The hand-off: the next thing a funded first-timer needs is "now what?" — /api has the SDK
           examples. New tab: the key is still on screen, and losing it loses the credit. */}
       <p className="hint">
         Save your key, then point your SDK at it.{" "}
-        <a href="/start/" {...EXT}>
-          get started
+        <a href="/api/" {...EXT}>
+          api reference
         </a>
         .
       </p>
