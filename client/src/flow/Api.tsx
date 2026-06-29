@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
@@ -144,24 +144,17 @@ export function Api() {
 
       <section className="section">
         <h2>base url &amp; auth</h2>
-        {/* the coin on each base URL marks which provider it serves — /v1 is shared by OpenAI + Tinfoil */}
-        <div className="ep-group">
-          <div className="ep">
-            <span className="ep-path">
-              https://nullsink.is <Copy value="https://nullsink.is" />
-            </span>
-            <Marks marks={[AnthropicMark]} />
-          </div>
-          <div className="ep">
-            <span className="ep-path">
-              https://nullsink.is/v1 <Copy value="https://nullsink.is/v1" />
-            </span>
-            <Marks marks={[OpenAiMark, TinfoilMark]} />
-          </div>
-        </div>
         <dl className="kv">
+          <KvRow k="base url" values={["https://nullsink.is"]} />
           <KvRow k="auth headers" values={["x-api-key", "Authorization: Bearer"]} />
         </dl>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Endpoints live under <code>/v1</code>. OpenAI-compatible SDKs append only the endpoint tail, so
+            give them the base URL with it — <code>https://nullsink.is/v1</code>.
+          </span>
+        </p>
       </section>
 
       <section className="section">

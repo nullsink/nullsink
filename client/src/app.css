@@ -32,7 +32,7 @@ button:disabled { cursor: not-allowed; }
      per-page measure later if the wider column reads loose there. */
   max-width: 760px;
   margin: 0 auto;
-  padding: 0 20px 80px;
+  padding: 0 20px 32px;
   /* Sticky footer: fill at least the viewport so .foot reaches the bottom on short pages (the home
      especially). .content below takes the slack; border-box keeps the 80px bottom pad inside the 100dvh. */
   display: flex;
@@ -622,7 +622,7 @@ button:disabled { cursor: not-allowed; }
 }
 .ep-ico { width: 12px; height: 12px; color: var(--ns-bone); }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
-.ep-method { flex: none; min-width: 34px; color: var(--ns-faint); font-size: 11px; letter-spacing: 0.06em; }
+.ep-method { flex: none; min-width: 40px; color: var(--ns-bone); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
 .ep-desc { color: var(--ns-muted); } /* the provider's API name + doc link, sitting after the path */
 .ep-desc a { color: var(--ns-bone); } /* the provider's own API docs */
