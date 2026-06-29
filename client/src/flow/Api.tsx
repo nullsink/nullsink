@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
@@ -8,13 +8,6 @@ import { EXT, GITHUB_URL } from "../lib/links.ts";
 // caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if the
 // served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons are
 // the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id — acid.
-
-// Provider docs: the request/response bodies are each provider's native schema, so their reference applies
-// verbatim (see the note under the endpoints). Each links the provider's own "create" endpoint page.
-const ANTHROPIC_DOCS = "https://platform.claude.com/docs/en/api/messages/create";
-const OPENAI_CHAT_DOCS =
-  "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create";
-const OPENAI_RESPONSES_DOCS = "https://developers.openai.com/api/reference/resources/responses/methods/create";
 
 const ANTHROPIC_CURL = `curl https://nullsink.is/v1/messages \\
   -H "x-api-key: 0sink_YOUR_KEY" \\
@@ -67,34 +60,25 @@ function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   );
 }
 
-// One endpoint row: provider mark(s) · method · path · a one-line note (a provider-doc link on the inference
-// rows). The whole site is monospace, so the path needs no special face — bone against the muted note.
+// One endpoint row: method · path · the provider's API name · a copy button for the full URL · the provider
+// mark(s). The whole site is monospace, so the path needs no special face — bone against the muted name.
 function Ep({
   marks,
   method,
   path,
-  href,
   children,
 }: {
   marks: ComponentType<{ className?: string }>[];
   method: string;
   path: string;
-  href?: string;
   children: ReactNode;
 }) {
   return (
     <div className="ep">
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
-      <span className="ep-desc">
-        {href ? (
-          <a href={href} {...EXT}>
-            {children}
-          </a>
-        ) : (
-          children
-        )}
-      </span>
+      <span className="ep-desc">{children}</span>
+      <Copy value={`https://nullsink.is${path}`} />
       <Marks marks={marks} />
     </div>
   );
@@ -155,18 +139,13 @@ export function Api() {
           <span>Request and response bodies are each provider&apos;s native schema.</span>
         </p>
         <div className="ep-group">
-          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
+          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages">
             Anthropic Messages
           </Ep>
-          <Ep
-            marks={[OpenAiMark, TinfoilMark]}
-            method="POST"
-            path="/v1/chat/completions"
-            href={OPENAI_CHAT_DOCS}
-          >
+          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions">
             OpenAI Chat Completions
           </Ep>
-          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" href={OPENAI_RESPONSES_DOCS}>
+          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses">
             OpenAI Responses
           </Ep>
         </div>

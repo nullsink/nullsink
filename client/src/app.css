@@ -378,8 +378,8 @@ button:disabled { cursor: not-allowed; }
   display: block;
   box-sizing: border-box;
   color-scheme: dark;
-  background: transparent;
-  border: 1px solid var(--ns-line);
+  background: rgba(255, 255, 255, 0.03); /* a faint surface so the optional key field reads as an input, not a hairline */
+  border: 1px solid rgba(255, 255, 255, 0.24); /* one notch above --ns-line — the empty field is easier to spot */
   color: var(--ns-bone);
   font-family: inherit;
   font-size: 15px;
@@ -599,7 +599,7 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the right edge, after the line */
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; } /* the coins sit at the right edge of the row */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -616,9 +616,8 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep-desc { color: var(--ns-muted); } /* the provider's API name + doc link, sitting after the path */
-.ep-desc a { color: var(--ns-bone); } /* the provider's own API docs */
-.ep-desc a:hover { color: var(--ns-acid); }
+.ep-desc { color: var(--ns-muted); } /* the provider's API name, sitting after the path */
+.ep .copy { margin-left: auto; } /* the copy-url button + the coins cluster at the right edge */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }
@@ -761,6 +760,8 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: var(--ns-tracking-display);
   color: var(--ns-bone);
 }
+.pcard-title a { color: inherit; text-decoration: none; } /* the title links to the provider's site */
+.pcard-title a:hover { color: var(--ns-acid); }
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;

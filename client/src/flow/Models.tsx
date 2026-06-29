@@ -22,6 +22,13 @@ const LOGO: Record<string, ComponentType<{ className?: string }>> = {
   openai: OpenAiMark,
 };
 
+// provider id → homepage. The card title links out to it (the same provider sites the home page links).
+const SITE: Record<string, string> = {
+  tinfoil: "https://tinfoil.sh",
+  anthropic: "https://www.anthropic.com",
+  openai: "https://openai.com",
+};
+
 // Listed/priced but the live upstream 404s for our account right now (a staged rollout we don't have access
 // to yet). Shown, flagged "down" in the danger register, still copyable — the proxy prices it, so a request
 // gets a clean refund on the 404. DISPLAY-ONLY: gating it at the proxy is a separate core change.
@@ -72,7 +79,15 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <div className="pcard-head">
           {Logo && <Logo className="pcard-logo" />}
           <div className="pcard-name">
-            <span className="pcard-title">{provider.label}</span>
+            <span className="pcard-title">
+              {SITE[provider.id] ? (
+                <a href={SITE[provider.id]} {...EXT}>
+                  {provider.label}
+                </a>
+              ) : (
+                provider.label
+              )}
+            </span>
             <span className="pcard-count">{provider.models.length} models</span>
           </div>
           <div className="pcard-tags">
