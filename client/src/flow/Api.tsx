@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
 import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
-import { EXT } from "../lib/links.ts";
+import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
 // the base URL + key change. Minimal prose: the served routes, what each does, and the few snippets any
@@ -93,7 +93,6 @@ function Ep({
 }) {
   return (
     <div className="ep">
-      <Marks marks={marks} />
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
       <span className="ep-desc">
@@ -105,6 +104,7 @@ function Ep({
           children
         )}
       </span>
+      <Marks marks={marks} />
     </div>
   );
 }
@@ -147,16 +147,16 @@ export function Api() {
         {/* the coin on each base URL marks which provider it serves — /v1 is shared by OpenAI + Tinfoil */}
         <div className="ep-group">
           <div className="ep">
-            <Marks marks={[AnthropicMark]} />
             <span className="ep-path">
               https://nullsink.is <Copy value="https://nullsink.is" />
             </span>
+            <Marks marks={[AnthropicMark]} />
           </div>
           <div className="ep">
-            <Marks marks={[OpenAiMark, TinfoilMark]} />
             <span className="ep-path">
               https://nullsink.is/v1 <Copy value="https://nullsink.is/v1" />
             </span>
+            <Marks marks={[OpenAiMark, TinfoilMark]} />
           </div>
         </div>
         <dl className="kv">
@@ -184,10 +184,7 @@ export function Api() {
         </div>
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Request and response bodies are each provider&apos;s native schema — the linked docs apply
-            verbatim.
-          </span>
+          <span>Request and response bodies are each provider&apos;s native schema.</span>
         </p>
       </section>
 
@@ -217,7 +214,7 @@ export function Api() {
         <h2>limits</h2>
         <ul className="dash-list">
           <li>
-            <span className="lead-term">model</span> — must be one <Ns /> prices (
+            <span className="lead-term">model</span> — must be one <Ns /> supports (
             <a href="/models/">models</a>); anything else returns <code>unsupported_model</code>.
           </li>
           <li>
@@ -233,6 +230,14 @@ export function Api() {
             org / project ids are stripped before forwarding.
           </li>
         </ul>
+        <p className="section-copy">
+          Need a stripped feature or an unlisted model? Email{" "}
+          <a href="mailto:admin@nullsink.is">admin@nullsink.is</a> or open a{" "}
+          <a href={GITHUB_URL} {...EXT}>
+            GitHub issue
+          </a>
+          .
+        </p>
       </section>
 
       <section className="section">

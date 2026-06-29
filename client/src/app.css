@@ -607,7 +607,7 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; width: 52px; } /* fixed slot (fits two discs) so method/path stay aligned across 1- and 2-provider rows */
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the right edge, after the line */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -624,7 +624,7 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 34px; color: var(--ns-faint); font-size: 11px; letter-spacing: 0.06em; }
 .ep-path { color: var(--ns-bone); }
-.ep-desc { margin-left: auto; color: var(--ns-muted); } /* right-aligned on a wide row; wraps under on narrow */
+.ep-desc { color: var(--ns-muted); } /* the provider's API name + doc link, sitting after the path */
 .ep-desc a { color: var(--ns-bone); } /* the provider's own API docs */
 .ep-desc a:hover { color: var(--ns-acid); }
 
