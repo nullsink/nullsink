@@ -8,6 +8,7 @@ import { App } from "./App.tsx";
 import { Api } from "./flow/Api.tsx";
 import { Models } from "./flow/Models.tsx";
 import { NotFound } from "./flow/NotFound.tsx";
+import { Seeds } from "./flow/Seeds.tsx";
 import { Privacy } from "./flow/Privacy.tsx";
 import { Tos } from "./flow/Tos.tsx";
 
@@ -68,6 +69,16 @@ export const ROUTES: Route[] = [
     description:
       "Terms for using nullsink: prepaid credit bought with Monero or Bitcoin, bearer keys, no refunds, no key recovery, experimental with low limits. AI output comes from third-party providers under their policies.",
     Component: Tos,
+  },
+  {
+    // TEMP: wordmark pulse-seed comparison page. Not in the sitemap; noindex. Remove with the Seeds page.
+    path: "/seeds",
+    file: "seeds/index.html",
+    url: `${PROD}/seeds/`,
+    title: "nullsink: pulse seeds (temp)",
+    description: "Temporary page to compare wordmark pulse seeds.",
+    noindex: true,
+    Component: Seeds,
   },
 ];
 

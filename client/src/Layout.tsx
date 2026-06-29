@@ -35,6 +35,7 @@ export function Layout({
           >
             models
           </a>
+          <a href="/seeds/">seeds</a>
         </nav>
       </header>
       <div className={"content" + (center ? " center" : "")}>{children}</div>

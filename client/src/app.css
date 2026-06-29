@@ -72,7 +72,7 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: var(--ns-tracking-display);
   font-size: 19px;
 }
-.wordmark .mark { height: 1cap; width: 1cap; color: var(--ns-acid); display: inline-block; }
+.wordmark .mark { height: 1.7cap; width: 1.7cap; color: var(--ns-acid); display: inline-block; } /* bigger than cap-height so the moving mark reads as a logo */
 /* the deployed build tag trailing the name — the acid highlighter chip (same ink-on-acid as .hl), sized
    down and with the tight display tracking reset so it reads as a small tag beside the name. "dev" locally. */
 .wordmark-ver {
@@ -711,8 +711,8 @@ button:disabled { cursor: not-allowed; }
 .trust-path .node.sink { flex-direction: column; gap: 8px; padding: 0; border: none; }
 .sink-mark { width: 42px; height: 42px; color: var(--ns-acid); }
 /* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
-   per-rect animation-delay, frozen from the pattern generator — SEED 4817). Decorative, so it yields to
-   reduced-motion (then it just holds the brand mark, full-opacity). The diagram is the ONLY place it lives. */
+   per-rect animation-delay, frozen from mulberry32 — SEED 6425). Decorative, so it yields to reduced-motion
+   (then it just holds the brand mark, full-opacity). It powers the wordmark mark in the header. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
@@ -784,11 +784,10 @@ button:disabled { cursor: not-allowed; }
 }
 .title-ext { width: 0.78em; height: 0.78em; margin-left: 0.9ch; vertical-align: -0.05em; opacity: 0; color: var(--ns-acid); } /* clears the name's hover highlight (which bleeds ~0.4ch right) + a real gap */
 .pcard-title a:hover .title-ext { opacity: 1; }
-/* SEALED providers (Tinfoil, Privatemode) take the purple seal accent instead of acid — for the title
-   highlight, its external glyph, and the copy-confirmation on their model chips. */
+/* SEALED providers (Tinfoil, Privatemode) take the purple seal accent on the title highlight + its external
+   glyph; their model chips still copy in acid (green), like every other provider. */
 .pcard.sealed .pcard-title a:hover .title-name { background: var(--ns-seal); }
 .pcard.sealed .title-ext { color: var(--ns-seal); }
-.pcard.sealed .model-chip.copied { border-color: var(--ns-seal); color: var(--ns-seal); }
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;
@@ -815,6 +814,13 @@ button:disabled { cursor: not-allowed; }
 
 /* model chips: each id copies on click. Hairline default; hover wakes the border (muted → bone); copied →
    acid border + text; an unroutable id (.down) takes a red-tinted border and a red "down" tag. */
+/* TEMP: the /seeds comparison grid — delete with the Seeds page once a seed is chosen */
+.seed-grid { display: flex; flex-wrap: wrap; gap: 24px; margin-top: 26px; }
+.seed-cell { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 24px 28px; border: 1px solid var(--ns-line); }
+.seed-cell.on { border-color: var(--ns-acid); }
+.seed-mark { width: 68px; height: 68px; color: var(--ns-acid); }
+.seed-label { font-size: 12px; letter-spacing: 0.05em; color: var(--ns-muted); }
+
 .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .model-chip {
   display: inline-flex;
@@ -845,7 +851,6 @@ button:disabled { cursor: not-allowed; }
   background: var(--ns-red);
   padding: 1px 5px;
 }
-.model-chip-ok { font-size: 11px; }
 
 /* the "all N models" / "show less" toggle: sits BELOW the chips so the list never splits around it. State-
    driven (the card hydrates); a muted underline that wakes to bone. With JS off it shows the preview. */
