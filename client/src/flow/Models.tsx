@@ -34,7 +34,7 @@ const PREVIEW = 6;
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
-  { key: "sealed", label: "TEE-attested", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
+  { key: "sealed", label: "Sealed", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
     label: "Proprietary",
@@ -114,14 +114,14 @@ export function Models() {
         </p>
 
         {/* The trust framing: the "who can read your messages" lede beside a static you → nullsink →
-            {frontier | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
+            {proprietary | enclave} diagram. The diagram is decorative (aria-hidden) — the lede says it in
             words. The right branch is a spine with a short wire into each node (sealed branch in seal). */}
         <div className="trust">
           <div className="trust-copy">
             <ul className="trust-points">
               <li className="lead">nullsink strips your identity.</li>
-              <li>Frontier providers still process your text.</li>
-              <li>A sealed enclave can&apos;t read it at all.</li>
+              <li>Proprietary models — the provider reads your text.</li>
+              <li>Sealed models — even the provider can&apos;t read it.</li>
             </ul>
           </div>
           <div className="trust-path" aria-hidden="true">
@@ -142,7 +142,7 @@ export function Models() {
               <span className="branch-row">
                 <span className="wire" />
                 <span className="node">
-                  <SquareGlyph /> frontier · receives plaintext
+                  <SquareGlyph /> proprietary · receives plaintext
                 </span>
               </span>
             </span>
