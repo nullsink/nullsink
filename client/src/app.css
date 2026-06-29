@@ -594,8 +594,20 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; width: 38px; } /* fixed slot — keeps method/path aligned even on the markless account rows */
-.ep-mark { width: 14px; height: 14px; color: var(--ns-bone); }
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; width: 52px; } /* fixed slot (fits two discs) so method/path stay aligned across 1- and 2-provider rows */
+/* each provider mark sits in an acid-ringed coin — the page's signature accent */
+.ep-disc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ns-void);
+  border: 1px solid var(--ns-acid);
+}
+.ep-ico { width: 12px; height: 12px; color: var(--ns-bone); }
 .ep-method { flex: none; min-width: 34px; color: var(--ns-faint); font-size: 11px; letter-spacing: 0.06em; }
 .ep-path { color: var(--ns-bone); }
 .ep-desc { margin-left: auto; color: var(--ns-muted); } /* right-aligned on a wide row; wraps under on narrow */

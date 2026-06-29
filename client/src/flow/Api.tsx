@@ -42,21 +42,46 @@ claude`;
 // The two error envelopes — each provider's native shape (so a stock SDK classifies the failure), our code
 // riding in `message` (Anthropic, no code field) / `code` (OpenAI). max_tokens_required shown as the example.
 const ERROR_SHAPE = `# anthropic · 400 on POST /v1/messages
-{ "type": "error", "error": { "type": "invalid_request_error", "message": "max_tokens_required" } }
+{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "max_tokens_required"
+  }
+}
 
 # openai · 400 on POST /v1/chat/completions
-{ "error": { "message": "max_tokens_required", "type": "invalid_request_error", "code": "max_tokens_required" } }`;
+{
+  "error": {
+    "message": "max_tokens_required",
+    "type": "invalid_request_error",
+    "code": "max_tokens_required"
+  }
+}`;
+
+// Provider mark(s) in acid-ringed coins — the page's signature accent, shared by the base-url and endpoint rows.
+function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
+  return (
+    <span className="ep-marks" aria-hidden="true">
+      {marks.map((M, i) => (
+        <span key={i} className="ep-disc">
+          <M className="ep-ico" />
+        </span>
+      ))}
+    </span>
+  );
+}
 
 // One endpoint row: provider mark(s) · method · path · a one-line note (a provider-doc link on the inference
 // rows). The whole site is monospace, so the path needs no special face — bone against the muted note.
 function Ep({
-  marks = [],
+  marks,
   method,
   path,
   href,
   children,
 }: {
-  marks?: ComponentType<{ className?: string }>[];
+  marks: ComponentType<{ className?: string }>[];
   method: string;
   path: string;
   href?: string;
@@ -64,11 +89,7 @@ function Ep({
 }) {
   return (
     <div className="ep">
-      <span className="ep-marks" aria-hidden="true">
-        {marks.map((M, i) => (
-          <M key={i} className="ep-mark" />
-        ))}
-      </span>
+      <Marks marks={marks} />
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
       <span className="ep-desc">
@@ -107,26 +128,29 @@ export function Api() {
             page.
           </span>
         </p>
+        <p className="note">
+          <span className="marker" aria-hidden="true">!</span>
+          <span>
+            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
+            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
+            <code>max_tokens_required</code>.
+          </span>
+        </p>
       </section>
 
       <section className="section">
         <h2>base url &amp; auth</h2>
-        {/* the mark(s) on each base URL carry which provider it serves — /v1 is shared by OpenAI + Tinfoil */}
+        {/* the coin on each base URL marks which provider it serves — /v1 is shared by OpenAI + Tinfoil */}
         <div className="ep-group">
           <div className="ep">
-            <span className="ep-marks" aria-hidden="true">
-              <AnthropicMark className="ep-mark" />
-            </span>
+            <Marks marks={[AnthropicMark]} />
             <span className="ep-path">
               https://nullsink.is <Copy value="https://nullsink.is" />
             </span>
             <span className="ep-desc">anthropic</span>
           </div>
           <div className="ep">
-            <span className="ep-marks" aria-hidden="true">
-              <OpenAiMark className="ep-mark" />
-              <TinfoilMark className="ep-mark" />
-            </span>
+            <Marks marks={[OpenAiMark, TinfoilMark]} />
             <span className="ep-path">
               https://nullsink.is/v1 <Copy value="https://nullsink.is/v1" />
             </span>
@@ -134,14 +158,13 @@ export function Api() {
           </div>
         </div>
         <dl className="kv">
-          <KvRow k="auth" values={["x-api-key: 0sink_…", "Authorization: Bearer 0sink_…"]} />
+          <KvRow k="auth headers" values={["x-api-key", "Authorization: Bearer"]} />
         </dl>
       </section>
 
       <section className="section">
         <h2>endpoints</h2>
         <div className="ep-group">
-          <div className="ep-group-label">inference · spends credit</div>
           <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
             Anthropic Messages
           </Ep>
@@ -158,12 +181,10 @@ export function Api() {
           </Ep>
         </div>
         <p className="note">
-          <span className="marker" aria-hidden="true">!</span>
+          <span className="marker" aria-hidden="true">?</span>
           <span>
             Request and response bodies are each provider&apos;s native schema — the linked docs apply
-            verbatim. <Ns /> only constrains what metering needs: a max output tokens, a model it prices (
-            <a href="/models/">models</a>), and a few rejected options (<code>n</code>, <code>best_of</code>,
-            premium betas).
+            verbatim.
           </span>
         </p>
       </section>
@@ -176,11 +197,6 @@ export function Api() {
           highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
         />
         <CodeBlock label="openai · curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.2"]} />
-        <p className="section-copy">
-          <span className="hl">Always set a max output tokens</span> — <code>max_tokens</code> (Anthropic) or{" "}
-          <code>max_completion_tokens</code> (OpenAI). Without one the request is rejected with{" "}
-          <code>max_tokens_required</code>.
-        </p>
       </section>
 
       <section className="section">
@@ -193,6 +209,28 @@ export function Api() {
             <code>ANTHROPIC_API_KEY</code>. Then point it at a <a href="/models/">supported model</a>.
           </span>
         </p>
+      </section>
+
+      <section className="section">
+        <h2>limits</h2>
+        <ul className="dash-list">
+          <li>
+            <span className="lead-term">model</span> — must be one <Ns /> prices (
+            <a href="/models/">models</a>); anything else returns <code>unsupported_model</code>.
+          </li>
+          <li>
+            <span className="lead-term">endpoints</span> — only the three above are proxied; other paths
+            return <code>unsupported_endpoint</code>.
+          </li>
+          <li>
+            <span className="lead-term">options</span> — <code>n</code> and <code>best_of</code> must be 1;
+            unsupported ones return <code>unsupported_option</code>.
+          </li>
+          <li>
+            <span className="lead-term">headers</span> — premium <code>anthropic-beta</code> features and
+            org / project ids are stripped before forwarding.
+          </li>
+        </ul>
       </section>
 
       <section className="section">

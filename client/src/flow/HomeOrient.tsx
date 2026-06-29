@@ -26,6 +26,17 @@ export function HomeOrient() {
       <dl className="avail">
         <div className="avail-row">
           <dt>
+            <a className="model-link" href="/api/">
+              api
+            </a>
+          </dt>
+          <dd className="on">
+            <span className="avail-dot" aria-hidden="true" />
+            live
+          </dd>
+        </div>
+        <div className="avail-row">
+          <dt>
             <a className="model-link" href="/models/">
               models
             </a>
@@ -42,17 +53,6 @@ export function HomeOrient() {
                 <OpenAiMark className="stack-ico" />
               </span>
             </span>
-          </dd>
-        </div>
-        <div className="avail-row">
-          <dt>
-            <a className="model-link" href="/api/">
-              api
-            </a>
-          </dt>
-          <dd className="on">
-            <span className="avail-dot" aria-hidden="true" />
-            live
           </dd>
         </div>
         <div className="avail-row">
