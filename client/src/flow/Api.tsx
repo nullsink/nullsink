@@ -32,14 +32,22 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
-// The error envelope is each provider's native shape (so a stock SDK classifies the failure). The OpenAI form
-// is shown — it covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible). Anthropic's /v1/messages
-// wears its own, carrying the reason in `message` rather than `code` (see the note). The code is the same in both.
+// The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
+// shown below. The OpenAI form covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible), carrying
+// the reason in `code`; Anthropic's /v1/messages wears its own, carrying the reason in `message`. Same reason
+// string either way.
 const ERROR_SHAPE = `{
   "error": {
     "message": "max_tokens_required",
     "type": "invalid_request_error",
     "code": "max_tokens_required"
+  }
+}`;
+const ANTHROPIC_ERROR_SHAPE = `{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "max_tokens_required"
   }
 }`;
 
@@ -60,24 +68,21 @@ function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   );
 }
 
-// One endpoint row: method · path · the provider's API name · a copy button for the full URL · the provider
-// mark(s). The whole site is monospace, so the path needs no special face — bone against the muted name.
+// One endpoint row: method · path · a copy button for the full URL · the provider mark(s). The whole site is
+// monospace, so the path needs no special face — bone path against the muted method.
 function Ep({
   marks,
   method,
   path,
-  children,
 }: {
   marks: ComponentType<{ className?: string }>[];
   method: string;
   path: string;
-  children: ReactNode;
 }) {
   return (
     <div className="ep">
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
-      <span className="ep-desc">{children}</span>
       <Copy value={`https://nullsink.is${path}`} />
       <Marks marks={marks} />
     </div>
@@ -139,15 +144,9 @@ export function Api() {
           <span>Request and response bodies are each provider&apos;s native schema.</span>
         </p>
         <div className="ep-group">
-          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages">
-            Anthropic Messages
-          </Ep>
-          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions">
-            OpenAI Chat Completions
-          </Ep>
-          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses">
-            OpenAI Responses
-          </Ep>
+          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" />
+          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" />
+          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" />
         </div>
       </section>
 
@@ -210,14 +209,7 @@ export function Api() {
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
         <CodeBlock label="error response · openai · tinfoil" code={ERROR_SHAPE} />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            The envelope matches the provider you called — Anthropic puts the reason in <code>message</code>,
-            OpenAI and Tinfoil in <code>code</code> — but the code is the same, so a stock SDK reads it
-            natively.
-          </span>
-        </p>
+        <CodeBlock label="error response · anthropic" code={ANTHROPIC_ERROR_SHAPE} />
       </section>
     </Layout>
   );

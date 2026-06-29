@@ -379,8 +379,8 @@ button:disabled { cursor: not-allowed; }
   display: block;
   box-sizing: border-box;
   color-scheme: dark;
-  background: rgba(255, 255, 255, 0.03); /* a faint surface so the optional key field reads as an input, not a hairline */
-  border: 1px solid rgba(255, 255, 255, 0.24); /* one notch above --ns-line — the empty field is easier to spot */
+  background: var(--ns-void); /* solid black field so the optional key input reads as an input, not a hairline */
+  border: 1px solid rgba(255, 255, 255, 0.24); /* stronger than --ns-line so the empty field is easy to spot */
   color: var(--ns-bone);
   font-family: inherit;
   font-size: 15px;
@@ -620,7 +620,6 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep-desc { color: var(--ns-muted); } /* the provider's API name, sitting after the path */
 .ep .copy { margin-left: auto; } /* the copy-url button + the coins cluster at the right edge */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */

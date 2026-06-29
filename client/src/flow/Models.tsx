@@ -1,6 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
+import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, PrivatemodeMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
@@ -51,15 +51,13 @@ const TIERS = [
   },
 ] as const;
 
-// Privatemode AI has no vendored brand mark yet — it's a confidential-compute (TEE) provider, so the sealed
-// square glyph stands in until a real logo is added to ui.tsx. PLACEHOLDER: swap for a PrivatemodeMark SVG.
-const PrivatemodeMark = ({ className }: { className?: string }) => <SquareGlyph sealed className={className} />;
-
 // On the roadmap, not yet routable (so deliberately not in models.json). Dimmed rows that set expectations.
+// Privatemode AI is a sealed-enclave provider (attested TEE, open-weight models) — the SAME class as Tinfoil,
+// so it reads "sealed · open weight", not "confidential".
 const ROADMAP: { id: string; name: string; meta: string; Logo: ComponentType<{ className?: string }> }[] = [
-  { id: "privatemode", name: "Privatemode AI", meta: "confidential", Logo: PrivatemodeMark },
+  { id: "privatemode", name: "Privatemode AI", meta: "sealed · open weight", Logo: PrivatemodeMark },
   { id: "groq", name: "Groq", meta: "open weight", Logo: GroqMark },
-  { id: "gemini", name: "Google Gemini", meta: "proprietary", Logo: GeminiMark },
+  { id: "gemini", name: "Google Gemini", meta: "closed source", Logo: GeminiMark },
 ];
 
 function Chips({ ids }: { ids: string[] }) {
