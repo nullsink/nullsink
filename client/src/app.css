@@ -57,7 +57,7 @@ button:disabled { cursor: not-allowed; }
 }
 .bar .links { font-size: 13px; color: var(--ns-muted); display: flex; gap: 18px; }
 .bar .links a { text-decoration: none; }
-.bar .links a.on { color: var(--ns-acid); } /* the nav item for the current route */
+.bar .links a.on { color: var(--ns-acid); text-decoration: underline; text-underline-offset: 3px; } /* the nav item for the current route */
 /* the brand wraps the wordmark in a home link; keep the wordmark's exact look (no underline, and the
    text doesn't flip to acid on hover the way body links do — the mark is already the accent) */
 .brand { text-decoration: none; color: inherit; }
@@ -600,7 +600,7 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; } /* the coins sit at the right edge of the row */
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the far right; the copy button sits next to the path */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -617,7 +617,7 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep .copy { margin-left: auto; } /* the copy-url button + the coins cluster at the right edge */
+.ep .copy { margin-left: 4px; } /* sits just after the path; the coins get pushed to the far right (.ep-marks) */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }

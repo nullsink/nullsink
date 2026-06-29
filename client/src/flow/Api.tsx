@@ -176,10 +176,6 @@ export function Api() {
         <h2>limits</h2>
         <ul className="dash-list">
           <li>
-            <span className="lead-term">endpoints</span> — only the three above are proxied; other paths
-            return <code>unsupported_endpoint</code>.
-          </li>
-          <li>
             <span className="lead-term">options</span> — <code>n</code> and <code>best_of</code> must be 1;
             unsupported ones return <code>unsupported_option</code>.
           </li>
