@@ -159,6 +159,10 @@ export function Api() {
 
       <section className="section">
         <h2>endpoints</h2>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>Request and response bodies are each provider&apos;s native schema.</span>
+        </p>
         <div className="ep-group">
           <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
             Anthropic Messages
@@ -175,10 +179,6 @@ export function Api() {
             OpenAI Responses
           </Ep>
         </div>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>Request and response bodies are each provider&apos;s native schema.</span>
-        </p>
       </section>
 
       <section className="section">
@@ -206,10 +206,6 @@ export function Api() {
       <section className="section">
         <h2>limits</h2>
         <ul className="dash-list">
-          <li>
-            <span className="lead-term">model</span> — must be one <Ns /> supports (
-            <a href="/models/">models</a>); anything else returns <code>unsupported_model</code>.
-          </li>
           <li>
             <span className="lead-term">endpoints</span> — only the three above are proxied; other paths
             return <code>unsupported_endpoint</code>.

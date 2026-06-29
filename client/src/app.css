@@ -622,7 +622,7 @@ button:disabled { cursor: not-allowed; }
 }
 .ep-ico { width: 12px; height: 12px; color: var(--ns-bone); }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
-.ep-method { flex: none; min-width: 40px; color: var(--ns-bone); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
+.ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
 .ep-desc { color: var(--ns-muted); } /* the provider's API name + doc link, sitting after the path */
 .ep-desc a { color: var(--ns-bone); } /* the provider's own API docs */
