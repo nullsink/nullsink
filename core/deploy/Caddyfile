@@ -124,14 +124,6 @@
 		}
 	}
 
-	# --- /start was renamed to /api: redirect the old path so inbound links and the prior sitemap entry
-	#     don't 404 (the page is gone from ROUTES). Scoped to a handle so it joins the same
-	#     mutually-exclusive routing as the API blocks above and never shadows them. ---
-	@old_start path /start /start/
-	handle @old_start {
-		redir * /api/ permanent
-	}
-
 	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; it's a
 	#     localhost-only liveness check, so public requests for it just 404 here.) ---
 	handle {

@@ -1,20 +1,20 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 
 // /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
 // the base URL + key change. Minimal prose: the served routes, what each does, and the few snippets any
-// caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/ + endpoints/)
-// — if the served surface changes, change this page. Static: prerenders and reads with JS off (the copy
-// buttons are the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the
-// model id — acid.
+// caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if the
+// served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons are
+// the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id — acid.
 
 // Provider docs: the request/response bodies are each provider's native schema, so their reference applies
-// verbatim (see the note under the endpoints). Linked off the inference rows.
-const ANTHROPIC_DOCS = "https://docs.anthropic.com/en/api/messages";
-const OPENAI_CHAT_DOCS = "https://platform.openai.com/docs/api-reference/chat";
-const OPENAI_RESPONSES_DOCS = "https://platform.openai.com/docs/api-reference/responses";
+// verbatim (see the note under the endpoints). Each links the provider's own "create" endpoint page.
+const ANTHROPIC_DOCS = "https://platform.claude.com/docs/en/api/messages/create";
+const OPENAI_CHAT_DOCS =
+  "https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create";
+const OPENAI_RESPONSES_DOCS = "https://developers.openai.com/api/reference/resources/responses/methods/create";
 
 const ANTHROPIC_CURL = `curl https://nullsink.is/v1/messages \\
   -H "x-api-key: 0sink_YOUR_KEY" \\
@@ -38,6 +38,14 @@ const OPENAI_CURL = `curl https://nullsink.is/v1/chat/completions \\
 const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
+
+// The two error envelopes — each provider's native shape (so a stock SDK classifies the failure), our code
+// riding in `message` (Anthropic, no code field) / `code` (OpenAI). max_tokens_required shown as the example.
+const ERROR_SHAPE = `# anthropic · 400 on POST /v1/messages
+{ "type": "error", "error": { "type": "invalid_request_error", "message": "max_tokens_required" } }
+
+# openai · 400 on POST /v1/chat/completions
+{ "error": { "message": "max_tokens_required", "type": "invalid_request_error", "code": "max_tokens_required" } }`;
 
 // One endpoint row: provider mark(s) · method · path · a one-line note (a provider-doc link on the inference
 // rows). The whole site is monospace, so the path needs no special face — bone against the muted note.
@@ -103,18 +111,31 @@ export function Api() {
 
       <section className="section">
         <h2>base url &amp; auth</h2>
+        {/* the mark(s) on each base URL carry which provider it serves — /v1 is shared by OpenAI + Tinfoil */}
+        <div className="ep-group">
+          <div className="ep">
+            <span className="ep-marks" aria-hidden="true">
+              <AnthropicMark className="ep-mark" />
+            </span>
+            <span className="ep-path">
+              https://nullsink.is <Copy value="https://nullsink.is" />
+            </span>
+            <span className="ep-desc">anthropic</span>
+          </div>
+          <div className="ep">
+            <span className="ep-marks" aria-hidden="true">
+              <OpenAiMark className="ep-mark" />
+              <TinfoilMark className="ep-mark" />
+            </span>
+            <span className="ep-path">
+              https://nullsink.is/v1 <Copy value="https://nullsink.is/v1" />
+            </span>
+            <span className="ep-desc">openai · tinfoil</span>
+          </div>
+        </div>
         <dl className="kv">
-          <KvRow k="base url" values={["https://nullsink.is", "https://nullsink.is/v1"]} />
-          <KvRow k="auth header" values={["x-api-key: 0sink_…", "Authorization: Bearer 0sink_…"]} />
+          <KvRow k="auth" values={["x-api-key: 0sink_…", "Authorization: Bearer 0sink_…"]} />
         </dl>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Two base URLs because the SDKs build paths differently — Anthropic from the bare host, OpenAI adds{" "}
-            <code>/v1</code>. Use either auth header, whichever your SDK sends. Your key identifies you to{" "}
-            <Ns /> and is never forwarded upstream.
-          </span>
-        </p>
       </section>
 
       <section className="section">
@@ -124,17 +145,16 @@ export function Api() {
           <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" href={ANTHROPIC_DOCS}>
             Anthropic Messages
           </Ep>
-          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" href={OPENAI_CHAT_DOCS}>
+          <Ep
+            marks={[OpenAiMark, TinfoilMark]}
+            method="POST"
+            path="/v1/chat/completions"
+            href={OPENAI_CHAT_DOCS}
+          >
             OpenAI Chat Completions
           </Ep>
           <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" href={OPENAI_RESPONSES_DOCS}>
             OpenAI Responses
-          </Ep>
-        </div>
-        <div className="ep-group">
-          <div className="ep-group-label">account · free</div>
-          <Ep method="GET" path="/balance">
-            remaining credit → <code>{"{ balance_usd }"}</code>
           </Ep>
         </div>
         <p className="note">
@@ -144,13 +164,6 @@ export function Api() {
             verbatim. <Ns /> only constrains what metering needs: a max output tokens, a model it prices (
             <a href="/models/">models</a>), and a few rejected options (<code>n</code>, <code>best_of</code>,
             premium betas).
-          </span>
-        </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Open-weight ids route to Tinfoil — a sealed enclave sharing the OpenAI{" "}
-            <code>/v1/chat/completions</code> surface, selected by the model id.
           </span>
         </p>
       </section>
@@ -192,6 +205,7 @@ export function Api() {
           <Err code="invalid_token">the key is unknown or malformed</Err>
           <Err code="rate_limited">too many requests right now — retry shortly</Err>
         </ul>
+        <CodeBlock label="error response" code={ERROR_SHAPE} />
       </section>
     </Layout>
   );
