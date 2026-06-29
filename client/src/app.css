@@ -761,7 +761,16 @@ button:disabled { cursor: not-allowed; }
   color: var(--ns-bone);
 }
 .pcard-title a { color: inherit; text-decoration: none; } /* the title links to the provider's site */
-.pcard-title a:hover { color: var(--ns-acid); } /* full acid on hover, like the site's other links */
+/* full acid HIGHLIGHT on hover (acid block + dark ink) — the brand's .hl highlighter treatment, like the
+   AVAILABLE pill. The negative inline margin offsets the padding so the title text doesn't shift on hover. */
+.pcard-title a:hover {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  padding: 0.04em 0.4ch;
+  margin: 0 -0.4ch;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;
