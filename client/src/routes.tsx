@@ -5,11 +5,9 @@
 // solve a problem we don't have. See prerender.tsx for how `file`/`url`/the head fields are consumed.
 import type { ReactElement } from "react";
 import { App } from "./App.tsx";
-import { AnonymousClaudeApi } from "./flow/AnonymousClaudeApi.tsx";
 import { Api } from "./flow/Api.tsx";
 import { Models } from "./flow/Models.tsx";
 import { NotFound } from "./flow/NotFound.tsx";
-import { OpenAiApiNoPhone } from "./flow/OpenAiApiNoPhone.tsx";
 import { Privacy } from "./flow/Privacy.tsx";
 import { Tos } from "./flow/Tos.tsx";
 
@@ -52,24 +50,6 @@ export const ROUTES: Route[] = [
     description:
       "Models you can call through the nullsink proxy, grouped by provider. Catalogue derived from models.dev.",
     Component: Models,
-  },
-  {
-    path: "/anonymous-claude-api",
-    file: "anonymous-claude-api/index.html",
-    url: `${PROD}/anonymous-claude-api/`,
-    title: "Claude API without an account — private, no sign-up",
-    description:
-      "Call Anthropic's Claude API without an account, email, or card. Mint a prepaid key in your browser, fund it with Monero or Bitcoin, and point the stock Anthropic SDK at nullsink. No sign-up, no IP, no request logs.",
-    Component: AnonymousClaudeApi,
-  },
-  {
-    path: "/openai-api-no-phone",
-    file: "openai-api-no-phone/index.html",
-    url: `${PROD}/openai-api-no-phone/`,
-    title: "OpenAI API without a phone number or card",
-    description:
-      "Use the OpenAI API with no phone verification, no card, and no account. Mint a prepaid key in your browser, fund it with Monero or Bitcoin, and point the stock OpenAI SDK at nullsink. No sign-up, no IP, no request logs.",
-    Component: OpenAiApiNoPhone,
   },
   {
     path: "/privacy",

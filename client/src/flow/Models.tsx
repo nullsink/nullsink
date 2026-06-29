@@ -1,6 +1,6 @@
 import { type ComponentType, useState } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, PrivatemodeMark, TinfoilMark, SquareGlyph, ModelChip } from "../ui.tsx";
+import { AnthropicMark, OpenAiMark, GeminiMark, GroqMark, PrivatemodeMark, TinfoilMark, SquareGlyph, ModelChip, ExtMark } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
@@ -85,7 +85,8 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
             <span className="pcard-title">
               {SITE[provider.id] ? (
                 <a href={SITE[provider.id]} {...EXT}>
-                  {provider.label}
+                  <span className="title-name">{provider.label}</span>
+                  <ExtMark className="title-ext" />
                 </a>
               ) : (
                 provider.label

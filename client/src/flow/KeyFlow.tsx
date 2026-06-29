@@ -271,11 +271,10 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
                 </span>
               ))}
           </div>
-          {keyState.malformed ? (
+          {keyState.malformed && (
             <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
-          ) : !paste ? (
-            <p className="hint">Leave blank to mint a fresh key in your browser.</p>
-          ) : null}
+          )}
+          <p className="hint">Leave blank to mint a fresh key in your browser.</p>
         </div>
 
         <AmountStep

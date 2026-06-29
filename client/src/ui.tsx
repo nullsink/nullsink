@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
+import { pulseDelays, WORDMARK_SEED } from "./lib/pulse.ts";
 
 // The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
 // so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
@@ -19,10 +20,10 @@ export function Mark({ className }: { className?: string }) {
 }
 
 // The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
-// phase so the funnel breathes instead of blinking in unison. The offsets are mulberry32(seed) * 2.2 from
-// the pattern generator — frozen here for SEED 4817, so it's deterministic and needs no runtime RNG. To
-// reseed: re-run the generator and paste the new delays. Decorative motion → yields to prefers-reduced-motion
-// (see .pulse-mark in app.css). Separate from <Mark> so the static brand wordmark never animates.
+// phase (animation-delay) so the funnel breathes instead of blinking in unison. The phases come from
+// pulseDelays(seed) in lib/pulse.ts — deterministic, so prerender and client agree (no hydration drift).
+// Default seed is the live WORDMARK_SEED; pass `seed` to render any other. Decorative motion →
+// yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
 const PULSE_GEO = [
   { x: 0, y: 0, w: 70, h: 70 },
   { x: 140, y: 0, w: 70, h: 70 },
@@ -32,8 +33,8 @@ const PULSE_GEO = [
   { x: 140, y: 140, w: 70, h: 70 },
   { x: 0, y: 280, w: 350, h: 70 },
 ];
-const PULSE_DELAYS = ["2.19s", "0.76s", "2.16s", "1.42s", "1.10s", "1.87s", "0.92s"]; // SEED 4817
-export function PulseMark({ className }: { className?: string }) {
+export function PulseMark({ className, seed = WORDMARK_SEED }: { className?: string; seed?: number }) {
+  const delays = pulseDelays(seed);
   return (
     <svg
       className={"pulse-mark" + (className ? " " + className : "")}
@@ -43,7 +44,7 @@ export function PulseMark({ className }: { className?: string }) {
       fill="currentColor"
     >
       {PULSE_GEO.map((g, i) => (
-        <rect key={i} x={g.x} y={g.y} width={g.w} height={g.h} style={{ animationDelay: PULSE_DELAYS[i] }} />
+        <rect key={i} x={g.x} y={g.y} width={g.w} height={g.h} style={{ animationDelay: delays[i] }} />
       ))}
     </svg>
   );
@@ -140,7 +141,7 @@ export function CoinMark({ name, className }: { name: string; className?: string
 export function Wordmark() {
   return (
     <span className="wordmark">
-      <Mark className="mark" />
+      <PulseMark className="mark" />
       <span>nullsink</span>
       <span className="wordmark-ver">{BUILD_VERSION}</span>
     </span>
@@ -167,13 +168,13 @@ const COPY_FEEDBACK_MS = 1500;
 // Shared copy behaviour for the Copy button below: a `copied` flag that auto-clears, and a click
 // handler that writes to the clipboard then lights the flag (silent if the Clipboard API is
 // unavailable; the source text is also user-select:all as a fallback).
-function useCopy(value: string): { copied: boolean; copy: () => void } {
+function useCopy(value: string, ms: number = COPY_FEEDBACK_MS): { copied: boolean; copy: () => void } {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
-    const t = setTimeout(() => setCopied(false), COPY_FEEDBACK_MS);
+    const t = setTimeout(() => setCopied(false), ms);
     return () => clearTimeout(t);
-  }, [copied]);
+  }, [copied, ms]);
   const copy = () => navigator.clipboard?.writeText(value).then(() => setCopied(true)).catch(() => {});
   return { copied, copy };
 }
@@ -189,13 +190,37 @@ export function Copy({ value, label = "copy", filled = false }: { value: string;
   );
 }
 
+// "Opens in a new tab" glyph — a box with an arrow leaving it. A generic UI mark (not a brand logo),
+// stroked in currentColor so it tints to context. Shown on hover beside an external link.
+export function ExtMark({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      role="img"
+      aria-label="external link"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M13 4h7v7" />
+      <path d="M20 4 10 14" />
+      <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4" />
+    </svg>
+  );
+}
+
 // A model id as a copy-on-click chip, for the /models cards: a click copies the exact id to paste into a
 // config or SDK call, with a brief ✓. `down` flags an id the proxy prices but the upstream currently 404s
 // for us — the danger register (a red tag + red-tinted border), still copyable since a call just refunds.
 // Copy needs JS; with it off the chip still reads as the plain id (and is selectable). Same copy mechanics
 // as <Copy>, so the "copied" acknowledgement and timing match.
 export function ModelChip({ id, down = false }: { id: string; down?: boolean }) {
-  const { copied, copy } = useCopy(id);
+  // copy feedback floats a small acid "copied" badge ABOVE the chip (.chip-copied, absolutely positioned),
+  // so the chip text never moves — no layout shift in the row. Short-lived.
+  const { copied, copy } = useCopy(id, 800);
   return (
     <button
       type="button"
@@ -205,7 +230,7 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
     >
       {id}
       {down && <span className="model-chip-down">down</span>}
-      {copied && <span className="model-chip-ok" aria-hidden="true">✓</span>}
+      {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
     </button>
   );
 }

@@ -57,7 +57,7 @@ button:disabled { cursor: not-allowed; }
 }
 .bar .links { font-size: 13px; color: var(--ns-muted); display: flex; gap: 18px; }
 .bar .links a { text-decoration: none; }
-.bar .links a.on { color: var(--ns-acid); } /* the nav item for the current route */
+.bar .links a.on { color: var(--ns-acid); text-decoration: underline; text-underline-offset: 3px; } /* the nav item for the current route */
 /* the brand wraps the wordmark in a home link; keep the wordmark's exact look (no underline, and the
    text doesn't flip to acid on hover the way body links do — the mark is already the accent) */
 .brand { text-decoration: none; color: inherit; }
@@ -72,7 +72,7 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: var(--ns-tracking-display);
   font-size: 19px;
 }
-.wordmark .mark { height: 1cap; width: 1cap; color: var(--ns-acid); display: inline-block; }
+.wordmark .mark { height: 1.7cap; width: 1.7cap; color: var(--ns-acid); display: inline-block; } /* bigger than cap-height so the moving mark reads as a logo */
 /* the deployed build tag trailing the name — the acid highlighter chip (same ink-on-acid as .hl), sized
    down and with the tight display tracking reset so it reads as a small tag beside the name. "dev" locally. */
 .wordmark-ver {
@@ -140,7 +140,7 @@ button:disabled { cursor: not-allowed; }
 .avail-row dd.soon .avail-dot { border: 1px solid var(--ns-faint); }
 /* the models row: a "models" text link, plus overlapping circular discs (the coin-stack pattern) as a
    decorative provider cue. First disc on top. */
-.model-link { color: var(--ns-bone); text-decoration: underline; text-underline-offset: 3px; transition: color 120ms ease-out; }
+.model-link { color: var(--ns-bone); text-decoration: underline; text-underline-offset: 3px; }
 .model-link:hover { color: var(--ns-acid); }
 .model-stack { display: inline-flex; align-items: center; }
 .stack-disc {
@@ -153,7 +153,6 @@ button:disabled { cursor: not-allowed; }
   border-radius: 50%;
   background: var(--ns-void); /* page-bg disc so each front mark cleanly cuts the one behind it */
   border: 1px solid var(--ns-acid); /* acid ring to match the /api coins; Tinfoil takes the seal variant */
-  transition: border-color 120ms ease-out;
 }
 .stack-disc.sealed { border-color: var(--ns-seal); }
 .stack-disc:not(:first-child) { margin-left: -9px; }
@@ -222,7 +221,6 @@ button:disabled { cursor: not-allowed; }
   padding: 14px 0;
   text-align: center;
   font-size: 15px;
-  transition: border-color 0.12s, color 0.12s;
 }
 .preset:hover { color: var(--ns-bone); border-color: var(--ns-muted); }
 .preset[aria-pressed="true"] {
@@ -418,7 +416,6 @@ button:disabled { cursor: not-allowed; }
   border: 1px solid var(--ns-line);
   padding: 6px 11px;
   cursor: pointer;
-  transition: border-color 120ms ease-out, color 120ms ease-out;
 }
 .check-btn:not(:disabled):hover { border-color: var(--ns-muted); color: var(--ns-bone); }
 .check-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
@@ -603,7 +600,7 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; } /* the coins sit at the right edge of the row */
+.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the far right; the copy button sits next to the path */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -620,7 +617,7 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep .copy { margin-left: auto; } /* the copy-url button + the coins cluster at the right edge */
+.ep .copy { margin-left: 4px; } /* sits just after the path; the coins get pushed to the far right (.ep-marks) */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }
@@ -690,40 +687,50 @@ button:disabled { cursor: not-allowed; }
 }
 .sqg.sealed::before { content: ""; position: absolute; inset: 22%; background: currentColor; }
 
-/* the trust framing: the "who can read your messages" lede beside a static you → nullsink → {frontier |
-   enclave} diagram. The diagram is decorative (aria-hidden); the lede carries the meaning. */
-.trust { margin-top: 26px; display: flex; justify-content: center; gap: 36px; align-items: center; flex-wrap: wrap; }
-.trust-path { flex: none; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+/* the trust framing: a full-width band under the price note — a static you → nullsink → { sealed | closed
+   source } diagram (decorative, aria-hidden). The two connecting wires flex to fill the column; the branch
+   colours match the tier headers below (sealed = seal/purple, closed = acid). */
+.trust {
+  margin: 20px 0 30px;
+  padding: 24px 26px;
+  border: 1px solid var(--ns-line);
+}
+.trust-path { display: flex; align-items: center; gap: 0; flex-wrap: wrap; font-size: 12px; }
 .trust-path .node {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   border: 1px solid var(--ns-line);
   color: var(--ns-bone);
   white-space: nowrap;
+  flex: none;
 }
 .trust-path .node .sqg { font-size: 11px; }
-.trust-path .wire { width: 18px; height: 1px; flex: none; background: var(--ns-line); }
-.trust-path .node.sink { flex-direction: column; gap: 7px; padding: 0; border: none; }
-.sink-mark { width: 34px; height: 34px; color: var(--ns-acid); }
+.trust-path > .wire { flex: 1; min-width: 30px; height: 1px; background: var(--ns-line); margin: 0 14px; } /* the two main wires stretch to span the width */
+.trust-path .node.sink { flex-direction: column; gap: 8px; padding: 0; border: none; }
+.sink-mark { width: 42px; height: 42px; color: var(--ns-acid); }
 /* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
-   per-rect animation-delay, frozen from the pattern generator — SEED 4817). Decorative, so it yields to
-   reduced-motion (then it just holds the brand mark, full-opacity). */
+   per-rect animation-delay from pulseDelays(seed) — see lib/pulse.ts). Decorative, so it yields to
+   reduced-motion (then it just holds the brand mark, full-opacity). It powers the wordmark mark. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
 .node-cap { font-size: 11px; letter-spacing: 0.04em; color: var(--ns-muted); }
-/* the right branch: a vertical spine (border-left) with a short wire teeing into each node — the frontier
-   node stays muted, the enclave node + its wire take --ns-seal. */
-.trust-branch { display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--ns-line); }
+/* the right branch: a vertical spine (border-left) with a short fixed wire teeing into each node. */
+.trust-branch { display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--ns-line); flex: none; }
 .branch-row { display: inline-flex; align-items: center; }
-.branch-row .wire { width: 16px; background: var(--ns-acid); }
+.branch-row .wire { width: 18px; height: 1px; flex: none; background: var(--ns-acid); }
 .branch-row.sealed .wire { background: var(--ns-seal); }
-/* the two branches take their tier's accent: frontier (→ the closed/policy tier) in acid, enclave (→ the
-   open/silicon tier) in seal — so the diagram colour-matches the tier headers below. */
+/* the two branches take their tier's accent: closed (→ the closed-source tier) in acid, sealed (→ the
+   sealed/silicon tier) in seal — so the diagram colour-matches the tier headers below. */
 .trust-branch .node { border-color: var(--ns-acid); color: var(--ns-acid); }
 .trust-branch .node.sealed { border-color: var(--ns-seal); color: var(--ns-seal); }
+/* narrow screens: drop the band padding a touch and let the path wrap rather than overflow */
+@media (max-width: 560px) {
+  .trust { padding: 18px; }
+  .trust-path > .wire { min-width: 20px; }
+}
 
 /* tier header: a glyph + label + tagline over a hairline that takes the tier's accent — acid for the
    policy tier, --ns-seal for the sealed (silicon) tier. */
@@ -764,8 +771,23 @@ button:disabled { cursor: not-allowed; }
   color: var(--ns-bone);
 }
 .pcard-title a { color: inherit; text-decoration: none; } /* the title links to the provider's site */
-/* hover reads as a LINK, not an acid-highlighted term: keep the bone text, add an acid underline only */
-.pcard-title a:hover { text-decoration: underline; text-decoration-color: var(--ns-acid); text-underline-offset: 3px; }
+/* hover: only the NAME takes the acid highlighter (the .hl treatment, like the AVAILABLE pill); the negative
+   inline margin offsets the padding so the name doesn't shift. The external-link glyph is NOT highlighted — it
+   just appears to the right in acid text colour. */
+.pcard-title a:hover .title-name {
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  padding: 0.04em 0.4ch;
+  margin: 0 -0.4ch;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.title-ext { width: 0.78em; height: 0.78em; margin-left: 0.9ch; vertical-align: -0.05em; opacity: 0; color: var(--ns-acid); } /* clears the name's hover highlight (which bleeds ~0.4ch right) + a real gap */
+.pcard-title a:hover .title-ext { opacity: 1; }
+/* SEALED providers (Tinfoil, Privatemode) take the purple seal accent on the title highlight + its external
+   glyph; their model chips still copy in acid (green), like every other provider. */
+.pcard.sealed .pcard-title a:hover .title-name { background: var(--ns-seal); }
+.pcard.sealed .title-ext { color: var(--ns-seal); }
 .pcard-count { font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ns-muted); }
 .pcard-tags {
   flex: none;
@@ -794,6 +816,7 @@ button:disabled { cursor: not-allowed; }
    acid border + text; an unroutable id (.down) takes a red-tinted border and a red "down" tag. */
 .model-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 .model-chip {
+  position: relative; /* anchor for the floating "copied" badge */
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -804,11 +827,27 @@ button:disabled { cursor: not-allowed; }
   background: transparent;
   border: 1px solid var(--ns-line);
   cursor: pointer;
-  transition: border-color 120ms ease-out, color 120ms ease-out;
 }
 .model-chip:hover { border-color: var(--ns-muted); }
 .model-chip.down { border-color: color-mix(in srgb, var(--ns-red) 45%, transparent); color: var(--ns-muted); }
-.model-chip.copied { border-color: var(--ns-acid); color: var(--ns-acid); }
+.model-chip.copied { border-color: var(--ns-acid); }
+/* copy feedback: a small acid-highlight "COPIED" floats just ABOVE the chip — absolutely positioned, so it
+   never shifts the chip row (the chip text stays put). Brief. */
+.chip-copied {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  transform: translateX(-50%);
+  background: var(--ns-acid);
+  color: var(--ns-ink);
+  font-size: 10px;
+  font-weight: var(--ns-weight-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  white-space: nowrap;
+  pointer-events: none;
+}
 /* one focus ring everywhere (the design-system "states are decided" rule): 2px acid, offset 2px. */
 .model-chip:focus-visible,
 .model-more-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
@@ -823,7 +862,6 @@ button:disabled { cursor: not-allowed; }
   background: var(--ns-red);
   padding: 1px 5px;
 }
-.model-chip-ok { font-size: 11px; }
 
 /* the "all N models" / "show less" toggle: sits BELOW the chips so the list never splits around it. State-
    driven (the card hydrates); a muted underline that wakes to bone. With JS off it shows the preview. */
@@ -838,7 +876,6 @@ button:disabled { cursor: not-allowed; }
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 3px;
-  transition: color 120ms ease-out;
 }
 .model-more-btn:hover { color: var(--ns-bone); }
 
