@@ -199,7 +199,7 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
 }
 
 // One key/value integration row ("base url" → value + copy). `values` is a list so an endpoint row can
-// carry more than one (OpenAI's two endpoints). Used by the /start integration panels.
+// carry more than one (OpenAI's two endpoints). Used by the /api reference.
 export function KvRow({ k, values }: { k: string; values: string[] }) {
   return (
     <div className="kvrow">

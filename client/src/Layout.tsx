@@ -4,12 +4,12 @@ import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 
 // The shell shared by every route: the centered column, the header bar with the brand (a home link) and
 // the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
-// adoption pages in the order a new user needs them (start → models). The footer opens with the
+// adoption pages (api → models) with GitHub pulled up front. The footer opens with the
 // never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
 // unqualified negations only; anything needing a caveat stays off the row) — then the policy links
-// (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
+// (privacy + terms) on the left and the community links (Discord, Matrix) on the right; external
 // <a> navigations are unaffected by the strict CSP.
-export function Layout({ children }: { children: ReactNode }) {
+export function Layout({ children, center = false }: { children: ReactNode; center?: boolean }) {
   return (
     <div className="shell">
       <header className="bar">
@@ -17,11 +17,14 @@ export function Layout({ children }: { children: ReactNode }) {
           <Wordmark />
         </a>
         <nav className="links">
-          <a href="/start/">start</a>
+          <a href={GITHUB_URL} {...EXT}>
+            github
+          </a>
+          <a href="/api/">api</a>
           <a href="/models/">models</a>
         </nav>
       </header>
-      {children}
+      <div className={"content" + (center ? " center" : "")}>{children}</div>
       <footer className="foot">
         <div className="foot-row">
           <nav className="foot-links">
@@ -29,9 +32,6 @@ export function Layout({ children }: { children: ReactNode }) {
             <a href="/terms/">terms</a>
           </nav>
           <nav className="foot-links">
-            <a href={GITHUB_URL} {...EXT}>
-              github
-            </a>
             <a href={DISCORD_URL} {...EXT}>
               discord
             </a>

@@ -3,7 +3,7 @@ import { Ns } from "../ui.tsx";
 
 // SEO landing (route /anonymous-claude-api): captures "anonymous Claude API" / "Claude API without
 // account". A real explainer (how the proxy solves it, the 3 steps, what we don't keep), not a doorway —
-// funnels to /start. "private", not "anonymous to everyone" — don't overclaim. Claims mirror the proxy
+// funnels to /api. "private", not "anonymous to everyone" — don't overclaim. Claims mirror the proxy
 // contract (no account, key hashed in-browser, prepaid crypto, no request logs); prerenders, reads JS-off.
 export function AnonymousClaudeApi() {
   return (
@@ -56,10 +56,10 @@ export function AnonymousClaudeApi() {
       </section>
 
       <section className="section">
-        <h2>start</h2>
+        <h2>api</h2>
         <p className="section-copy">
-          Base URLs and copy-paste examples are on{" "}
-          <a href="/start/">get started</a>.
+          Base URLs and copy-paste examples are in the{" "}
+          <a href="/api/">api reference</a>.
         </p>
       </section>
     </Layout>
