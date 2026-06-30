@@ -168,10 +168,18 @@ fi
 
 # --- 4. buy rail (only when enabled) ---
 if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
-  wallet_resp="$(curl -sS --max-time "$RPC_TIMEOUT" "$WALLET_RPC" \
-    -H 'content-type: application/json' \
-    -d '{"jsonrpc":"2.0","id":"0","method":"get_height"}' 2>/dev/null)"
-  wallet_h="$(jnum "$wallet_resp" height)"
+  # Retry like the node probe below: a wallet mid-refresh can briefly block get_height past RPC_TIMEOUT, and a
+  # single shot then false-pages. Real wedges persist across all attempts (and monero-wallet-rpc-watchdog.timer
+  # bounces those); only a genuinely dead wallet warns here.
+  wallet_h=""
+  for attempt in 1 2 3; do
+    wallet_resp="$(curl -sS --max-time "$RPC_TIMEOUT" "$WALLET_RPC" \
+      -H 'content-type: application/json' \
+      -d '{"jsonrpc":"2.0","id":"0","method":"get_height"}' 2>/dev/null)"
+    wallet_h="$(jnum "$wallet_resp" height)"
+    [ -n "$wallet_h" ] && break
+    sleep 5
+  done
   if [ -n "$wallet_h" ]; then ok "wallet height $wallet_h"
   else warn "wallet-rpc unreachable or no height (get_height failed)"; fi
 
