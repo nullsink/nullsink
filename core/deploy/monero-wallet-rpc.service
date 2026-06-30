@@ -54,6 +54,10 @@ ExecStart=/usr/local/bin/monero-wallet-rpc \
 
 Restart=always
 RestartSec=5
+# A wedged wallet (deadlocked on its internal lock) may not service SIGTERM, so cap the graceful-stop wait —
+# after this, systemd SIGKILLs it (the default). Without this, `systemctl restart` (by an operator or the
+# watchdog) would block on the ~90s default while a deaf process refuses to exit.
+TimeoutStopSec=30
 
 # Hardening.
 NoNewPrivileges=true

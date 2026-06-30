@@ -7,8 +7,8 @@ Description=Probe monero-wallet-rpc liveness (hung-wallet watchdog)
 
 [Timer]
 # A wedge strands the buy rail (deposits stop crediting), so check more often than the 10-min status-check:
-# 3 min bounds the worst-case blind window, and stays comfortably above the script's 120s startup grace so a
-# just-restarted wallet is never re-bounced mid-open.
+# 3 min bounds the worst-case blind window. The script's retry loop covers a just-restarted wallet's reopen,
+# so no startup-grace/interval coupling is needed.
 OnBootSec=5min
 OnUnitActiveSec=3min
 AccuracySec=30s
