@@ -27,9 +27,9 @@ button:disabled { cursor: not-allowed; }
 
 /* ---- layout shell ------------------------------------------------------- */
 .shell {
-  /* Widened from 600 to give the reference content (the /models tiers, the trust diagram) room to sit
-     side-by-side rather than wrap. Applied site-wide for now; the buy flow can take a narrower
-     per-page measure later if the wider column reads loose there. */
+  /* Widened from 600 to give the reference content (the /models tiers) room to sit side-by-side rather
+     than wrap. Applied site-wide for now; the buy flow can take a narrower per-page measure later if the
+     wider column reads loose there. */
   max-width: 760px;
   margin: 0 auto;
   padding: 0 20px 32px;
@@ -727,50 +727,12 @@ button:disabled { cursor: not-allowed; }
 }
 .sqg.sealed::before { content: ""; position: absolute; inset: 22%; background: currentColor; }
 
-/* the trust framing: a full-width band under the price note — a static you → nullsink → { sealed | closed
-   source } diagram (decorative, aria-hidden). The two connecting wires flex to fill the column; the branch
-   colours match the tier headers below (sealed = seal/purple, closed = acid). */
-.trust {
-  margin: 20px 0 30px;
-  padding: 24px 26px;
-  border: 1px solid var(--ns-line);
-}
-.trust-path { display: flex; align-items: center; gap: 0; flex-wrap: wrap; font-size: 12px; }
-.trust-path .node {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 14px;
-  border: 1px solid var(--ns-line);
-  color: var(--ns-bone);
-  white-space: nowrap;
-  flex: none;
-}
-.trust-path .node .sqg { font-size: 11px; }
-.trust-path > .wire { flex: 1; min-width: 30px; height: 1px; background: var(--ns-line); margin: 0 14px; } /* the two main wires stretch to span the width */
-.trust-path .node.sink { flex-direction: column; gap: 8px; padding: 0; border: none; }
-.sink-mark { width: 42px; height: 42px; color: var(--ns-acid); }
 /* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
    per-rect animation-delay from pulseDelays(seed) — see lib/pulse.ts). Decorative, so it yields to
    reduced-motion (then it just holds the brand mark, full-opacity). It powers the wordmark mark. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
-.node-cap { font-size: 11px; letter-spacing: 0.04em; color: var(--ns-muted); }
-/* the right branch: a vertical spine (border-left) with a short fixed wire teeing into each node. */
-.trust-branch { display: flex; flex-direction: column; gap: 14px; border-left: 1px solid var(--ns-line); flex: none; }
-.branch-row { display: inline-flex; align-items: center; }
-.branch-row .wire { width: 18px; height: 1px; flex: none; background: var(--ns-acid); }
-.branch-row.sealed .wire { background: var(--ns-seal); }
-/* the two branches take their tier's accent: closed (→ the closed-source tier) in acid, sealed (→ the
-   sealed/silicon tier) in seal — so the diagram colour-matches the tier headers below. */
-.trust-branch .node { border-color: var(--ns-acid); color: var(--ns-acid); }
-.trust-branch .node.sealed { border-color: var(--ns-seal); color: var(--ns-seal); }
-/* narrow screens: drop the band padding a touch and let the path wrap rather than overflow */
-@media (max-width: 560px) {
-  .trust { padding: 18px; }
-  .trust-path > .wire { min-width: 20px; }
-}
 
 /* tier header: a glyph + label + tagline over a hairline that takes the tier's accent — acid for the
    policy tier, --ns-seal for the sealed (silicon) tier. */
