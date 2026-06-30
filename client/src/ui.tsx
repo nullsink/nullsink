@@ -323,7 +323,6 @@ export function KeyBlock({ token }: { token: string }) {
           <button
             type="button"
             className="copy"
-            aria-pressed={!hidden}
             aria-label={hidden ? "show full key" : "hide full key"}
             onClick={() => setHidden((h) => !h)}
           >

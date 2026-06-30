@@ -933,6 +933,7 @@ button:disabled { cursor: not-allowed; }
 /* roadmap: dimmed rows — listed but not yet routable. */
 .roadmap-head {
   margin: 0;
+  font-weight: 400; /* it's an <h2> now; null the UA bold so the dimmed roadmap label stays body-weight */
   font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
