@@ -1,0 +1,17 @@
+# Probe the wallet's liveness every few minutes and bounce it if wedged. Enable with:
+# systemctl enable --now monero-wallet-rpc-watchdog.timer (setup.sh does this when the XMR rail is up).
+# Monotonic timers resume on their own after a reboot; Persistent= is intentionally omitted (it only affects
+# OnCalendar= timers, and a missed liveness probe is worthless to replay late).
+[Unit]
+Description=Probe monero-wallet-rpc liveness (hung-wallet watchdog)
+
+[Timer]
+# A wedge strands the buy rail (deposits stop crediting), so check more often than the 10-min status-check:
+# 3 min bounds the worst-case blind window, and stays comfortably above the script's 120s startup grace so a
+# just-restarted wallet is never re-bounced mid-open.
+OnBootSec=5min
+OnUnitActiveSec=3min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

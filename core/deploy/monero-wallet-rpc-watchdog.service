@@ -1,0 +1,15 @@
+[Unit]
+Description=Restart monero-wallet-rpc if it is hung (alive but not answering RPC)
+# Best-effort ordering; the script itself guards on the wallet unit being enabled + active, so it is
+# harmless if that unit is absent.
+After=monero-wallet-rpc.service
+# Page Telegram when the watchdog restarts a wedged wallet: the script exits non-zero on a heal, which trips
+# this. Same sink as the other units; alert.sh sends only the unit name (no journal content). A heal that
+# RECURS is the real signal — the node/Tor link needs attention, not the wallet.
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=oneshot
+# Runs as root (no User=): it must `systemctl restart monero-wallet-rpc`, which needs privilege. It touches
+# only the localhost wallet RPC and systemctl — no app data, no secrets.
+ExecStart=/opt/nullsink/deploy/wallet-rpc-watchdog.sh

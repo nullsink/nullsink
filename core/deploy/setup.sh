@@ -333,6 +333,8 @@ fi
 if [ -f /etc/monero-wallet-rpc.env ] && [ -f /var/lib/nullsink-wallet/prview ]; then
   systemctl enable monero-wallet-rpc
   systemctl restart monero-wallet-rpc        # restart so a unit/env change takes effect
+  # Liveness watchdog: bounces a HUNG wallet (active-but-deaf) that systemd's Restart=always can't catch.
+  systemctl enable --now monero-wallet-rpc-watchdog.timer
 elif rail_active monero; then
   todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc"
 else
