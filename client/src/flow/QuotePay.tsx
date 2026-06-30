@@ -168,20 +168,23 @@ export function QuotePay({
   // Before the first poll lands (status null) we show watching copy — "watching", not "waiting",
   // because a payer who just sent money reads "waiting for your payment" as "we saw nothing". After,
   // we reflect the live order state — "confirming n/N" being the reassurance the payment is on its way.
-  const statusText = checking
-    ? "checking…"
-    : !status
-      ? baseline > 0
-        ? "watching for your top-up"
-        : "watching for your payment"
-      : status.state === "confirming"
-        ? `payment seen, confirming ${status.confirmations}/${status.required}`
-        : status.state === "finalizing"
-          ? "confirmed, verifying credit…"
-          : // waiting, or closed with no credit landed yet
-            baseline > 0
-            ? "no top-up landed yet"
-            : "not seen yet";
+  // The settled status — what's actually true, excluding the transient "checking…" pulse. This is what the
+  // SR live region announces, so the background poll flipping `checking` on/off every 45s doesn't spam ~40
+  // redundant "checking… / not seen yet" announcements across a 30-minute wait.
+  const settledStatus = !status
+    ? baseline > 0
+      ? "watching for your top-up"
+      : "watching for your payment"
+    : status.state === "confirming"
+      ? `payment seen, confirming ${status.confirmations}/${status.required}`
+      : status.state === "finalizing"
+        ? "confirmed, verifying credit…"
+        : // waiting, or closed with no credit landed yet
+          baseline > 0
+          ? "no top-up landed yet"
+          : "not seen yet";
+  // Visible text adds the transient "checking…" pulse — sighted feedback that a poll is in flight.
+  const statusText = checking ? "checking…" : settledStatus;
 
   return (
     <section className="section">
@@ -230,7 +233,9 @@ export function QuotePay({
           impatient. The fine-print line under it states the privacy split out loud — the design
           choice is a feature, so say it. */}
       <div className="status">
-        <span className="watch" role="status">{statusText}</span>
+        <span className="watch">{statusText}</span>
+        {/* announce only the settled status — the visible "checking…" pulse must not re-announce each poll */}
+        <span className="sr-only" role="status">{settledStatus}</span>
         <button className="copy acid" type="button" disabled={checking} onClick={checkNow}>
           check
         </button>

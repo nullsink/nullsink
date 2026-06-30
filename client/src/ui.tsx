@@ -226,18 +226,22 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
   // so the chip text never moves — no layout shift in the row. Short-lived.
   const { copied, copy } = useCopy(id, 800);
   return (
-    <button
-      type="button"
-      className={"model-chip" + (down ? " down" : "") + (copied ? " copied" : "")}
-      onClick={copy}
-      aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
-    >
-      {id}
-      {down && <span className="model-chip-down">down</span>}
-      {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
-      {/* The visible badge is aria-hidden; this polite region announces the copy (aria-label stays the instruction). */}
+    <>
+      <button
+        type="button"
+        className={"model-chip" + (down ? " down" : "") + (copied ? " copied" : "")}
+        onClick={copy}
+        aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
+      >
+        {id}
+        {down && <span className="model-chip-down">down</span>}
+        {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
+      </button>
+      {/* Sibling of the button, NOT inside it: a button's subtree is presentational and the aria-label
+          overrides name-from-content, so a live region nested within is pruned and never announces. The
+          .sr-only span is position:absolute, so it stays out of the .model-chips flow. */}
       <span className="sr-only" role="status">{copied ? "copied" : ""}</span>
-    </button>
+    </>
   );
 }
 

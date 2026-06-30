@@ -284,7 +284,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
             </span>
           </div>
           {keyState.malformed && (
-            <div className="range-cap" id="key-error" role="alert">
+            <div className="range-cap" id="key-error">
               that key doesn't look valid: check for a typo or missing characters
             </div>
           )}
