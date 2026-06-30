@@ -28,9 +28,9 @@ export const ROUTES: Route[] = [
     path: "/",
     file: "index.html",
     url: `${PROD}/`,
-    title: "nullsink: privacy-first LLM proxy",
+    title: "nullsink: anonymous LLM proxy",
     description:
-      "Privacy-first LLM proxy. Mint a prepaid key in your browser, pay with Monero or Bitcoin, and use any Anthropic or OpenAI SDK. No account, no request logs.",
+      "Anonymous LLM proxy. Mint a prepaid key in your browser, pay with Monero or Bitcoin, and use any Anthropic or OpenAI SDK. No account, no request logs.",
     Component: App,
   },
   {

@@ -1,6 +1,6 @@
 # nullsink
 
-A privacy-first, account-less metered reverse proxy for Anthropic and OpenAI, paid in
+An anonymous, account-less metered reverse proxy for Anthropic and OpenAI, paid in
 Monero or Bitcoin. Mint a bearer key in your browser,
 fund it on-chain, and call it from the official Anthropic/OpenAI SDKs by overriding the
 base URL. No account, no IP, no request logs.
