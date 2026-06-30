@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AMOUNT_PRESETS, BUY_MAX_USD, BUY_MIN_USD, MARGIN, MARKUP_PCT, usd } from "../lib/api.ts";
+import { AMOUNT_PRESETS, BUY_MAX_USD, BUY_MIN_USD, MARGIN, MARKUP_PCT, usd, usdWhole } from "../lib/api.ts";
 import type { Rail } from "../lib/api.ts";
 import { CoinMark } from "../ui.tsx";
 
@@ -56,10 +56,10 @@ export function AmountStep({
         <span>amount</span>
         <span className={"range-inline" + (flash ? " flash" : "")}>
           <span>
-            <span className="hl">min</span> ${BUY_MIN_USD}
+            <span className="hl">min</span> {usdWhole(BUY_MIN_USD)}
           </span>
           <span>
-            <span className="hl">max</span> ${BUY_MAX_USD}
+            <span className="hl">max</span> {usdWhole(BUY_MAX_USD)}
           </span>
         </span>
       </div>
@@ -75,7 +75,7 @@ export function AmountStep({
             aria-pressed={amount === p}
             onClick={() => setAmount(p)}
           >
-            ${p}
+            {usdWhole(p)}
           </button>
         ))}
       </div>
@@ -88,7 +88,9 @@ export function AmountStep({
             className="amount-input"
             inputMode="decimal"
             value={text}
-            onChange={(e) => setText(e.target.value.replace(/[^\d.]/g, ""))}
+            // normalize a comma decimal (10,50 → 10.50) before stripping, so comma-decimal locales don't
+            // read "10,50" as 1050; then keep only digits + dot for Number() in commit().
+            onChange={(e) => setText(e.target.value.replace(/,/g, ".").replace(/[^\d.]/g, ""))}
             onBlur={commit}
             // Enter here clamps the amount; it must NOT submit the parent form (you commit the
             // number first, then mint), so swallow the default submit.

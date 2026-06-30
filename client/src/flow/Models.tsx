@@ -38,6 +38,9 @@ const UNAVAILABLE = new Set(["claude-fable-5"]);
 // the rest expand in place below (the toggle stays under the chips, so the list never splits around it).
 const PREVIEW = 6;
 
+// "5 models" / "1 model" — pluralize the count so a single-model provider doesn't read "1 models".
+const modelCount = (n: number): string => `${n} model${n === 1 ? "" : "s"}`;
+
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
@@ -92,7 +95,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
                 provider.label
               )}
             </h3>
-            <span className="pcard-count">{provider.models.length} models</span>
+            <span className="pcard-count">{modelCount(provider.models.length)}</span>
           </div>
           <div className="pcard-tags">
             {sealed && (
@@ -107,7 +110,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <Chips ids={visible} />
         {collapses && (
           <button type="button" className="model-more-btn" onClick={() => setOpen((o) => !o)}>
-            {open ? "show less" : `all ${provider.models.length} models`}
+            {open ? "show less" : `all ${modelCount(provider.models.length)}`}
           </button>
         )}
       </div>
