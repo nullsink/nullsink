@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AMOUNT_PRESETS, BUY_MAX_USD, BUY_MIN_USD, MARGIN, MARKUP_PCT, usd } from "../lib/api.ts";
+import { AMOUNT_PRESETS, BUY_MAX_USD, BUY_MIN_USD, MARGIN, MARKUP_PCT, usd, usdWhole } from "../lib/api.ts";
 import type { Rail } from "../lib/api.ts";
 import { CoinMark } from "../ui.tsx";
 
@@ -56,15 +56,17 @@ export function AmountStep({
         <span>amount</span>
         <span className={"range-inline" + (flash ? " flash" : "")}>
           <span>
-            <span className="hl">min</span> ${BUY_MIN_USD}
+            <span className="hl">min</span> {usdWhole(BUY_MIN_USD)}
           </span>
           <span>
-            <span className="hl">max</span> ${BUY_MAX_USD}
+            <span className="hl">max</span> {usdWhole(BUY_MAX_USD)}
           </span>
         </span>
       </div>
+      {/* A clamp is a silent value change — announce the new amount politely (the visible caption only flashes). */}
+      <span className="sr-only" role="status">{flash ? `amount set to ${usd(amount)}` : ""}</span>
 
-      <div className="presets">
+      <div className="presets" role="group" aria-label="amount presets">
         {AMOUNT_PRESETS.map((p) => (
           <button
             key={p}
@@ -73,7 +75,7 @@ export function AmountStep({
             aria-pressed={amount === p}
             onClick={() => setAmount(p)}
           >
-            ${p}
+            {usdWhole(p)}
           </button>
         ))}
       </div>
@@ -86,7 +88,9 @@ export function AmountStep({
             className="amount-input"
             inputMode="decimal"
             value={text}
-            onChange={(e) => setText(e.target.value.replace(/[^\d.]/g, ""))}
+            // normalize a comma decimal (10,50 → 10.50) before stripping, so comma-decimal locales don't
+            // read "10,50" as 1050; then keep only digits + dot for Number() in commit().
+            onChange={(e) => setText(e.target.value.replace(/,/g, ".").replace(/[^\d.]/g, ""))}
             onBlur={commit}
             // Enter here clamps the amount; it must NOT submit the parent form (you commit the
             // number first, then mint), so swallow the default submit.
@@ -111,8 +115,8 @@ export function AmountStep({
           marks are currentColor so they take the same ink/acid. */}
       {rails.length >= 2 && (
         <div className="coin-pick">
-          <div className="custom-label">pay with</div>
-          <div className="seg coins">
+          <div className="custom-label" id="pay-with-label">pay with</div>
+          <div className="seg coins" role="group" aria-labelledby="pay-with-label">
             {rails.map((r) => (
               <button
                 key={r.name}

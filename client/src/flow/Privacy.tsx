@@ -13,7 +13,9 @@ export function Privacy() {
     <Layout>
       <section className="legal">
         <h1 className="legal-h1">Privacy policy</h1>
-        <p className="legal-updated">Last updated: 8 June 2026</p>
+        <p className="legal-updated">
+          Last updated: <time dateTime="2026-06-08">8 June 2026</time>
+        </p>
 
         <p className="legal-lead">
           <Ns /> is built so that there is very little to collect. There are no accounts, no identities,

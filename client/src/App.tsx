@@ -10,7 +10,7 @@ import { HomeOrient } from "./flow/HomeOrient.tsx";
 // card; the card alone during checkout). The prerendered (JS-off) page is the full two-column landing:
 // `checkout` starts false and only a user action sets it.
 //
-// INVARIANT: <KeyFlow/> is mounted ONCE. The .home grid and <main id="buy"> render unconditionally in both
+// INVARIANT: <KeyFlow/> is mounted ONCE. The .home grid and <div id="buy"> render unconditionally in both
 // states; only <HomeOrient/> is conditional and only the .checkout class flips. Never put KeyFlow behind a
 // conditional/ternary parent or give it a state-dependent key — a remount would wipe the in-flight quote +
 // polling mid-payment. `id="buy"` serves the /#buy deep-link from /api.
@@ -19,9 +19,9 @@ export function App() {
   return (
     <Layout center>
       <div className={"home" + (checkout ? " checkout" : "")}>
-        <main id="buy" className="home-buy">
+        <div id="buy" className="home-buy">
           <KeyFlow onCheckoutChange={setCheckout} />
-        </main>
+        </div>
         {!checkout && <HomeOrient />}
       </div>
     </Layout>

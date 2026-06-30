@@ -38,6 +38,9 @@ const UNAVAILABLE = new Set(["claude-fable-5"]);
 // the rest expand in place below (the toggle stays under the chips, so the list never splits around it).
 const PREVIEW = 6;
 
+// "5 models" / "1 model" — pluralize the count so a single-model provider doesn't read "1 models".
+const modelCount = (n: number): string => `${n} model${n === 1 ? "" : "s"}`;
+
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
@@ -82,7 +85,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <div className="pcard-head">
           {Logo && <Logo className="pcard-logo" />}
           <div className="pcard-name">
-            <span className="pcard-title">
+            <h3 className="pcard-title">
               {SITE[provider.id] ? (
                 <a href={SITE[provider.id]} {...EXT}>
                   <span className="title-name">{provider.label}</span>
@@ -91,8 +94,8 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
               ) : (
                 provider.label
               )}
-            </span>
-            <span className="pcard-count">{provider.models.length} models</span>
+            </h3>
+            <span className="pcard-count">{modelCount(provider.models.length)}</span>
           </div>
           <div className="pcard-tags">
             {sealed && (
@@ -107,7 +110,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <Chips ids={visible} />
         {collapses && (
           <button type="button" className="model-more-btn" onClick={() => setOpen((o) => !o)}>
-            {open ? "show less" : `all ${provider.models.length} models`}
+            {open ? "show less" : `all ${modelCount(provider.models.length)}`}
           </button>
         )}
       </div>
@@ -139,7 +142,7 @@ export function Models() {
             <section className={"tier" + (tier.sealed ? " sealed" : "")} key={tier.key}>
               <div className="tier-head">
                 <SquareGlyph sealed={tier.sealed} className="tier-mark" />
-                <span className="tier-label">{tier.label}</span>
+                <h2 className="tier-label">{tier.label}</h2>
                 <span className="tier-tag">{tier.tagline}</span>
               </div>
               {provs.map((p) => (
@@ -150,7 +153,7 @@ export function Models() {
         })}
 
         <section className="tier roadmap">
-          <div className="roadmap-head">On the roadmap</div>
+          <h2 className="roadmap-head">On the roadmap</h2>
           {ROADMAP.map(({ id, name, meta, Logo }) => (
             <div className="rm-row" key={id}>
               <Logo className="rm-logo" />

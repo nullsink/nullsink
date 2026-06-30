@@ -28,9 +28,17 @@ export const MARGIN = DEFAULT_MARGIN;
 // line, and the prose can't disagree if the margin moves.
 export const MARKUP_PCT = Math.round((MARGIN - 1) * 100);
 
-// Format a USD amount for display: "$12.00". Centralized so the dollar/2-decimal decision
-// lives in one place (and can later become Intl.NumberFormat).
-export const usd = (n: number): string => `$${n.toFixed(2)}`;
+// Format a USD amount for display: "$12.00" / "$1,234.50". Intl.NumberFormat with a FIXED en-US locale
+// (not the runtime's) so prerender (Bun) and the browser produce identical strings — a locale-dependent
+// result would desync hydration. Centralized so a future locale switch is one line, and so grouping +
+// negatives are correct (the old $${n.toFixed(2)} gave "$1234.50" and "$-5.00").
+const USD_FMT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+export const usd = (n: number): string => USD_FMT.format(n);
+
+// Whole-dollar form ("$10", "$100") for the round figures — presets, the min/max band, the per-purchase
+// range. Same fixed-locale reasoning; routes the symbol + its placement through Intl too.
+const USD_WHOLE_FMT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+export const usdWhole = (n: number): string => USD_WHOLE_FMT.format(n);
 
 export interface Quote {
   pay_to: string;

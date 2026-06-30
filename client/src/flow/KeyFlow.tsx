@@ -42,9 +42,16 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // the new phase's heading (the key panel, the funded summary, or the form). Layout effect so the
   // scroll happens before paint (no flash at the stale offset); the ref guard keeps hydration from
   // yanking a visitor who arrived mid-scroll (e.g. at /#buy).
+  // Ref on the checkout view's heading (pay/done). On a phase change we move focus here after the scroll so
+  // a screen-reader / keyboard user lands on the new view's title — otherwise focus falls to <body> when the
+  // submit button (which they activated) is disabled then unmounted. preventScroll so the scrollTo(0,0) wins.
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const prevPhase = useRef(phase);
   useLayoutEffect(() => {
-    if (prevPhase.current !== phase) window.scrollTo(0, 0);
+    if (prevPhase.current !== phase) {
+      window.scrollTo(0, 0);
+      headingRef.current?.focus({ preventScroll: true });
+    }
     prevPhase.current = phase;
   }, [phase]);
 
@@ -253,26 +260,33 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
               setCheckError(false);
             }}
             aria-label="your 0sink_ token — leave blank to mint a new key"
+            aria-invalid={keyState.malformed}
+            aria-describedby={keyState.malformed ? "key-error" : undefined}
           />
           {/* the check-balance control is always visible; it's disabled until a valid key is present. */}
           <div className="balance-check">
             <button type="button" className="check-btn" disabled={!keyState.willTopUp || checking} onClick={check}>
               {checking ? "checking…" : "check balance"}
             </button>
-            {keyState.willTopUp &&
-              didCheck &&
-              (checkError ? (
-                <span className="check-line none">couldn't check, try again in a moment</span>
-              ) : (
-                <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
-                  {checkedBalance !== null
-                    ? `balance: ${usd(checkedBalance)}`
-                    : "no balance for this key. deposits confirm in ~20-45 min"}
-                </span>
-              ))}
+            {/* Always-present polite live region: the result fills in after a check and is announced in place. */}
+            <span role="status">
+              {keyState.willTopUp &&
+                didCheck &&
+                (checkError ? (
+                  <span className="check-line none">couldn't check, try again in a moment</span>
+                ) : (
+                  <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
+                    {checkedBalance !== null
+                      ? `balance: ${usd(checkedBalance)}`
+                      : "no balance for this key. deposits confirm in ~20-45 min"}
+                  </span>
+                ))}
+            </span>
           </div>
           {keyState.malformed && (
-            <div className="range-cap">that key doesn't look valid: check for a typo or missing characters</div>
+            <div className="range-cap" id="key-error">
+              that key doesn't look valid: check for a typo or missing characters
+            </div>
           )}
           <p className="hint">Leave blank to mint a fresh key in your browser.</p>
         </div>
@@ -286,7 +300,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         />
 
         {/* Environmental /buy errors (rate/wallet/busy/rate-limit) surface here, pre-navigation. */}
-        {errorCode && <div className="notice">{buyErrorMessage(errorCode)}</div>}
+        {errorCode && <div className="notice" role="alert">{buyErrorMessage(errorCode)}</div>}
 
         {/* Click-through acceptance gates the purchase, so the full terms (linked to /terms/, opened in a new
             tab so the buy flow and its leave-warning aren't disturbed) are agreed before an irreversible
@@ -335,7 +349,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     const gated = order.wasNew && !savedAck; // save-gate: minted keys only (see savedAck above)
     return (
       <div className="section">
-        <h2>{order.wasNew ? "Your new key" : "Add credit"}</h2>
+        <h1 className="flow-h1" tabIndex={-1} ref={headingRef}>
+          {order.wasNew ? "Your new key" : "Add credit"}
+        </h1>
 
         <KeyBlock token={order.token} />
 
@@ -376,9 +392,14 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   if (!order) return null; // unreachable: phase is "done" only after a funded order
   return (
     <div className="section">
+      <h1 className="sr-only" tabIndex={-1} ref={headingRef}>
+        {order.wasNew ? "Key funded" : "Credit added"}
+      </h1>
       <div className="funded-head">
         <span className="funded-tag">{order.wasNew ? "funded" : "topped up"}</span>
-        <span className="balance">
+        {/* polite region on the amount only — the focus-moved sr-only <h1> already says "funded", so
+            announcing the number here (not the whole head) avoids a doubled "funded". */}
+        <span className="balance" role="status">
           {usd(finalBalance)}
           {!order.wasNew && order.baseline > 0 && (
             <span className="delta"> +{usd(finalBalance - order.baseline)}</span>

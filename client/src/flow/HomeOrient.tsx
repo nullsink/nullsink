@@ -1,6 +1,6 @@
 import { Ns, AnthropicMark, OpenAiMark, TinfoilMark } from "../ui.tsx";
 import { Terms } from "./Terms.tsx";
-import { BUY_MAX_USD, BUY_MIN_USD } from "../lib/api.ts";
+import { BUY_MAX_USD, BUY_MIN_USD, usdWhole } from "../lib/api.ts";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // The landing's orient column (right of the buy card): the pitch, the terms, then the models + service
@@ -17,7 +17,7 @@ export function HomeOrient() {
       <p className="note">
         <span className="marker" aria-hidden="true">!</span>
         <span>
-          Early access: ${BUY_MIN_USD}–${BUY_MAX_USD} per purchase. Brief outages may be
+          Early access: {usdWhole(BUY_MIN_USD)}–{usdWhole(BUY_MAX_USD)} per purchase. Brief outages may be
           frequent.
         </span>
       </p>

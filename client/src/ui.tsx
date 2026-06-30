@@ -184,9 +184,13 @@ function useCopy(value: string, ms: number = COPY_FEEDBACK_MS): { copied: boolea
 export function Copy({ value, label = "copy", filled = false }: { value: string; label?: string; filled?: boolean }) {
   const { copied, copy } = useCopy(value);
   return (
-    <button type="button" className={"copy" + (filled ? " acid" : "") + (copied ? " copied" : "")} onClick={copy}>
-      {copied ? "copied ✓" : label}
-    </button>
+    <>
+      <button type="button" className={"copy" + (filled ? " acid" : "") + (copied ? " copied" : "")} onClick={copy}>
+        {copied ? "copied ✓" : label}
+      </button>
+      {/* Always-present polite region: visible label swap isn't reliably announced, so mirror it here. */}
+      <span className="sr-only" role="status">{copied ? "copied" : ""}</span>
+    </>
   );
 }
 
@@ -222,16 +226,22 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
   // so the chip text never moves — no layout shift in the row. Short-lived.
   const { copied, copy } = useCopy(id, 800);
   return (
-    <button
-      type="button"
-      className={"model-chip" + (down ? " down" : "") + (copied ? " copied" : "")}
-      onClick={copy}
-      aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
-    >
-      {id}
-      {down && <span className="model-chip-down">down</span>}
-      {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
-    </button>
+    <>
+      <button
+        type="button"
+        className={"model-chip" + (down ? " down" : "") + (copied ? " copied" : "")}
+        onClick={copy}
+        aria-label={`copy ${id}${down ? " (unavailable)" : ""}`}
+      >
+        {id}
+        {down && <span className="model-chip-down">down</span>}
+        {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
+      </button>
+      {/* Sibling of the button, NOT inside it: a button's subtree is presentational and the aria-label
+          overrides name-from-content, so a live region nested within is pruned and never announces. The
+          .sr-only span is position:absolute, so it stays out of the .model-chips flow. */}
+      <span className="sr-only" role="status">{copied ? "copied" : ""}</span>
+    </>
   );
 }
 
@@ -320,13 +330,29 @@ export function KeyBlock({ token }: { token: string }) {
         </span>
         <div className="head-right">
           <Copy value={token} label="copy" filled />
-          <button type="button" className="copy" onClick={() => setHidden((h) => !h)}>
+          <button
+            type="button"
+            className="copy"
+            aria-label={hidden ? "show full key" : "hide full key"}
+            onClick={() => setHidden((h) => !h)}
+          >
             {hidden ? "show" : "hide"}
           </button>
         </div>
       </div>
       <div className="body">
-        <div className="token">{hidden ? masked : token}</div>
+        {/* The mask is a run of bullets a screen reader would read out one by one — hide it and give SR an
+            sr-only status instead. The revealed token reads as itself. */}
+        <div className="token">
+          {hidden ? (
+            <>
+              <span aria-hidden="true">{masked}</span>
+              <span className="sr-only">key hidden — select show to reveal</span>
+            </>
+          ) : (
+            token
+          )}
+        </div>
       </div>
     </div>
   );
