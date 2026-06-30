@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.2](https://github.com/nullsink/nullsink/compare/v1.3.1...v1.3.2) (2026-06-30)
+
+
+### Bug Fixes
+
+* **client:** bump stale OpenAI quickstart example to gpt-5.5 ([#39](https://github.com/nullsink/nullsink/issues/39)) ([fd1137d](https://github.com/nullsink/nullsink/commit/fd1137dbbc0d606bc8f8043ff7dad46ecb8544f5))
+* **deploy:** remove the monero-wallet-rpc watchdog + node failover ([#37](https://github.com/nullsink/nullsink/issues/37)) ([bdf76f9](https://github.com/nullsink/nullsink/commit/bdf76f90ae79bb4e1f331c55634a3d1c5876a841))
+
 ## [1.3.1](https://github.com/nullsink/nullsink/compare/v1.3.0...v1.3.1) (2026-06-30)
 
 
