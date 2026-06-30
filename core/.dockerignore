@@ -1,0 +1,12 @@
+# Keep the build context to just the source the compile needs.
+node_modules
+test
+reports
+scripts
+deploy
+.stryker-tmp
+*.db
+nullsink-linux-x64
+nsk-linux-x64
+.env
+.env.*
