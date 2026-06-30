@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/nullsink/nullsink/compare/v1.3.0...v1.3.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* **client:** wordmark stagger survives prod CSP (move delays to CSS) ([#35](https://github.com/nullsink/nullsink/issues/35)) ([58259a8](https://github.com/nullsink/nullsink/commit/58259a8b1a24c7ba3c419326d84d1592508cab1f))
+
 ## [1.3.0](https://github.com/nullsink/nullsink/compare/v1.2.0...v1.3.0) (2026-06-30)
 
 
