@@ -23,7 +23,7 @@ const OPENAI_CURL = `curl https://nullsink.is/v1/chat/completions \\
   -H "authorization: Bearer 0sink_YOUR_KEY" \\
   -H "content-type: application/json" \\
   -d '{
-    "model": "gpt-5.2",
+    "model": "gpt-5.5",
     "max_completion_tokens": 1024,
     "messages": [{"role": "user", "content": "hello"}]
   }'`;
@@ -157,7 +157,7 @@ export function Api() {
           code={ANTHROPIC_CURL}
           highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
         />
-        <CodeBlock label="openai · curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.2"]} />
+        <CodeBlock label="openai · curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
       </section>
 
       <section className="section">
