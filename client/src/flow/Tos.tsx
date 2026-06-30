@@ -18,7 +18,9 @@ export function Tos() {
     <Layout>
       <section className="legal">
         <h1 className="legal-h1">Terms of service</h1>
-        <p className="legal-updated">Last updated: 15 June 2026</p>
+        <p className="legal-updated">
+          Last updated: <time dateTime="2026-06-15">15 June 2026</time>
+        </p>
 
         <p className="legal-lead">
           These are the terms for using <Ns />. The service is experimental and deliberately minimal, and
