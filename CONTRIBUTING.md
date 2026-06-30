@@ -1,6 +1,6 @@
 # Contributing to nullsink
 
-Thanks for your interest. nullsink is a privacy-first, money-handling system, so contributions are held to a
+Thanks for your interest. nullsink is a privacy-focused, money-handling system, so contributions are held to a
 high bar for correctness — especially anything touching the billing/ledger path or the privacy guarantees.
 
 ## Ground rules

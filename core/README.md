@@ -1,6 +1,6 @@
 # core
 
-The metered proxy service: a privacy-first reverse proxy to Anthropic/OpenAI, metered at the
+The metered proxy service: an anonymous reverse proxy to Anthropic/OpenAI, metered at the
 provider's per-token price against prepaid balances, plus its billing ledger, payment rails,
 the `nsk` operator CLI, and the box deploy machinery. Bun + TypeScript, zero runtime dependencies.
 
