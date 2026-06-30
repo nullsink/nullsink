@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.3.0](https://github.com/nullsink/nullsink/compare/v1.2.0...v1.3.0) (2026-06-30)
+
+
+### Features
+
+* **client:** /start Tinfoil on-ramp + lighter /models diagram wording ([#22](https://github.com/nullsink/nullsink/issues/22)) ([a95f9e7](https://github.com/nullsink/nullsink/commit/a95f9e7d3112e4b9309f87d0411813d9f20ac642))
+* **client:** drop /about page; models copy (Frontier tier, identity line) ([#23](https://github.com/nullsink/nullsink/issues/23)) ([09fcba2](https://github.com/nullsink/nullsink/commit/09fcba27f03afd5b559549515fb4bf64bf6921a2))
+* **client:** redesign /models — open-weight vs closed trust tiers ([#20](https://github.com/nullsink/nullsink/issues/20)) ([2140969](https://github.com/nullsink/nullsink/commit/2140969d13add2d24c37736d6bc4f65db6a25418))
+* **client:** redesign the landing — two-column home, single key field, models tiers ([#24](https://github.com/nullsink/nullsink/issues/24)) ([2b444ff](https://github.com/nullsink/nullsink/commit/2b444ffcde4f5825d62e3e761ce714525a9d67e0))
+* **client:** show the deployed version beside the wordmark ([#18](https://github.com/nullsink/nullsink/issues/18)) ([2452244](https://github.com/nullsink/nullsink/commit/24522442afc20c0fdc9e93b026bac8228f66fa22))
+* **client:** UI follow-ups — provider links, /api copy + dual error envelopes, active nav, /rails flicker fix ([#27](https://github.com/nullsink/nullsink/issues/27)) ([e12d611](https://github.com/nullsink/nullsink/commit/e12d611661d88217fded4539a927ba76898e2130))
+* **client:** UI polish — persistent hint, remove fades, /api + nav tweaks, drop SEO pages ([#28](https://github.com/nullsink/nullsink/issues/28)) ([6b51e0f](https://github.com/nullsink/nullsink/commit/6b51e0f44e40e7ab44fe387a2398509cf9f65c71))
+* **client:** wordmark seed → 999 ([#29](https://github.com/nullsink/nullsink/issues/29)) ([2520c8c](https://github.com/nullsink/nullsink/commit/2520c8c4fdc61e329f781997d8ff25f45bdd16b1))
+* **deploy:** MONERO_NODE failover — comma-separated node list + launch wrapper ([#33](https://github.com/nullsink/nullsink/issues/33)) ([bba9bd2](https://github.com/nullsink/nullsink/commit/bba9bd2acdd26872a2638f16a43428b800549906))
+* **deploy:** watchdog to restart a hung monero-wallet-rpc ([#30](https://github.com/nullsink/nullsink/issues/30)) ([c6c1fcc](https://github.com/nullsink/nullsink/commit/c6c1fccb7ef762bc5d581071d0bde84e43b3d25f))
+* **providers:** Tinfoil provider — namespaced routing + enclave attestation ([#13](https://github.com/nullsink/nullsink/issues/13)) ([96b9946](https://github.com/nullsink/nullsink/commit/96b994620af0b5a51d3b830e143fb0352624a2c2))
+
+
+### Bug Fixes
+
+* **client:** accessibility + i18n audit fixes ([#31](https://github.com/nullsink/nullsink/issues/31)) ([998005f](https://github.com/nullsink/nullsink/commit/998005fd8b2e50152408f467adb8f52340bee229))
+* **deploy:** reconcile timers on redeploy + warn on changed rail-daemon units ([#34](https://github.com/nullsink/nullsink/issues/34)) ([f31ea5a](https://github.com/nullsink/nullsink/commit/f31ea5ada4138a4f96bd54dda0aba5effde45005))
+
+
+### Refactoring
+
+* **deploy:** trim wallet-rpc watchdog + bound the heal ([#32](https://github.com/nullsink/nullsink/issues/32)) ([b453028](https://github.com/nullsink/nullsink/commit/b4530283b73670696c239c26d7715c7a8e208c69))
+
 ## [1.2.0](https://github.com/nullsink/nullsink/compare/v1.1.0...v1.2.0) (2026-06-26)
 
 
