@@ -21,11 +21,14 @@ export function Layout({
   return (
     <div className="shell">
       <a className="skip-link" href="#main">skip to content</a>
+      {/* one shared note every external link points at via EXT's aria-describedby, so SR users hear the
+          new-tab jump without per-link markup. */}
+      <span id="ext-new-tab" className="sr-only">opens in a new tab</span>
       <header className="bar">
         <a className="brand" href="/" aria-label="nullsink home">
           <Wordmark />
         </a>
-        <nav className="links">
+        <nav className="links" aria-label="primary">
           <a href="/api/" className={nav === "api" ? "on" : undefined} aria-current={nav === "api" ? "page" : undefined}>
             api
           </a>
@@ -43,11 +46,11 @@ export function Layout({
       </main>
       <footer className="foot">
         <div className="foot-row">
-          <nav className="foot-links">
+          <nav className="foot-links" aria-label="legal">
             <a href="/privacy/">privacy</a>
             <a href="/terms/">terms</a>
           </nav>
-          <nav className="foot-links">
+          <nav className="foot-links" aria-label="community">
             <a href={GITHUB_URL} {...EXT}>
               github
             </a>

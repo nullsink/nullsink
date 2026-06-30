@@ -66,7 +66,7 @@ export function AmountStep({
       {/* A clamp is a silent value change — announce the new amount politely (the visible caption only flashes). */}
       <span className="sr-only" role="status">{flash ? `amount set to ${usd(amount)}` : ""}</span>
 
-      <div className="presets">
+      <div className="presets" role="group" aria-label="amount presets">
         {AMOUNT_PRESETS.map((p) => (
           <button
             key={p}
@@ -113,8 +113,8 @@ export function AmountStep({
           marks are currentColor so they take the same ink/acid. */}
       {rails.length >= 2 && (
         <div className="coin-pick">
-          <div className="custom-label">pay with</div>
-          <div className="seg coins">
+          <div className="custom-label" id="pay-with-label">pay with</div>
+          <div className="seg coins" role="group" aria-labelledby="pay-with-label">
             {rails.map((r) => (
               <button
                 key={r.name}
