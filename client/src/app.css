@@ -117,7 +117,11 @@ button:disabled { cursor: not-allowed; }
 
 /* ---- section scaffolding ------------------------------------------------ */
 .section { margin-top: 40px; }
-.section h2 {
+/* Direct child only: the /models tiers nest their own <h2 class="tier-label"> / <h2 class="roadmap-head">
+   inside .section.models — a bare `.section h2` (more specific than those classes) would override their
+   12px label styling with this 22px section-heading look. The Api page's section headings ARE direct
+   children, so they still match. */
+.section > h2 {
   margin: 8px 0 4px;
   font-size: 22px;
   font-weight: var(--ns-weight-display);
