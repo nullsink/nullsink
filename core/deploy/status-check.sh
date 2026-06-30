@@ -23,7 +23,6 @@ set -u
 WALLET_RPC="${MONERO_WALLET_RPC_URL:-http://127.0.0.1:18083/json_rpc}"
 TOR_SOCKS="${TOR_SOCKS:-127.0.0.1:9050}"
 NODE_ENV_FILE="${NODE_ENV_FILE:-/etc/monero-wallet-rpc.env}"
-ACTIVE_NODE_FILE="${ACTIVE_NODE_FILE:-/run/monero-wallet-rpc/active-node}"  # failover node the wallet launch wrapper picked
 LAG_BLOCKS="${LAG_BLOCKS:-3}"                  # wallet may trail the tip by a block or two while scanning; alert past this
 RPC_TIMEOUT="${RPC_TIMEOUT:-15}"
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"    # where balances.db / pending.db (+ WAL sidecars) live
@@ -170,8 +169,8 @@ fi
 # --- 4. buy rail (only when enabled) ---
 if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
   # Retry like the node probe below: a wallet mid-refresh can briefly block get_height past RPC_TIMEOUT, and a
-  # single shot then false-pages. Real wedges persist across all attempts (and monero-wallet-rpc-watchdog.timer
-  # bounces those); only a genuinely dead wallet warns here.
+  # single shot then false-pages. A real wedge persists across all attempts and pages — clear it with
+  # `systemctl restart monero-wallet-rpc`; only a genuinely dead/wedged wallet warns here.
   wallet_h=""
   for attempt in 1 2 3; do
     wallet_resp="$(curl -sS --max-time "$RPC_TIMEOUT" "$WALLET_RPC" \
@@ -184,18 +183,12 @@ if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
   if [ -n "$wallet_h" ]; then ok "wallet height $wallet_h"
   else warn "wallet-rpc unreachable or no height (get_height failed)"; fi
 
-  # remote node: get_info over Tor (stateless stall + fault isolation). MONERO_NODE may be a comma-separated
-  # failover list, so probe the ACTIVE node the launch wrapper picked (recorded in $ACTIVE_NODE_FILE) — the raw
-  # list would malform the URL. Fall back to the first/preferred entry if the runtime file is absent (e.g. a
-  # restart just cleared the tmpfs RuntimeDirectory).
+  # remote node over Tor: get_info (stateless stall + fault isolation)
   # shellcheck disable=SC1090
   [ -r "$NODE_ENV_FILE" ] && . "$NODE_ENV_FILE"
   if [ -z "${MONERO_NODE:-}" ]; then
     warn "MONERO_NODE not set (cannot reach node to compare height) — check $NODE_ENV_FILE"
   else
-    primary_node="${MONERO_NODE%%,*}"; primary_node="${primary_node//[[:space:]]/}"
-    active_node="$(cat "$ACTIVE_NODE_FILE" 2>/dev/null)"; active_node="${active_node//[[:space:]]/}"
-    [ -n "$active_node" ] || active_node="$primary_node"
     # Tor circuits flake (~1 in 5 ticks in practice), so a single attempt false-pages. Retry up to 3× with
     # distinct SOCKS credentials — Tor's IsolateSOCKSAuth (on by default) gives each attempt a fresh
     # circuit — so only a genuinely down node/Tor warns. Stays stateless: all retries within this run.
@@ -203,7 +196,7 @@ if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
     for attempt in 1 2 3; do
       node_resp="$(curl -sS --max-time "$RPC_TIMEOUT" --socks5-hostname "$TOR_SOCKS" \
         --proxy-user "hc:circuit$attempt" \
-        "http://$active_node/json_rpc" -H 'content-type: application/json' \
+        "http://$MONERO_NODE/json_rpc" -H 'content-type: application/json' \
         -d '{"jsonrpc":"2.0","id":"0","method":"get_info"}' 2>/dev/null)"
       node_h="$(jnum "$node_resp" height)"
       [ -n "$node_h" ] && break
@@ -221,11 +214,6 @@ if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
         if [ "$wallet_h" -ge "$((node_h - LAG_BLOCKS))" ]; then ok "wallet in sync with node (lag $((node_h - wallet_h)))"
         else warn "wallet STALLED: $((node_h - wallet_h)) blocks behind node — deposits won't credit"; fi
       fi
-    fi
-    # Failover visibility — NON-failing (no fail=1): a healthy rail running on a fallback shouldn't page every
-    # tick. Note it so the operator can prefer the primary again with a restart.
-    if [ "$active_node" != "$primary_node" ]; then
-      ok "XMR rail on fallback node $active_node (primary $primary_node not picked at last start) — restart monero-wallet-rpc to prefer primary"
     fi
   fi
 else

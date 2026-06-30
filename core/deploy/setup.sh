@@ -333,10 +333,8 @@ fi
 if [ -f /etc/monero-wallet-rpc.env ] && [ -f /var/lib/nullsink-wallet/prview ]; then
   systemctl enable monero-wallet-rpc
   systemctl restart monero-wallet-rpc        # restart so a unit/env change takes effect
-  # The liveness watchdog (bounces a HUNG wallet that systemd's Restart=always can't catch) is enabled by
-  # enable_timers below — it tracks this unit's enabled state, so it follows the XMR rail automatically.
 elif rail_active monero; then
-  todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc (re-run setup.sh or deploy.sh after, to bring up the liveness watchdog)"
+  todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc"
 else
   todo "XMR rail (optional): add 'monero' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install the wallet binaries"
 fi
@@ -356,9 +354,8 @@ else
   todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install bitcoind"
 fi
 
-step "Enabling timers (health check, daily backup, wallet watchdog)"
-# One shared reconcile (lib.sh enable_timers, also run by deploy.sh): enables the always-on timers, plus the
-# XMR watchdog timer iff monero-wallet-rpc is enabled (done just above) so it follows the rail. Units were
+step "Enabling timers (health check, daily backup)"
+# One shared reconcile (lib.sh enable_timers, also run by deploy.sh): enables the always-on timers. Units were
 # refreshed by install_units above. Both always-on timers are safe with their creds unset:
 #   - status-check.timer runs status-check.sh every 10 min; a failure pages Telegram via status-alert@.service
 #     (a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set — still logs to journald).
