@@ -320,13 +320,30 @@ export function KeyBlock({ token }: { token: string }) {
         </span>
         <div className="head-right">
           <Copy value={token} label="copy" filled />
-          <button type="button" className="copy" onClick={() => setHidden((h) => !h)}>
+          <button
+            type="button"
+            className="copy"
+            aria-pressed={!hidden}
+            aria-label={hidden ? "show full key" : "hide full key"}
+            onClick={() => setHidden((h) => !h)}
+          >
             {hidden ? "show" : "hide"}
           </button>
         </div>
       </div>
       <div className="body">
-        <div className="token">{hidden ? masked : token}</div>
+        {/* The mask is a run of bullets a screen reader would read out one by one — hide it and give SR an
+            sr-only status instead. The revealed token reads as itself. */}
+        <div className="token">
+          {hidden ? (
+            <>
+              <span aria-hidden="true">{masked}</span>
+              <span className="sr-only">key hidden — select show to reveal</span>
+            </>
+          ) : (
+            token
+          )}
+        </div>
       </div>
     </div>
   );

@@ -890,7 +890,16 @@ button:disabled { cursor: not-allowed; }
   white-space: nowrap;
   pointer-events: none;
 }
-/* one focus ring everywhere (the design-system "states are decided" rule): 2px acid, offset 2px. */
+/* one focus ring everywhere (the design-system "states are decided" rule): 2px acid, offset 2px.
+   The amount field is here too: its always-acid bottom border is decoration, not a focus cue, so a
+   keyboard focus needs the ring (it kills the UA outline in .amount-input:focus). */
+.btn-primary:focus-visible,
+.preset:focus-visible,
+.seg button:focus-visible,
+.copy:focus-visible,
+.amount-input:focus-visible,
+.bar a:focus-visible,
+.foot-links a:focus-visible,
 .model-chip:focus-visible,
 .model-more-btn:focus-visible { outline: 2px solid var(--ns-acid); outline-offset: 2px; }
 /* the red "down" tag — the danger register (ink-on-red). Red is otherwise reserved for the money warnings;

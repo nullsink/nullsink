@@ -42,9 +42,16 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // the new phase's heading (the key panel, the funded summary, or the form). Layout effect so the
   // scroll happens before paint (no flash at the stale offset); the ref guard keeps hydration from
   // yanking a visitor who arrived mid-scroll (e.g. at /#buy).
+  // Ref on the checkout view's heading (pay/done). On a phase change we move focus here after the scroll so
+  // a screen-reader / keyboard user lands on the new view's title — otherwise focus falls to <body> when the
+  // submit button (which they activated) is disabled then unmounted. preventScroll so the scrollTo(0,0) wins.
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const prevPhase = useRef(phase);
   useLayoutEffect(() => {
-    if (prevPhase.current !== phase) window.scrollTo(0, 0);
+    if (prevPhase.current !== phase) {
+      window.scrollTo(0, 0);
+      headingRef.current?.focus({ preventScroll: true });
+    }
     prevPhase.current = phase;
   }, [phase]);
 
@@ -335,7 +342,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     const gated = order.wasNew && !savedAck; // save-gate: minted keys only (see savedAck above)
     return (
       <div className="section">
-        <h1 className="flow-h1">{order.wasNew ? "Your new key" : "Add credit"}</h1>
+        <h1 className="flow-h1" tabIndex={-1} ref={headingRef}>
+          {order.wasNew ? "Your new key" : "Add credit"}
+        </h1>
 
         <KeyBlock token={order.token} />
 
@@ -376,7 +385,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   if (!order) return null; // unreachable: phase is "done" only after a funded order
   return (
     <div className="section">
-      <h1 className="sr-only">{order.wasNew ? "Key funded" : "Credit added"}</h1>
+      <h1 className="sr-only" tabIndex={-1} ref={headingRef}>
+        {order.wasNew ? "Key funded" : "Credit added"}
+      </h1>
       <div className="funded-head">
         <span className="funded-tag">{order.wasNew ? "funded" : "topped up"}</span>
         <span className="balance">
