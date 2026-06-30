@@ -335,7 +335,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     const gated = order.wasNew && !savedAck; // save-gate: minted keys only (see savedAck above)
     return (
       <div className="section">
-        <h2>{order.wasNew ? "Your new key" : "Add credit"}</h2>
+        <h1 className="flow-h1">{order.wasNew ? "Your new key" : "Add credit"}</h1>
 
         <KeyBlock token={order.token} />
 
@@ -376,6 +376,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   if (!order) return null; // unreachable: phase is "done" only after a funded order
   return (
     <div className="section">
+      <h1 className="sr-only">{order.wasNew ? "Key funded" : "Credit added"}</h1>
       <div className="funded-head">
         <span className="funded-tag">{order.wasNew ? "funded" : "topped up"}</span>
         <span className="balance">

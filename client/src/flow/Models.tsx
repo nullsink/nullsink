@@ -82,7 +82,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
         <div className="pcard-head">
           {Logo && <Logo className="pcard-logo" />}
           <div className="pcard-name">
-            <span className="pcard-title">
+            <h3 className="pcard-title">
               {SITE[provider.id] ? (
                 <a href={SITE[provider.id]} {...EXT}>
                   <span className="title-name">{provider.label}</span>
@@ -91,7 +91,7 @@ function ProviderCard({ provider, sealed }: { provider: Provider; sealed: boolea
               ) : (
                 provider.label
               )}
-            </span>
+            </h3>
             <span className="pcard-count">{provider.models.length} models</span>
           </div>
           <div className="pcard-tags">
@@ -139,7 +139,7 @@ export function Models() {
             <section className={"tier" + (tier.sealed ? " sealed" : "")} key={tier.key}>
               <div className="tier-head">
                 <SquareGlyph sealed={tier.sealed} className="tier-mark" />
-                <span className="tier-label">{tier.label}</span>
+                <h2 className="tier-label">{tier.label}</h2>
                 <span className="tier-tag">{tier.tagline}</span>
               </div>
               {provs.map((p) => (
@@ -150,7 +150,7 @@ export function Models() {
         })}
 
         <section className="tier roadmap">
-          <div className="roadmap-head">On the roadmap</div>
+          <h2 className="roadmap-head">On the roadmap</h2>
           {ROADMAP.map(({ id, name, meta, Logo }) => (
             <div className="rm-row" key={id}>
               <Logo className="rm-logo" />

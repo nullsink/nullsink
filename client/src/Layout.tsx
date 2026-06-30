@@ -20,6 +20,7 @@ export function Layout({
 }) {
   return (
     <div className="shell">
+      <a className="skip-link" href="#main">skip to content</a>
       <header className="bar">
         <a className="brand" href="/" aria-label="nullsink home">
           <Wordmark />
@@ -37,7 +38,9 @@ export function Layout({
           </a>
         </nav>
       </header>
-      <div className={"content" + (center ? " center" : "")}>{children}</div>
+      <main id="main" tabIndex={-1} className={"content" + (center ? " center" : "")}>
+        {children}
+      </main>
       <footer className="foot">
         <div className="foot-row">
           <nav className="foot-links">
