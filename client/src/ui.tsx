@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
-import { pulseDelays, WORDMARK_SEED } from "./lib/pulse.ts";
 
 // The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
 // so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
@@ -19,11 +18,10 @@ export function Mark({ className }: { className?: string }) {
   );
 }
 
-// The sink mark with the "alive" pulse: each square fades on a shared 2.2s loop, offset by a per-square
-// phase (animation-delay) so the funnel breathes instead of blinking in unison. The phases come from
-// pulseDelays(seed) in lib/pulse.ts — deterministic, so prerender and client agree (no hydration drift).
-// Default seed is the live WORDMARK_SEED; pass `seed` to render any other. Decorative motion →
-// yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
+// The sink mark with the "alive" pulse: seven squares fade on a shared 2.2s loop, each phase-offset by a
+// per-square animation-delay so the funnel breathes. The offsets live in app.css (.pulse-mark rect:nth-child)
+// as static CSS, so they survive the strict production CSP, which drops inline style attributes. Decorative
+// motion → yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
 const PULSE_GEO = [
   { x: 0, y: 0, w: 70, h: 70 },
   { x: 140, y: 0, w: 70, h: 70 },
@@ -33,8 +31,7 @@ const PULSE_GEO = [
   { x: 140, y: 140, w: 70, h: 70 },
   { x: 0, y: 280, w: 350, h: 70 },
 ];
-export function PulseMark({ className, seed = WORDMARK_SEED }: { className?: string; seed?: number }) {
-  const delays = pulseDelays(seed);
+export function PulseMark({ className }: { className?: string }) {
   return (
     <svg
       className={"pulse-mark" + (className ? " " + className : "")}
@@ -44,7 +41,7 @@ export function PulseMark({ className, seed = WORDMARK_SEED }: { className?: str
       fill="currentColor"
     >
       {PULSE_GEO.map((g, i) => (
-        <rect key={i} x={g.x} y={g.y} width={g.w} height={g.h} style={{ animationDelay: delays[i] }} />
+        <rect key={i} x={g.x} y={g.y} width={g.w} height={g.h} />
       ))}
     </svg>
   );

@@ -731,11 +731,21 @@ button:disabled { cursor: not-allowed; }
 }
 .sqg.sealed::before { content: ""; position: absolute; inset: 22%; background: currentColor; }
 
-/* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square (the
-   per-rect animation-delay from pulseDelays(seed) — see lib/pulse.ts). Decorative, so it yields to
-   reduced-motion (then it just holds the brand mark, full-opacity). It powers the wordmark mark. */
+/* the sink mark's "alive" pulse: each square fades on a shared 2.2s loop, phase-offset per square by the
+   nth-child animation-delays below. They live here as static CSS (served from 'self') so the offsets
+   survive the strict production CSP, which drops inline style attributes — that is why the stagger is
+   authored here rather than per-rect in the markup. Decorative, so it yields to reduced-motion (then it
+   just holds the brand mark, full-opacity). It powers the wordmark mark. */
 @keyframes ns-pulse { 0%, 30% { opacity: 1; } 36%, 100% { opacity: 0.2; } }
 .pulse-mark rect { animation: ns-pulse 2.2s linear infinite; }
+/* deterministic phase offsets across the 2.2s loop, one per square (PULSE_GEO order in ui.tsx). */
+.pulse-mark rect:nth-child(1) { animation-delay: 2.13s; }
+.pulse-mark rect:nth-child(2) { animation-delay: 1.40s; }
+.pulse-mark rect:nth-child(3) { animation-delay: 0.68s; }
+.pulse-mark rect:nth-child(4) { animation-delay: 1.70s; }
+.pulse-mark rect:nth-child(5) { animation-delay: 1.00s; }
+.pulse-mark rect:nth-child(6) { animation-delay: 1.27s; }
+.pulse-mark rect:nth-child(7) { animation-delay: 0.10s; }
 @media (prefers-reduced-motion: reduce) { .pulse-mark rect { animation: none; } }
 
 /* tier header: a glyph + label + tagline over a hairline that takes the tier's accent — acid for the
