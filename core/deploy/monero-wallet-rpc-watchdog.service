@@ -10,6 +10,9 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=oneshot
+# alert.sh reads TELEGRAM_* from its environment; the script calls it directly on a heal, so this unit must
+# load the creds itself (status-check.service does the same). `-`: a missing file is fine (page just no-ops).
+EnvironmentFile=-/etc/nullsink.env
 # Runs as root (no User=): it must `systemctl restart monero-wallet-rpc`, which needs privilege. It touches
 # only the localhost wallet RPC and systemctl — no app data, no secrets.
 ExecStart=/opt/nullsink/deploy/wallet-rpc-watchdog.sh
