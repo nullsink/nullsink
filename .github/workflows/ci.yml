@@ -27,6 +27,7 @@ jobs:
       - run: bun --filter '*' test
       - run: bun --filter '*' build          # core single-binary + client static bundle (smoke)
       - run: bun --filter './core' build:nsk  # nsk operator-CLI binary (smoke)
+      - run: bash core/deploy/test/monero-wallet-rpc-launch.test.sh  # wallet launch-wrapper argv/selection guard
 
   lint:
     # Runs core/scripts/lint.sh — the same gate a developer runs locally — with pinned linters.
