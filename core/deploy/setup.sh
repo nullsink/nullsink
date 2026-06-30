@@ -333,10 +333,10 @@ fi
 if [ -f /etc/monero-wallet-rpc.env ] && [ -f /var/lib/nullsink-wallet/prview ]; then
   systemctl enable monero-wallet-rpc
   systemctl restart monero-wallet-rpc        # restart so a unit/env change takes effect
-  # Liveness watchdog: bounces a HUNG wallet (active-but-deaf) that systemd's Restart=always can't catch.
-  systemctl enable --now monero-wallet-rpc-watchdog.timer
+  # The liveness watchdog (bounces a HUNG wallet that systemd's Restart=always can't catch) is enabled by
+  # enable_timers below — it tracks this unit's enabled state, so it follows the XMR rail automatically.
 elif rail_active monero; then
-  todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc"
+  todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc (re-run setup.sh or deploy.sh after, to bring up the liveness watchdog)"
 else
   todo "XMR rail (optional): add 'monero' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install the wallet binaries"
 fi
@@ -356,21 +356,19 @@ else
   todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install bitcoind"
 fi
 
-step "Enabling the health-check timer + Telegram alert units"
-# status-check.timer runs status-check.sh every 10 min; a failure pages Telegram via status-alert@.service.
-# Alerts are a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set in $ENV_FILE. Units already refreshed
-# by install_units above; just (re)enable the timer. Safe to run with alerts unconfigured (still logs to journald).
-systemctl enable --now status-check.timer
-
-step "Enabling the daily backup timer"
-# backup.timer runs deploy/backup.sh daily AS the service user: sqlite3 .backup of balances.db + pending.db,
-# optional age-encryption (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), both set in $ENV_FILE.
-# Unset = local-only plaintext snapshots in /var/lib/nullsink/backups; status-check warns if the newest
-# goes stale. Restore or TEST a backup with deploy/restore.sh (dry-run by default). The units were
-# refreshed by install_units above; just (re)enable the timer.
-systemctl enable --now backup.timer
-# Seed the first artifact now, so the freshness check doesn't warn until the daily timer first fires AND so
-# any backup misconfig surfaces immediately. Non-fatal (e.g. before the app has created balances.db).
+step "Enabling timers (health check, daily backup, wallet watchdog)"
+# One shared reconcile (lib.sh enable_timers, also run by deploy.sh): enables the always-on timers, plus the
+# XMR watchdog timer iff monero-wallet-rpc is enabled (done just above) so it follows the rail. Units were
+# refreshed by install_units above. Both always-on timers are safe with their creds unset:
+#   - status-check.timer runs status-check.sh every 10 min; a failure pages Telegram via status-alert@.service
+#     (a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set — still logs to journald).
+#   - backup.timer runs deploy/backup.sh daily AS the service user: sqlite3 .backup of balances.db + pending.db,
+#     optional age-encryption (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), both set in $ENV_FILE.
+#     Unset = local-only plaintext snapshots in /var/lib/nullsink/backups (status-check warns if the newest goes
+#     stale). Restore or TEST a backup with deploy/restore.sh (dry-run by default).
+enable_timers
+# Seed the first backup artifact now, so the freshness check doesn't warn until the daily timer first fires AND
+# so any backup misconfig surfaces immediately. Non-fatal (e.g. before the app has created balances.db).
 systemctl start backup.service || note "initial backup run failed — check: journalctl -u backup.service"
 
 step "Installing Caddy (public edge: TLS + reverse proxy)"
