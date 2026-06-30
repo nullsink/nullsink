@@ -23,34 +23,29 @@ Group=nullsink
 StateDirectory=nullsink-wallet
 StateDirectoryMode=0700
 
-# MONERO_NODE=<onion-host>:<port>  — the remote node. Keep it in this file (not the unit) so swapping
-# nodes is a one-line edit + restart. PROD uses an .onion node reached over Tor (the default below).
+# /run/monero-wallet-rpc — the launch wrapper records the active failover node here (service-owned) for
+# status-check to read. Tmpfs, cleared on restart; status-check falls back to the primary if it's absent.
+RuntimeDirectory=monero-wallet-rpc
+
+# MONERO_NODE=<host>:<port>[,<host>:<port>…] — one node, or a comma-separated, preference-ordered FAILOVER
+# list. The launch wrapper (ExecStart below) picks the first reachable entry at (re)start; a single value
+# behaves exactly as before. ALL entries must share one transport (all .onion-over-Tor, or all clearnet) —
+# the proxy is all-or-nothing. Keep it in this file (not the unit) so swapping/extending nodes is a one-line
+# edit + restart. PROD uses .onion node(s) reached over Tor (the default below).
 # MONERO_PROXY_ARG defaults to Tor; set it EMPTY in the env file for a DIRECT/clearnet node (e.g. staging) —
 # monero REFUSES --proxy to a clearnet daemon (no SSL/onion), so a clearnet node must drop the proxy.
 # Environment= is the default; EnvironmentFile= is loaded AFTER, so a value there overrides it.
 Environment="MONERO_PROXY_ARG=--proxy 127.0.0.1:9050"
 EnvironmentFile=/etc/monero-wallet-rpc.env
 
-# View-only watcher: detects deposits, derives per-order subaddresses, never spends.
-#  --untrusted-daemon : the remote node may lie/withhold; we still wait MONERO_CONFIRMATIONS.
-#  $MONERO_PROXY_ARG : node traffic over Tor by default (--proxy 127.0.0.1:9050); EMPTY = direct (see above).
-#  --rpc-bind-ip 127.0.0.1 --disable-rpc-login : localhost-only, so no auth; NEVER bind public.
-#  --password-file : keeps the wallet password out of the process args (ps/journal).
-#  $MONERO_NET_ARG : optional network flag from the env file — EMPTY for mainnet (prod, the default),
-#    `--stagenet` (or `--testnet`) for a testnet staging box. Unbraced $VAR so an empty value adds NO
-#    argument (a braced ${VAR} would pass an empty "" that monero-wallet-rpc rejects).
-ExecStart=/usr/local/bin/monero-wallet-rpc \
-  $MONERO_NET_ARG \
-  --wallet-file %S/nullsink-wallet/prview \
-  --password-file %S/nullsink-wallet/.rpc-pw \
-  --daemon-address ${MONERO_NODE} \
-  $MONERO_PROXY_ARG \
-  --untrusted-daemon \
-  --rpc-bind-ip 127.0.0.1 \
-  --rpc-bind-port 18083 \
-  --disable-rpc-login \
-  --non-interactive \
-  --log-file %S/nullsink-wallet/wallet-rpc.log
+# View-only watcher: detects deposits, derives per-order subaddresses, never spends. ExecStart is the launch
+# wrapper (deploy/monero-wallet-rpc-launch.sh): it selects the active node from MONERO_NODE's failover list and
+# exec's monero-wallet-rpc with the SAME hardened args as before — see that script for the full arg list
+# (--untrusted-daemon; localhost-only --rpc-bind-ip 127.0.0.1 + --disable-rpc-login; --password-file keeps the
+# password out of ps/journal; $MONERO_NET_ARG; $MONERO_PROXY_ARG). It uses systemd's $STATE_DIRECTORY (the
+# wallet files) and $RUNTIME_DIRECTORY (where it records the active node), so the unit owns those paths, not the
+# script. The wrapper execs the daemon, so MainPID is monero-wallet-rpc and graceful shutdown is unaffected.
+ExecStart=/opt/nullsink/deploy/monero-wallet-rpc-launch.sh
 
 Restart=always
 RestartSec=5
@@ -58,6 +53,9 @@ RestartSec=5
 # after this, systemd SIGKILLs it (the default). Without this, `systemctl restart` (by an operator or the
 # watchdog) would block on the ~90s default while a deaf process refuses to exit.
 TimeoutStopSec=30
+# The launch wrapper probes each failover node once (~10s) before exec'ing the daemon; give start enough room
+# for that plus the wallet open, so a slow probe can't trip the ~90s default start timeout into a restart loop.
+TimeoutStartSec=120
 
 # Hardening.
 NoNewPrivileges=true
