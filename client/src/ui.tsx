@@ -184,9 +184,13 @@ function useCopy(value: string, ms: number = COPY_FEEDBACK_MS): { copied: boolea
 export function Copy({ value, label = "copy", filled = false }: { value: string; label?: string; filled?: boolean }) {
   const { copied, copy } = useCopy(value);
   return (
-    <button type="button" className={"copy" + (filled ? " acid" : "") + (copied ? " copied" : "")} onClick={copy}>
-      {copied ? "copied ✓" : label}
-    </button>
+    <>
+      <button type="button" className={"copy" + (filled ? " acid" : "") + (copied ? " copied" : "")} onClick={copy}>
+        {copied ? "copied ✓" : label}
+      </button>
+      {/* Always-present polite region: visible label swap isn't reliably announced, so mirror it here. */}
+      <span className="sr-only" role="status">{copied ? "copied" : ""}</span>
+    </>
   );
 }
 
@@ -231,6 +235,8 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
       {id}
       {down && <span className="model-chip-down">down</span>}
       {copied && <span className="chip-copied" aria-hidden="true">copied</span>}
+      {/* The visible badge is aria-hidden; this polite region announces the copy (aria-label stays the instruction). */}
+      <span className="sr-only" role="status">{copied ? "copied" : ""}</span>
     </button>
   );
 }

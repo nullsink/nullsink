@@ -63,6 +63,8 @@ export function AmountStep({
           </span>
         </span>
       </div>
+      {/* A clamp is a silent value change — announce the new amount politely (the visible caption only flashes). */}
+      <span className="sr-only" role="status">{flash ? `amount set to ${usd(amount)}` : ""}</span>
 
       <div className="presets">
         {AMOUNT_PRESETS.map((p) => (

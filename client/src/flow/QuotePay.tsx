@@ -138,7 +138,7 @@ export function QuotePay({
         )}
         {!busy && errorCode && (
           <>
-            <div className="notice">{buyErrorMessage(errorCode)}</div>
+            <div className="notice" role="alert">{buyErrorMessage(errorCode)}</div>
             <button className="btn-primary" type="button" onClick={onRetry}>
               try again →
             </button>
@@ -151,10 +151,10 @@ export function QuotePay({
   if (expired) {
     return (
       <div className="section">
-        <div className="notice">
+        <div className="notice" role="alert">
           This quote expired. The amount and address are no longer valid. Get a fresh quote to pay.
         </div>
-        {errorCode && <div className="notice">{buyErrorMessage(errorCode)}</div>}
+        {errorCode && <div className="notice" role="alert">{buyErrorMessage(errorCode)}</div>}
         <button className="btn-primary" type="button" disabled={busy} onClick={onRetry}>
           {busy ? "requesting…" : "new quote →"}
         </button>
@@ -230,7 +230,7 @@ export function QuotePay({
           impatient. The fine-print line under it states the privacy split out loud — the design
           choice is a feature, so say it. */}
       <div className="status">
-        <span className="watch">{statusText}</span>
+        <span className="watch" role="status">{statusText}</span>
         <button className="copy acid" type="button" disabled={checking} onClick={checkNow}>
           check
         </button>
