@@ -385,7 +385,7 @@ button:disabled { cursor: not-allowed; }
 .seg.coins { margin-top: 8px; }
 .seg.coins button { display: flex; align-items: center; justify-content: center; gap: 7px; }
 .coin-mark { width: 15px; height: 15px; flex: none; }
-.coin-tic { font-size: 12px; opacity: 0.7; }
+.coin-tic { font-size: 12px; } /* smaller than the coin name is enough hierarchy; no opacity dim (kept it AA) */
 .coin-desc { margin-top: 10px; color: var(--ns-muted); font-size: 13px; }
 /* separates the amount block from the optional key field now sitting above it (see KeyFlow home form). */
 .amount-step { margin-top: 28px; }
@@ -393,7 +393,7 @@ button:disabled { cursor: not-allowed; }
 .hint { margin-top: 12px; color: var(--ns-muted); font-size: 13px; line-height: 1.5; }
 .have-key-inline { margin-top: 0; }
 .keyfield-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); }
-.keyfield-opt { font-size: 11px; letter-spacing: 0.05em; color: var(--ns-faint); }
+.keyfield-opt { font-size: 11px; letter-spacing: 0.05em; color: var(--ns-muted); }
 
 /* click-through acceptance: a small acid checkbox plus a link up to the terms section */
 .agree {
@@ -426,7 +426,7 @@ button:disabled { cursor: not-allowed; }
   letter-spacing: 0.02em;
 }
 .paste-input:focus { outline: none; border-color: var(--ns-acid); }
-.paste-input::placeholder { color: var(--ns-faint); }
+.paste-input::placeholder { color: var(--ns-muted); }
 /* kill native + extension password decorations (the stray key icon) */
 .paste-input::-ms-reveal,
 .paste-input::-ms-clear { display: none; }
