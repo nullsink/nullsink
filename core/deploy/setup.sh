@@ -37,7 +37,7 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # release WITHOUT editing this file (and without downgrading a box already past the default):
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
-RELEASE_TAG="${RELEASE_TAG:-v1.3.0}" # x-release-please-version
+RELEASE_TAG="${RELEASE_TAG:-v1.3.1}" # x-release-please-version
 # Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the
 # fanquake-signed SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
 BITCOIN_VERSION="31.0"
