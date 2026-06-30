@@ -6,7 +6,7 @@
 #   sudo deploy/deploy.sh v0.3.0     # deploy a release tag (the only mode — no source/Bun on the box)
 # Only the app service is restarted; the rail daemons' unit files are refreshed (drift closure) but left
 # running — a redeploy WARNS when an enabled daemon's unit changed so you can restart it on your schedule.
-# Timers are reconciled too (status-check, backup, and the XMR watchdog when the wallet rail is enabled).
+# Timers are reconciled too (status-check, backup).
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
