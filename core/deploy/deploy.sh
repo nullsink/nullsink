@@ -4,8 +4,9 @@
 # UI, reinstalls units + Caddy edge so the box can't drift, restarts the app, waits for /healthz, and ROLLS
 # BACK binary + UI if unhealthy. Records the live version in $APP_DIR/REVISION. Run as root:
 #   sudo deploy/deploy.sh v0.3.0     # deploy a release tag (the only mode — no source/Bun on the box)
-# Only the app service is restarted; the rail daemons' unit files are refreshed (drift closure) but
-# left running — restart them yourself when a daemon unit actually changes.
+# Only the app service is restarted; the rail daemons' unit files are refreshed (drift closure) but left
+# running — a redeploy WARNS when an enabled daemon's unit changed so you can restart it on your schedule.
+# Timers are reconciled too (status-check, backup, and the XMR watchdog when the wallet rail is enabled).
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
@@ -39,8 +40,24 @@ sync_caddy() {  # refresh the Caddy edge config from the repo; validate first, r
     echo "!! /etc/caddy/Caddyfile failed validation after refresh — left in place but NOT reloaded; fix it" >&2
   fi
 }
-apply_repo_config() { install_units; sync_caddy; }   # everything the box derives from the repo (units + edge)
+apply_repo_config() { install_units; enable_timers; sync_caddy; }   # everything the box derives from the repo (units + timers + edge)
 record() { printf '%s  %s%s\n' "$1" "$(date -u +%FT%TZ)" "${2:-}" > "$APP_DIR/REVISION"; }
+
+# Rail daemons (bitcoind, monero-wallet-rpc) are deliberately NOT bounced by a redeploy — restarting a node
+# mid-sync is disruptive. But silently refreshing a daemon's unit FILE while it keeps running the old one is a
+# footgun, so when a redeploy actually CHANGES an enabled daemon's unit, tell the operator to restart it on
+# their schedule. Call BEFORE install_units overwrites /etc/systemd/system (compares the live unit vs the new tree).
+warn_changed_daemons() {
+  local u live new
+  for u in monero-wallet-rpc bitcoind; do
+    live="/etc/systemd/system/$u.service"; new="$APP_DIR/deploy/$u.service"
+    [ -f "$new" ] || continue
+    systemctl is-enabled --quiet "$u" 2>/dev/null || continue   # only matters for a daemon that's actually in use
+    if [ -f "$live" ] && ! cmp -s "$live" "$new"; then
+      echo "!! $u.service changed in $REF but the daemon was left running the OLD unit — restart on your schedule: systemctl restart $u" >&2
+    fi
+  done
+}
 
 deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap the binary + UI, health-gated
   # binary mode: fetch+verify+swap the binary + UI symlinks, refresh units/edge (NO git-checkout — the
@@ -63,7 +80,8 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap the b
     new_web="${prev_web:-unchanged}"
   fi
   new_bin="$(readlink /usr/local/lib/nullsink/current 2>/dev/null || true)"
-  apply_repo_config                      # refresh units (binary-ExecStart) + edge from the now-current deploy/
+  warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
+  apply_repo_config                      # refresh units (binary-ExecStart) + timers + edge from the now-current deploy/
   systemctl restart "$SVC_NAME"
 
   if health_ok; then

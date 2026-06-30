@@ -17,6 +17,21 @@ install_units() {  # refresh ALL units + timers from the repo so on-box config c
   systemctl daemon-reload
 }
 
+enable_timers() {  # reconcile the box's timers from the repo — shared by setup.sh + deploy.sh, idempotent.
+  # The always-on timers run on every box (safe with their creds unset — they just log / no-op). The XMR
+  # liveness watchdog instead TRACKS the wallet unit: enable it iff monero-wallet-rpc is enabled (the exact
+  # signal wallet-rpc-watchdog.sh itself gates on), disable it otherwise — so a BTC-only box never runs a
+  # no-op watchdog, and dropping the XMR rail cleans the orphaned timer up on the next reconcile. Reads
+  # systemd state, not PAY_RAILS, so deploy.sh needs no rail logic of its own. Run after install_units (the
+  # unit files must exist) and after the rail daemons are enabled (so the is-enabled gate reads true).
+  systemctl enable --now status-check.timer backup.timer
+  if systemctl is-enabled --quiet monero-wallet-rpc 2>/dev/null; then
+    systemctl enable --now monero-wallet-rpc-watchdog.timer
+  else
+    systemctl disable --now monero-wallet-rpc-watchdog.timer 2>/dev/null || true
+  fi
+}
+
 install_binary() {  # $1=tag — fetch+verify+activate the self-contained app binary for a release tag
   # Binary layout: versioned /usr/local/lib/nullsink/nullsink-<tag> + a `current` symlink -> the active
   # version (a RELATIVE target, so the dir is self-contained/relocatable). The unit's ExecStart runs the

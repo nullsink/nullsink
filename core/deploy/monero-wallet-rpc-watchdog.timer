@@ -1,5 +1,6 @@
-# Probe the wallet's liveness every few minutes and bounce it if wedged. Enable with:
-# systemctl enable --now monero-wallet-rpc-watchdog.timer (setup.sh does this when the XMR rail is up).
+# Probe the wallet's liveness every few minutes and bounce it if wedged. setup.sh + deploy.sh enable this
+# (via lib.sh enable_timers) whenever monero-wallet-rpc is enabled and disable it otherwise, so it tracks the
+# XMR rail automatically. Manual: systemctl enable --now monero-wallet-rpc-watchdog.timer.
 # Monotonic timers resume on their own after a reboot; Persistent= is intentionally omitted (it only affects
 # OnCalendar= timers, and a missed liveness probe is worthless to replay late).
 [Unit]
