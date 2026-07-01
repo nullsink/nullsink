@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.3.3](https://github.com/nullsink/nullsink/compare/v1.3.2...v1.3.3) (2026-07-01)
+
+
+### Features
+
+* **pricing:** add claude-sonnet-5 (sync from models.dev) ([#41](https://github.com/nullsink/nullsink/issues/41)) ([ff15d3d](https://github.com/nullsink/nullsink/commit/ff15d3dab7869dfd3b41798c9fb1048649effa2c))
+
+
+### Chores
+
+* pin release to 1.3.3; price syncs cut patch releases ([#44](https://github.com/nullsink/nullsink/issues/44)) ([06cbe41](https://github.com/nullsink/nullsink/commit/06cbe417715a8a58b7e151ebcf8bb80a081d526f))
+
 ## [1.3.2](https://github.com/nullsink/nullsink/compare/v1.3.1...v1.3.2) (2026-06-30)
 
 
