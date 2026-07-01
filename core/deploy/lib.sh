@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Shared "apply repo config to the box" helpers, SOURCED by setup.sh (bootstrap) and deploy.sh (redeploy)
-# so unit/timer install lives in one place and can't drift. No side effects beyond defining helpers + REPO.
+# so unit/timer install lives in one place and can't drift. No side effects beyond defining helpers + REPO +
+# the shared Bitcoin pin (below).
 # Caller must set APP_DIR (and ENV_FILE for health_ok).
 
 # The GitHub repo slug the box pulls release assets from — single source of truth for all four fetch
