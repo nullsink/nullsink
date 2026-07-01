@@ -22,8 +22,9 @@ StateDirectory=bitcoind
 StateDirectoryMode=0700
 RuntimeDirectory=bitcoind
 
-# bitcoin.conf (created per the runbook) carries: prune=, server=1, rpcbind=127.0.0.1 + rpcauth=, and
-# wallet=nullsink. RPC is localhost-ONLY — NEVER bind it public. Run in the foreground for systemd (Type=simple).
+# bitcoin.conf (created per the runbook) carries: prune=, server=1, rpcbind= + rpcauth=, and wallet=nullsink.
+# Bind RPC to localhost only (plus the WireGuard tunnel IP on a node box) — NEVER a clearnet-routable
+# address. Run in the foreground for systemd (Type=simple).
 ExecStart=/usr/local/bin/bitcoind -datadir=%S/bitcoind -conf=%S/bitcoind/bitcoin.conf -pid=/run/bitcoind/bitcoind.pid
 # Let bitcoind flush the chainstate cleanly on stop (a hard kill mid-flush forces a slow reindex next boot).
 ExecStop=/usr/local/bin/bitcoin-cli -datadir=%S/bitcoind stop
