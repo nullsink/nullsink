@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compare the pinned external versions (deploy/setup.sh) against upstream's latest release and report any
+# Compare the pinned external versions (deploy/setup.sh + deploy/lib.sh) against upstream's latest release and report any
 # that are behind. READ-ONLY, notify-only — never bumps anything. Run locally, or in CI (the check-pins
 # workflow opens an issue when this exits non-zero). Uses the public GitHub release API; unauthenticated
 # works (rate-limited) — CI passes a token via GH_TOKEN. Exit 0 = all current, 1 = something behind.
@@ -7,7 +7,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-pin() { grep -oE "$1=\"[^\"]+\"" deploy/setup.sh | head -1 | cut -d'"' -f2; }
+# The Bitcoin pin lives in deploy/lib.sh (shared with setup-nodes.sh); Monero + tinfoil pins are in setup.sh.
+# Grep both (-h drops the filename prefix); each var name is unique to one file, so head -1 is unambiguous.
+pin() { grep -hoE "$1=\"[^\"]+\"" deploy/setup.sh deploy/lib.sh | head -1 | cut -d'"' -f2; }
 btc_pinned="$(pin BITCOIN_VERSION)"
 xmr_pinned="$(pin MONERO_VERSION)"
 tf_pinned="$(pin TINFOIL_PROXY_VERSION)"   # Tinfoil verifying proxy (kept WITH its leading v, unlike the others)
