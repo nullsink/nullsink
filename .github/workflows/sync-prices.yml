@@ -1,0 +1,90 @@
+# Daily: regenerate the committed price snapshots from models.dev and, if anything changed, open (or
+# refresh) a PR with the diff. models.dev is the pricing source of truth; the proxy reads the COMMITTED
+# prices.json at startup and NEVER fetches prices at runtime, so billing stays deterministic — this job
+# only ever proposes a reviewable diff, it never changes what a running box bills until the PR is merged +
+# deployed. Regeneration is fully mechanical (core/cli/sync-prices.ts → core/src/cost/prices.json, then
+# client/sync-models.ts → client/src/models.json), so — unlike the notify-only check-pins.yml — this opens
+# a PR rather than an issue. It typechecks + tests the regenerated files FIRST, because a GITHUB_TOKEN-
+# created PR does not trigger the ci.yml `pull_request` run. A single rolling branch (bot/sync-prices) is
+# force-updated each run, so re-runs refresh the existing PR instead of stacking new ones. Run on demand
+# via the "Run workflow" button too.
+name: sync-prices
+
+on:
+  schedule:
+    - cron: "0 7 * * *"   # 07:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write        # push the bot/sync-prices branch
+  pull-requests: write   # open / refresh the PR
+
+jobs:
+  sync:
+    if: github.repository == 'nullsink/nullsink'   # don't run on forks (would push branches / open PRs there)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14   # match ci.yml + the box runtime
+      - run: bun install --frozen-lockfile
+
+      - name: regenerate price snapshots from models.dev
+        run: |
+          (cd core && bun run cli/sync-prices.ts)   # → core/src/cost/prices.json (output path is script-relative)
+          (cd client && bun run sync:models)        # → client/src/models.json (derives from core's prices.json)
+
+      - name: detect changes
+        id: diff
+        run: |
+          if git diff --quiet -- core/src/cost/prices.json client/src/models.json; then
+            echo "prices already current — no PR needed"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "body<<DIFF_EOF"
+              git diff -- core/src/cost/prices.json client/src/models.json
+              echo "DIFF_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: validate the regenerated files
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          bun --filter '*' typecheck   # client tsc parses models.json; core tsc parses prices.json's shape
+          bun --filter '*' test        # pricing/billing property tests exercise prices.json
+
+      - name: open or refresh the PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIFF: ${{ steps.diff.outputs.body }}
+        run: |
+          BRANCH=bot/sync-prices
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add core/src/cost/prices.json client/src/models.json
+          git commit -m "chore(pricing): sync prices from models.dev"
+          git push --force origin "$BRANCH"
+
+          if gh pr list --head "$BRANCH" --state open --json number --jq '.[].number' | grep -q .; then
+            echo "existing PR refreshed by the force-push — leaving it"
+            exit 0
+          fi
+
+          {
+            echo "Automated resync of model prices from [models.dev](https://models.dev/api.json), the pricing source of truth."
+            echo
+            echo "The proxy reads the committed \`prices.json\` at startup and never fetches prices at runtime, so this only proposes a diff — nothing a running box bills changes until this is merged and deployed. Typecheck + tests already passed in the sync job (a \`GITHUB_TOKEN\`-created PR does not trigger the \`ci.yml\` \`pull_request\` run, so this job validates the regenerated files itself)."
+            echo
+            echo "Retitle to \`fix(pricing): …\` before merging if you want the change in the release changelog."
+            echo
+            echo '```diff'
+            printf '%s\n' "$DIFF"
+            echo '```'
+          } | gh pr create --head "$BRANCH" --base main \
+                --title "chore(pricing): sync prices from models.dev" \
+                --body-file -
