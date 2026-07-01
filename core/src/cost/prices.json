@@ -90,6 +90,13 @@
     "cache_read": 0.3,
     "cache_write": 3.75
   },
+  "claude-sonnet-5": {
+    "provider": "anthropic",
+    "input": 2,
+    "output": 10,
+    "cache_read": 0.2,
+    "cache_write": 2.5
+  },
   "gemma4-31b": {
     "provider": "tinfoil",
     "input": 0.4,
