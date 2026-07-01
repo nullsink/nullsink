@@ -67,7 +67,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -C "$BRANCH"
           git add core/src/cost/prices.json client/src/models.json
-          git commit -m "chore(pricing): sync prices from models.dev"
+          git commit -m "fix(pricing): sync prices from models.dev"
           git push --force origin "$BRANCH"
 
           if gh pr list --head "$BRANCH" --state open --json number --jq '.[].number' | grep -q .; then
@@ -80,11 +80,11 @@ jobs:
             echo
             echo "The proxy reads the committed \`prices.json\` at startup and never fetches prices at runtime, so this only proposes a diff — nothing a running box bills changes until this is merged and deployed. Typecheck + tests already passed in the sync job (a \`GITHUB_TOKEN\`-created PR does not trigger the \`ci.yml\` \`pull_request\` run, so this job validates the regenerated files itself)."
             echo
-            echo "Retitle to \`fix(pricing): …\` before merging if you want the change in the release changelog."
+            echo "Titled \`fix(pricing)\` → a patch release with a Bug Fixes changelog line. Retitle to \`feat(pricing)\` if the sync adds a genuinely new model or provider (minor bump)."
             echo
             echo '```diff'
             printf '%s\n' "$DIFF"
             echo '```'
           } | gh pr create --head "$BRANCH" --base main \
-                --title "chore(pricing): sync prices from models.dev" \
+                --title "fix(pricing): sync prices from models.dev" \
                 --body-file -
