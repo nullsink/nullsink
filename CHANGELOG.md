@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/nullsink/nullsink/compare/v1.3.3...v1.3.4) (2026-07-02)
+
+
+### Bug Fixes
+
+* **client:** drop the claude-fable-5 "down" flag on the models page ([#46](https://github.com/nullsink/nullsink/issues/46)) ([e3c5d1b](https://github.com/nullsink/nullsink/commit/e3c5d1b90f5d0fa34709860bbf812dd71590ddd1))
+
 ## [1.3.3](https://github.com/nullsink/nullsink/compare/v1.3.2...v1.3.3) (2026-07-01)
 
 
