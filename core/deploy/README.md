@@ -20,6 +20,8 @@ alerts, troubleshooting). This file is just the map.
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps the binary symlink, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if the new binary doesn't pass `/healthz`. |
 | `lib.sh` | Shared "apply repo config" library `source`d by both of the above, so unit install, timer reconcile, and asset fetch live in one place and can't drift between bootstrap and redeploy. |
 | `install-nsk.sh` | Installs the optional `nsk` operator CLI on demand (not shipped by default). |
+| `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
+| `node-box-runbook.md` | The ordered cutover runbook for moving bitcoind to that node box — sync first, then a minutes-long drain window. |
 
 ### Operator & break-glass scripts (run by units or by hand)
 | File | Role |

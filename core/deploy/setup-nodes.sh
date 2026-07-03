@@ -96,11 +96,7 @@ else
   note "bitcoind NOT started yet — finish the runbook, then: systemctl enable --now bitcoind"
 fi
 
-step "Done — remaining operator steps"
-note "1. Finish wg0.conf on BOTH boxes, then: systemctl enable --now wg-quick@wg0  (verify: wg show, ping the peer)."
-note "2. Create the datadir + conf:  install -d -o $SVC_USER -g $SVC_USER -m700 /var/lib/bitcoind  then write"
-note "   /var/lib/bitcoind/bitcoin.conf with: prune=<MB>, server=1, rpcbind=127.0.0.1, rpcbind=<NODE_WG_IP>,"
-note "   rpcallowip=127.0.0.1, rpcallowip=<APP_WG_IP>, wallet=nullsink."
-note "3. MIGRATE the watch-only wallet from the app box (backupwallet -> copy over WG -> restorewallet). Do NOT re-import."
-note "4. systemctl enable --now bitcoind; let it sync (initialblockdownload:false) BEFORE the app box cuts over."
-note "5. Provision rpcauth: run deploy/regen-bitcoin-rpcauth.sh here; paste the printed BITCOIN_RPC_PASSWORD into the app env."
+step "Done — continue with the migration runbook"
+note "NEXT: deploy/node-box-runbook.md — the ordered cutover (7 steps: WG -> conf -> SYNC -> drain+migrate -> rpcauth -> verify -> decommission)."
+note "Two absolutes: let IBD FINISH before draining the rail (the drain window must be minutes, not the sync),"
+note "and MIGRATE the wallet (backupwallet -> restorewallet) — never re-import from the xpub."

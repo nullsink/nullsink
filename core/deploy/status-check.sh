@@ -220,19 +220,40 @@ else
   echo "skip buy rail (monero-wallet-rpc not enabled)"
 fi
 
-# --- 4b. Bitcoin buy rail (only when enabled): pruned node synced + the watch-only wallet loaded. Uses
-#     bitcoin-cli (reads the datadir's cookie/conf for auth) as the service user. ---
-if systemctl is-enabled --quiet bitcoind 2>/dev/null; then
-  BTC_DATADIR="${BTC_DATADIR:-/var/lib/bitcoind}"
-  BTC_WALLET="${BTC_WALLET:-nullsink}"
-  bcli() { sudo -u "$SVC_USER" bitcoin-cli -datadir="$BTC_DATADIR" "$@" 2>/dev/null; }
-  if ! command -v bitcoin-cli >/dev/null; then
-    warn "bitcoin-cli not installed — cannot probe the BTC rail"
-  else
-    chaininfo="$(bcli getblockchaininfo)"
+# --- 4b. Bitcoin buy rail (only when the rail is active): pruned node synced + the watch-only wallet
+#     loaded. Probes JSON-RPC over BITCOIN_RPC_URL with the app's Basic-auth creds — the SAME door the app
+#     uses — so one probe works unchanged against a local node or the WireGuard node box, and a mismatched
+#     rpcauth pair surfaces here as a failed probe (bitcoin-cli's datadir cookie would mask it; see
+#     regen-bitcoin-rpcauth.sh). Gated on PAY_RAILS (the app's source of truth for active rails, matching
+#     setup.sh rail_active), NOT on a local bitcoind unit — monitoring survives the node moving off-box,
+#     and goes quiet during a deliberate rail drain (the cutover runbook). Env vars come from
+#     status-check.service's EnvironmentFile; all read ${VAR:-} — an unset var must skip/warn, never
+#     abort the whole check under set -u. ---
+_btc_rails="${PAY_RAILS:-${PAY_RAIL:-}}"
+case ",${_btc_rails// /}," in *,bitcoin,*)
+  # Unset URL mirrors the APP's default (bitcoin.ts: local wallet-scoped endpoint) so the probe always
+  # tests what the app would actually dial — never warn about a config the app happily runs with.
+  _btc_url="${BITCOIN_RPC_URL:-http://127.0.0.1:8332/wallet/nullsink}"
+  {
+    # One JSON-RPC call with the app's creds: $1=method, $2=params (JSON array, default []). The URL is
+    # wallet-scoped (/wallet/nullsink), which serves node methods AND wallet methods.
+    btc_rpc() {
+      curl -sS --max-time "$RPC_TIMEOUT" -u "${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}" \
+        -H 'content-type: application/json' \
+        --data "{\"jsonrpc\":\"1.0\",\"id\":\"hc\",\"method\":\"$1\",\"params\":${2:-[]}}" \
+        "$_btc_url" 2>/dev/null
+    }
+    # Retry like the Monero node probe above: a WireGuard blip or a node mid-restart shouldn't false-page;
+    # a real outage persists across all attempts and pages.
+    chaininfo=""
+    for attempt in 1 2 3; do
+      chaininfo="$(btc_rpc getblockchaininfo)"
+      [ -n "$(jnum "$chaininfo" blocks)" ] && break
+      sleep 5
+    done
     blocks="$(jnum "$chaininfo" blocks)"; headers="$(jnum "$chaininfo" headers)"
     if [ -z "$blocks" ]; then
-      warn "bitcoind unreachable (getblockchaininfo failed) — node down or RPC creds wrong"
+      warn "bitcoind unreachable over RPC (getblockchaininfo failed) — node/WireGuard down, or rpcauth mismatched (401): re-pair with regen-bitcoin-rpcauth.sh"
     else
       ok "bitcoind block height $blocks"
       if grep -q '"initialblockdownload" *: *true' <<<"$chaininfo"; then
@@ -243,24 +264,28 @@ if systemctl is-enabled --quiet bitcoind 2>/dev/null; then
         warn "bitcoind STALLED: $((headers - blocks)) blocks behind headers — deposits won't credit"
       fi
       # The watch-only wallet MUST be loaded for the rail to see deposits (createAddress / listunspent).
-      if bcli -rpcwallet="$BTC_WALLET" getwalletinfo | grep -q '"walletname"'; then
-        ok "watch-only wallet '$BTC_WALLET' loaded"
+      if btc_rpc getwalletinfo | grep -q '"walletname"'; then
+        ok "watch-only wallet loaded (getwalletinfo)"
       else
-        warn "watch-only wallet '$BTC_WALLET' NOT loaded — loadwallet it (deposits won't be seen)"
+        warn "watch-only wallet NOT loaded — loadwallet it on the node (deposits won't be seen)"
       fi
       # The poller detects deposits via listunspent (minconf=0 + include_unsafe); if THIS read fails,
       # confirmed BTC won't be seen even with the wallet loaded. Read-only — we deliberately do NOT
       # getnewaddress per tick (that would burn the descriptor's keypool range and break real derivation).
-      if bcli -rpcwallet="$BTC_WALLET" listunspent 0 9999999 '[]' true >/dev/null 2>&1; then
+      # Success = a null error member (a JSON-RPC error body still contains a "result" key, so grep that
+      # instead and a 500 would read as healthy).
+      if btc_rpc listunspent '[0,9999999,[],true]' | grep -q '"error" *: *null'; then
         ok "BTC deposit scan (listunspent) responds"
       else
         warn "BTC listunspent failed — the poller can't see deposits (wallet/RPC issue)"
       fi
     fi
-  fi
-else
-  echo "skip BTC buy rail (bitcoind not enabled)"
-fi
+  }
+  ;;
+*)
+  echo "skip BTC buy rail (bitcoin not in PAY_RAILS)"
+  ;;
+esac
 
 [ "$fail" -eq 0 ] && echo "--- all healthy ---" || echo "--- ATTENTION NEEDED ---"
 
