@@ -32,6 +32,25 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
+const HERMES_SETUP = `hermes model              # choose "Custom endpoint"
+#   base url   https://nullsink.is/v1
+#   api key    0sink_YOUR_KEY
+#   model      gpt-5.5
+hermes chat -q "hello"`;
+
+const OPENCLAW_CONFIG = `{
+  models: { providers: { nullsink: {
+    baseUrl: "https://nullsink.is/v1",
+    apiKey: "0sink_YOUR_KEY",
+    api: "openai-completions",
+    models: [{ id: "gpt-5.5", name: "gpt-5.5", maxTokens: 8192 }],
+  } } },
+  agents: { defaults: {
+    model: { primary: "nullsink/gpt-5.5" },
+    models: { "nullsink/gpt-5.5": {} },
+  } },
+}`;
+
 // The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
 // shown below. The OpenAI form covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible), carrying
 // the reason in `code`; Anthropic's /v1/messages wears its own, carrying the reason in `message`. Same reason
@@ -175,6 +194,36 @@ export function Api() {
           <span>
             Use <code>ANTHROPIC_AUTH_TOKEN</code> — a logged-in Claude subscription silently overrides{" "}
             <code>ANTHROPIC_API_KEY</code>. Then point it at a <a href="/models/">supported model</a>.
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>hermes agent</h2>
+        <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Any <a href="/models/">supported model</a> works.{" "}
+            <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers" {...EXT}>
+              Hermes docs
+            </a>
+            .
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>openclaw</h2>
+        <CodeBlock label="~/.openclaw/openclaw.json" code={OPENCLAW_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Swap <code>gpt-5.5</code> for any <a href="/models/">supported model</a>.{" "}
+            <a href="https://docs.openclaw.ai/concepts/model-providers" {...EXT}>
+              OpenClaw docs
+            </a>
+            .
           </span>
         </p>
       </section>
