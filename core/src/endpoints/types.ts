@@ -7,9 +7,11 @@ import type { BalanceStore } from "../ledger/db";
 import type { OrdersStore } from "../ledger/orders";
 import type { OrderProgress } from "../ledger/orderstatus";
 import type { TokenBucket } from "../ratelimit";
+import type { ModelListing } from "../cost";
 
 export type EndpointDeps = {
   rails: Map<string, RailView>; // active pay rails keyed by name; /buy + /order-status resolve by it
+  servedModels: ModelListing[]; // GET /v1/models: the priced models an active provider owns (computed once at boot)
   defaultRail: string; // the rail /buy quotes when a request omits one
   margin: number; // our cut, applied to the quote at /buy time
   buyMinUsd: number;

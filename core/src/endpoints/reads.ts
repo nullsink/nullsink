@@ -72,6 +72,32 @@ export function makeRails(d: EndpointDeps) {
   };
 }
 
+// GET /v1/models: the OpenAI-compatible model catalog — every model THIS instance serves (its provider is
+// configured AND owns the id), so `data[].id` is exactly the set that won't 400 unsupported_model. Lets an
+// SDK or agent framework enumerate/validate models the standard way. Unauthenticated and a cheap read (the
+// list is static and already public on /models): the shared read throttle applies, like /rails. Each entry
+// carries its USD-per-Mtok pricing (nullsink bills upstream rates) — the one thing an upstream /v1/models
+// can't give you, and the reason we build the list locally rather than proxy one. `created` is a constant 0
+// (we don't track model dates) — present only to satisfy the OpenAI Model schema.
+export function makeModels(d: EndpointDeps) {
+  const { servedModels, readRateLimit } = d;
+  return async (_req: Request): Promise<Response> => {
+    const throttled = readThrottled(readRateLimit);
+    if (throttled) return throttled;
+    return Response.json({
+      object: "list",
+      pricing_unit: "usd_per_mtok", // documents every entry's `pricing` figures once, not per-model
+      data: servedModels.map((m) => ({
+        id: m.id,
+        object: "model",
+        created: 0,
+        owned_by: m.provider,
+        pricing: { input: m.input, output: m.output, cache_read: m.cache_read, cache_write: m.cache_write },
+      })),
+    });
+  };
+}
+
 // GET /balance: a token holder checks their own remaining balance. Distinguishes a known token (200) from
 // unknown (401) — a token-validity oracle — fine because tokens are 256-bit unguessable.
 export function makeBalance(d: EndpointDeps) {

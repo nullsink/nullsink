@@ -2,7 +2,7 @@
 // upstream fetch, and fake rate/wallet calls — no port, no network. index.ts wires production deps; pure
 // helpers (pricing, usage, hashing) are imported directly.
 import { hashToken } from "./ledger/db";
-import { priceUsage, isReasoningModel } from "./cost";
+import { priceUsage, isReasoningModel, pricedModels } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";
 import * as metrics from "./metrics";
@@ -236,11 +236,33 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
   const DEFAULT_RAIL = d.defaultRail;
   const RAILS = d.rails;
 
-  // nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance — built over the rail
-  // registry + the order/balance store methods + the limits (endpoints/). Each is `(req) => Promise<Response>`;
-  // the router below dispatches to them. The metered money path (handleMetered) stays here in the handler.
+  // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
+  // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
+  // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
+  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
+  // Every active provider, flattened across paths — the source of both the provider-id set and the served-
+  // model catalog below.
+  const ACTIVE_PROVIDERS = [...PROVIDERS.values()].flat();
+  // Every registered provider id (anthropic / openai / …) — used to tell a `provider/model` namespace prefix
+  // from a bare model id (which may itself contain a slash, e.g. an org/model open-weight id).
+  const KNOWN_PROVIDER_IDS = new Set<string>(ACTIVE_PROVIDERS.map((p) => p.id));
+  // The GET /v1/models catalog: every priced model an ACTIVE provider owns — the SAME ownsModel gate the
+  // metered path applies, so a listed id is exactly one that won't 400 unsupported_model (a claude-* on an
+  // Anthropic-less instance, or an off-card variant, is absent). Computed once: price book + provider set are
+  // both fixed from boot.
+  const SERVED_MODELS = pricedModels().filter((m) => ACTIVE_PROVIDERS.some((p) => p.ownsModel(m.id)));
+  // Exact-path lookup (Map.get is exact — no prefix readmit of subpaths like /v1/messages/batches); an
+  // unknown path or a disabled provider misses → the fail-closed 404 in handle(). A path may carry more than
+  // one provider (OpenAI + Tinfoil on /v1/chat/completions); handleMetered resolves the one a request means.
+  const providersForPath = (pathname: string): Provider[] | undefined => PROVIDERS.get(pathname);
+
+  // nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance, /v1/models — built over
+  // the rail registry + the order/balance store methods + the served-model catalog + the limits (endpoints/).
+  // Each is `(req) => Promise<Response>`; the router below dispatches to them. The metered money path
+  // (handleMetered) stays here in the handler.
   const endpoints = makeEndpoints({
     rails: RAILS,
+    servedModels: SERVED_MODELS,
     defaultRail: DEFAULT_RAIL,
     margin: d.margin,
     buyMinUsd: d.buyMinUsd,
@@ -256,18 +278,6 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     readRateLimit: d.readRateLimit,
     orderStatus,
   });
-
-  // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
-  // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
-  // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
-  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
-  // Every registered provider id (anthropic / openai / …) — used to tell a `provider/model` namespace prefix
-  // from a bare model id (which may itself contain a slash, e.g. an org/model open-weight id).
-  const KNOWN_PROVIDER_IDS = new Set<string>([...PROVIDERS.values()].flat().map((p) => p.id));
-  // Exact-path lookup (Map.get is exact — no prefix readmit of subpaths like /v1/messages/batches); an
-  // unknown path or a disabled provider misses → the fail-closed 404 in handle(). A path may carry more than
-  // one provider (OpenAI + Tinfoil on /v1/chat/completions); handleMetered resolves the one a request means.
-  const providersForPath = (pathname: string): Provider[] | undefined => PROVIDERS.get(pathname);
 
   // --- Shared money skeleton. Gate (reject before any spend) → size + atomically debit the hold →
   // forward with our injected key → reconcile to the real metered cost (clamped at the hold so a refund
@@ -591,6 +601,9 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     if (req.method === "POST" && url.pathname === "/order-status") return endpoints.orderStatus(req);
     if (req.method === "GET" && url.pathname === "/rails") return endpoints.rails(req);
     if (req.method === "GET" && url.pathname === "/balance") return endpoints.balance(req);
+    // The one /v1 path that's a free read, not a metered forward: the served-model catalog. Matched here (a
+    // GET) before the POST-only metered routing below, so it never reaches handleMetered.
+    if (req.method === "GET" && url.pathname === "/v1/models") return endpoints.models(req);
 
     // Metered endpoints: route by EXACT path to the provider that owns that API shape (Anthropic Messages
     // today; OpenAI added behind the same seam). Only these paths spend upstream — the up-front hold makes

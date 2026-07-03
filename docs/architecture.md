@@ -33,15 +33,18 @@ client
   ▼
 Bun.serve ── handle() router ──┬─ GET  /healthz
                                ├─ POST /buy           ┐
-                               ├─ POST /order-status  ├─ endpoints/ (not metered)
-                               ├─ GET  /rails         │
-                               ├─ GET  /balance       ┘
+                               ├─ POST /order-status  │
+                               ├─ GET  /rails         ├─ endpoints/ (not metered)
+                               ├─ GET  /balance       │
+                               ├─ GET  /v1/models     ┘
                                └─ POST /v1/...  → exact-path provider(s) → handleMetered
 ```
 
 The `/v1` branch matches an **exact-path** registry, not a prefix (so
 `/v1/messages/batches` isn't silently admitted); an unmatched path is denied — the router
-fails closed. A path can map to more than one provider (OpenAI + Tinfoil both speak
+fails closed. `GET /v1/models` is the one non-metered `/v1` path: it lists the served
+models (those an active provider owns) with their prices, read straight from the price
+book with no upstream call, so an SDK or agent framework can enumerate models the standard way. A path can map to more than one provider (OpenAI + Tinfoil both speak
 `/v1/chat/completions`); `handleMetered` then resolves the one a request means by its model.
 
 ## The two seams

@@ -147,7 +147,15 @@ export function Api() {
           <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" />
           <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" />
           <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" />
+          <Ep marks={[AnthropicMark, OpenAiMark, TinfoilMark]} method="GET" path="/v1/models" />
         </div>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price. Open —
+            no key needed.
+          </span>
+        </p>
       </section>
 
       <section className="section">
