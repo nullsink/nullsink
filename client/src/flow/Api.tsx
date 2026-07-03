@@ -204,7 +204,7 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
           <span>
-            Any <a href="/models/">supported model</a> works.{" "}
+            Any OpenAI or open-weight <a href="/models/">model</a> works.{" "}
             <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers" {...EXT}>
               Hermes docs
             </a>
@@ -219,7 +219,7 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
           <span>
-            Swap <code>gpt-5.5</code> for any <a href="/models/">supported model</a>.{" "}
+            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>.{" "}
             <a href="https://docs.openclaw.ai/concepts/model-providers" {...EXT}>
               OpenClaw docs
             </a>

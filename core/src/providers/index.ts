@@ -9,7 +9,6 @@
 import { makeAnthropicProvider } from "./anthropic";
 import { makeOpenAIProviders } from "./openai";
 import { makeTinfoilProvider } from "./tinfoil";
-import { makeAnthropicCompatProvider } from "./anthropic-compat";
 import type { Provider } from "./types";
 import type { HoldEstimator } from "../hold";
 
@@ -22,9 +21,6 @@ export type ProvidersConfig = {
   openai?: { apiKey: string; baseUrl: string; estimateHold: HoldEstimator };
   // Tinfoil (OpenAI-compatible) — shares /v1/chat/completions with OpenAI; the handler routes by model.
   tinfoil?: { apiKey: string; baseUrl: string; estimateHold: HoldEstimator };
-  // Anthropic's OpenAI-compat endpoint — claude-* on /v1/chat/completions (shared with OpenAI + Tinfoil).
-  // Present iff the operator opted in (index.ts); serves Claude to OpenAI-only clients through the one path.
-  anthropicCompat?: { apiKey: string; baseUrl: string; estimateHold: HoldEstimator };
 };
 
 // Resolve the active providers into an EXACT-path → Provider[] map. Map.get is exact (no prefix readmit),
@@ -46,7 +42,6 @@ export function selectProviders(cfg: ProvidersConfig): Map<string, Provider[]> {
     register(responses); // /v1/responses
   }
   if (cfg.tinfoil) register(makeTinfoilProvider(cfg.tinfoil)); // /v1/chat/completions (shared with OpenAI — routed by model)
-  if (cfg.anthropicCompat) register(makeAnthropicCompatProvider(cfg.anthropicCompat)); // /v1/chat/completions (claude-* — routed by model)
   // At least one provider must be configured — an empty set would 404 every metered path, serving no LLM at
   // all. Mirrors selectRails' empty-PAY_RAILS guard; the composition root (index.ts) fails fast on it at boot.
   if (m.size === 0) throw new Error("no providers configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY)");
