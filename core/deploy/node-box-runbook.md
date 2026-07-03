@@ -9,8 +9,10 @@ and a pruned node cannot `restorewallet` a snapshot whose best block has fallen 
 **Gate before step 4:** run the pre-cutover audit (multiple independent adversarial reviews of this
 runbook + the final box configs). The drain window is the one place a paid deposit can be silently lost.
 
-1. **WireGuard up.** Finish `/etc/wireguard/wg0.conf` on both boxes; `systemctl enable --now wg-quick@wg0`;
-   verify with `wg show` + ping the peer.
+1. **WireGuard up.** If the provider image ships ufw, purge it first (`ufw disable && apt-get purge ufw`) —
+   the nftables config flushes its rules, and a still-enabled ufw re-asserts on reboot and blocks the
+   WireGuard port. Then finish `/etc/wireguard/wg0.conf` on both boxes (`setup-nodes.sh` prints the node's
+   ready-made `[Peer]` block); `systemctl enable --now wg-quick@wg0`; verify with `wg show` + ping the peer.
 
 2. **Datadir + conf — no wallet yet.** `install -d -o nullsink -g nullsink -m700 /var/lib/bitcoind`, then
    write `/var/lib/bitcoind/bitcoin.conf`: `prune=<MB>`, `server=1`, `rpcbind=127.0.0.1`,
@@ -34,7 +36,9 @@ runbook + the final box configs). The drain window is the one place a paid depos
    `systemctl restart bitcoind`. Migrate, never re-import from the xpub: an order's PK is the wallet's
    derivation index — a fresh keypool collides with keyed orders, and a pruned node can't rescan.
    Open orders freeze during the drain (reaping is rail-scoped) but render `/order-status` in the wrong
-   coin's scale — prefer draining when open BTC orders are near zero.
+   coin's scale — prefer draining when open BTC orders are near zero. Afterwards delete every transient
+   copy of the wallet backup (`.dat` on both boxes and any hop machine) — it holds the xpub, which derives
+   all past and future deposit addresses.
 
 5. **rpcauth.** On the node box: `sudo PRINT_PASSWORD=1 deploy/regen-bitcoin-rpcauth.sh`; paste the
    printed `BITCOIN_RPC_PASSWORD` into the app box's `/etc/nullsink.env`; set
@@ -53,7 +57,9 @@ runbook + the final box configs). The drain window is the one place a paid depos
 
 **Staging (signet).** Same runbook, rehearsed first — staging IS the release candidate for the prod move.
 Differences: `bitcoin.conf` adds `signet=1`; RPC is 38332 (`BITCOIN_RPC_URL=http://<NODE_WG_IP>:38332/wallet/nullsink`);
-the signet chain is ~1-2 GB so IBD is minutes and the step-3 fast path is unnecessary.
+the signet chain is ~1-2 GB so IBD is minutes and the step-3 fast path is unnecessary. Conf gotcha: on any
+non-mainnet chain, network-specific options — `rpcbind`, `rpcport`, `wallet` — are silently ignored at the
+top level; put them under a `[signet]` section (step 2's rpcbind lines and step 4's `wallet=nullsink` both).
 
 This runbook is not one-shot: it is the standing procedure for provisioning or rebuilding a node box —
 staging, prod, a hosting move, or disaster recovery all re-execute it (a rebuild skips the step-4 drain
