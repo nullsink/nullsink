@@ -231,16 +231,17 @@ fi
 #     abort the whole check under set -u. ---
 _btc_rails="${PAY_RAILS:-${PAY_RAIL:-}}"
 case ",${_btc_rails// /}," in *,bitcoin,*)
-  if [ -z "${BITCOIN_RPC_URL:-}" ]; then
-    warn "bitcoin is in PAY_RAILS but BITCOIN_RPC_URL is not set — the rail can't work (or be probed)"
-  else
+  # Unset URL mirrors the APP's default (bitcoin.ts: local wallet-scoped endpoint) so the probe always
+  # tests what the app would actually dial — never warn about a config the app happily runs with.
+  _btc_url="${BITCOIN_RPC_URL:-http://127.0.0.1:8332/wallet/nullsink}"
+  {
     # One JSON-RPC call with the app's creds: $1=method, $2=params (JSON array, default []). The URL is
     # wallet-scoped (/wallet/nullsink), which serves node methods AND wallet methods.
     btc_rpc() {
       curl -sS --max-time "$RPC_TIMEOUT" -u "${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}" \
         -H 'content-type: application/json' \
         --data "{\"jsonrpc\":\"1.0\",\"id\":\"hc\",\"method\":\"$1\",\"params\":${2:-[]}}" \
-        "$BITCOIN_RPC_URL" 2>/dev/null
+        "$_btc_url" 2>/dev/null
     }
     # Retry like the Monero node probe above: a WireGuard blip or a node mid-restart shouldn't false-page;
     # a real outage persists across all attempts and pages.
@@ -279,7 +280,7 @@ case ",${_btc_rails// /}," in *,bitcoin,*)
         warn "BTC listunspent failed — the poller can't see deposits (wallet/RPC issue)"
       fi
     fi
-  fi
+  }
   ;;
 *)
   echo "skip BTC buy rail (bitcoin not in PAY_RAILS)"
