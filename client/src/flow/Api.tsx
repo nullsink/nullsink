@@ -219,7 +219,8 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
           <span>
-            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>.{" "}
+            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
+            add an <code>anthropic-messages</code> provider at <code>https://nullsink.is/v1</code>.{" "}
             <a href="https://docs.openclaw.ai/concepts/model-providers" {...EXT}>
               OpenClaw docs
             </a>
