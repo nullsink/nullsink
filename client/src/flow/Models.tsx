@@ -29,11 +29,6 @@ const SITE: Record<string, string> = {
   openai: "https://openai.com",
 };
 
-// Listed/priced but the live upstream 404s for our account right now (a staged rollout we don't have access
-// to yet). Shown, flagged "down" in the danger register, still copyable — the proxy prices it, so a request
-// gets a clean refund on the 404. DISPLAY-ONLY: gating it at the proxy is a separate core change.
-const UNAVAILABLE = new Set(["claude-fable-5"]);
-
 // Chips shown before the "all N models" reveal. A card with more than this collapses to the newest PREVIEW;
 // the rest expand in place below (the toggle stays under the chips, so the list never splits around it).
 const PREVIEW = 6;
@@ -67,7 +62,7 @@ function Chips({ ids }: { ids: string[] }) {
   return (
     <div className="model-chips">
       {ids.map((id) => (
-        <ModelChip key={id} id={id} down={UNAVAILABLE.has(id)} />
+        <ModelChip key={id} id={id} />
       ))}
     </div>
   );
