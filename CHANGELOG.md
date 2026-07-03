@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.4.0](https://github.com/nullsink/nullsink/compare/v1.3.4...v1.4.0) (2026-07-03)
+
+
+### Features
+
+* **deploy:** app-box cutover for the bitcoind node-box split ([#50](https://github.com/nullsink/nullsink/issues/50)) ([a781c3a](https://github.com/nullsink/nullsink/commit/a781c3ac15ef3c8fa61edcf254d7ac3a78859931))
+* **deploy:** fold the pre-cutover audit gate into the runbook + setup.sh ([#53](https://github.com/nullsink/nullsink/issues/53)) ([8fed78a](https://github.com/nullsink/nullsink/commit/8fed78a3c989c0106c0b246f237af9ea9b8ffce1))
+* **deploy:** node-box bootstrap for bitcoind isolation (WireGuard) ([#45](https://github.com/nullsink/nullsink/issues/45)) ([fefdf33](https://github.com/nullsink/nullsink/commit/fefdf33e5deed763ea4f17043401ea4ed42a55a2))
+
+
+### Bug Fixes
+
+* **deploy:** allow signet RPC (38332) over wg0 on the node box ([#51](https://github.com/nullsink/nullsink/issues/51)) ([be67714](https://github.com/nullsink/nullsink/commit/be677149d233ede1ea7034fa5c819c39c220c321))
+
+
+### Documentation
+
+* **deploy:** node-box DX — [Peer] block print, ufw + [signet] gotchas ([#52](https://github.com/nullsink/nullsink/issues/52)) ([46397aa](https://github.com/nullsink/nullsink/commit/46397aa02e61b86fff5baa7d7f3be1d2ead5ad9b))
+
 ## [1.3.4](https://github.com/nullsink/nullsink/compare/v1.3.3...v1.3.4) (2026-07-02)
 
 
