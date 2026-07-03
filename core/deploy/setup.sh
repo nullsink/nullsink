@@ -70,6 +70,14 @@ tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in $ENV_FILE — gat
   k="$(grep -E '^TINFOIL_API_KEY=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
 }
+btc_node_local() {  # true when BITCOIN_RPC_URL is unset/localhost — i.e. THIS box runs the bitcoind node.
+  # After a node-box split the URL points at the WireGuard peer; a setup.sh re-run must then neither
+  # reinstall nor resurrect a local bitcoind (the decommissioned datadir/conf may still exist).
+  local url
+  url="$(grep -E '^BITCOIN_RPC_URL=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+  [ -z "$url" ] && return 0   # unset = the app's built-in localhost default
+  case "$url" in http://127.0.0.1:*|http://localhost:*) return 0 ;; *) return 1 ;; esac
+}
 install_verified_monero_wallet() {  # monero-wallet-rpc (watcher) + monero-wallet-cli (one-time view-wallet creation)
   if /usr/local/bin/monero-wallet-rpc --version 2>/dev/null | grep -q "v${MONERO_VERSION}"; then return 0; fi
   require_x86_64 "Monero CLI"
@@ -321,9 +329,13 @@ step "Configuring bitcoind (BTC buy-rail watcher)"
 # The unit was refreshed by install_units above. The bitcoind BINARY is only installed when the BTC
 # rail is active (below); enable/start only once the pruned datadir + watch-only wallet exist, or it would
 # crash-loop.
-# Install bitcoind + bitcoin-cli when the BTC rail is active, before the datadir check below.
-if rail_active bitcoin; then install_verified_bitcoind; fi
-if [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ]; then
+# Install bitcoind + bitcoin-cli when the BTC rail is active AND the node is local — after a node-box
+# split (BITCOIN_RPC_URL → the WireGuard peer) this box runs no bitcoind: skip install, and never
+# enable/resurrect a decommissioned local node whose datadir/conf still exists.
+if rail_active bitcoin && btc_node_local; then install_verified_bitcoind; fi
+if rail_active bitcoin && ! btc_node_local; then
+  echo "    skip local bitcoind (BITCOIN_RPC_URL points off-box — the rail runs against the node box)"
+elif [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ]; then
   systemctl enable bitcoind
   systemctl restart bitcoind        # restart so a unit/conf change takes effect
 elif rail_active bitcoin; then
