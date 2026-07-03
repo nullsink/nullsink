@@ -22,8 +22,12 @@ runbook + the final box configs). The drain window is the one place a paid depos
 
 1. **WireGuard up.** If the provider image ships ufw, purge it first (`ufw disable && apt-get purge ufw`) —
    the nftables config flushes its rules, and a still-enabled ufw re-asserts on reboot and blocks the
-   WireGuard port. Then finish `/etc/wireguard/wg0.conf` on both boxes (`setup-nodes.sh` prints the node's
-   ready-made `[Peer]` block); `systemctl enable --now wg-quick@wg0`; verify with `wg show` + ping the peer.
+   WireGuard port. The node box is prepared by `setup-nodes.sh` (installs wireguard, writes the wg0.conf
+   skeleton, prints its ready-made `[Peer]` block — on first run only). The APP box needs the same by hand:
+   `apt-get install -y wireguard`, generate its keypair (`umask 077; wg genkey > /etc/wireguard/app.key;
+   wg pubkey < /etc/wireguard/app.key > /etc/wireguard/app.pub`), write `/etc/wireguard/wg0.conf` with
+   `Address = 10.55.0.1/24` + the node's printed `[Peer]` block, and hand `app.pub` to the node's skeleton.
+   Then `systemctl enable --now wg-quick@wg0` on both; verify with `wg show` + ping the peer.
 
 2. **Datadir + conf — no wallet yet.** `install -d -o nullsink -g nullsink -m700 /var/lib/bitcoind`, then
    write `/var/lib/bitcoind/bitcoin.conf`: `prune=<match the app box's value>`, `server=1`, `listen=0`

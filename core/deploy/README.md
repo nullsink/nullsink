@@ -40,7 +40,8 @@ alerts, troubleshooting). This file is just the map.
 
 ### Public edge & firewall
 `Caddyfile` (TLS + reverse proxy + security headers; a host-agnostic `{$NULLSINK_DOMAIN}` template) ·
-`nftables.conf` (default-deny inbound; only 22 / 80 / 443).
+`nftables.conf` (app box: default-deny inbound; only 22 / 80 / 443) ·
+`nftables-nodes.conf` (node box: default-deny inbound; only 22 / WireGuard, bitcoind RPC solely across `wg0`).
 
 ## Two things to know
 
