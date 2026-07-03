@@ -43,9 +43,9 @@ RestrictSUIDSGID=true
 # NOTE: unlike the Monero view-only watcher (which only ever talks to a localhost Tor SOCKS proxy and so can
 # IPAddressDeny=any), bitcoind needs OUTBOUND P2P to sync the chain — so we do NOT deny non-localhost
 # traffic. The cold-custody guarantee is at the WALLET level (the loaded wallet is watch-only, no spend key),
-# not network isolation. The RPC stays localhost-bound. To run P2P over Tor, add proxy=127.0.0.1:9050 to
-# bitcoin.conf (optional — the node is local + trusted, so there's no remote-node-lies risk to mitigate,
-# unlike Monero).
+# not network isolation. The RPC binds localhost (plus the WireGuard tunnel IP on a node box) — never a
+# clearnet-routable address. To run P2P over Tor, add proxy=127.0.0.1:9050 to bitcoin.conf (optional — the
+# node is your own + trusted, so there's no remote-node-lies risk to mitigate, unlike Monero).
 
 [Install]
 WantedBy=multi-user.target

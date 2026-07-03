@@ -52,8 +52,9 @@ install -m644 "$(dirname "$0")/bitcoind.service" /etc/systemd/system/bitcoind.se
 systemctl daemon-reload
 
 step "Installing the node firewall (nftables)"
-# Allows SSH + WireGuard inbound; bitcoind RPC (8332) only over wg0; P2P outbound. SSH stays up (established
-# + dport 22 accepted), so applying this won't drop the session you're running setup from.
+# Allows SSH + WireGuard inbound; bitcoind RPC (8332 mainnet / 38332 signet) only over wg0; P2P outbound.
+# SSH stays up (established + dport 22 accepted), so applying this won't drop the session you're running
+# setup from.
 install -m644 "$(dirname "$0")/nftables-nodes.conf" /etc/nftables.conf
 systemctl enable --now nftables
 nft -f /etc/nftables.conf
@@ -95,11 +96,16 @@ else
 fi
 
 step "Configuring bitcoind"
-# Start only once the pruned datadir + bitcoin.conf + MIGRATED watch-only wallet exist, or it would crash-loop.
-if [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ]; then
+# (Re)start only once the conf AND a chain exist. The blocks/ check is load-bearing: a re-run between
+# runbook steps 2 (conf written) and 3 (chain path chosen) must NOT start bitcoind — a started daemon
+# creates its own LevelDB + block-obfuscation key, which poisons the fast-path rsync seed (recovery is
+# stop + rm -rf blocks/ chainstate/). The operator starts it per the runbook's step-3 path instead.
+if [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ] && [ -d /var/lib/bitcoind/blocks ]; then
   systemctl enable bitcoind
   systemctl restart bitcoind   # restart so a unit/conf change takes effect
   note "bitcoind (re)started — watch: bitcoin-cli -datadir=/var/lib/bitcoind getblockchaininfo (wait for initialblockdownload:false)"
+elif [ -f /var/lib/bitcoind/bitcoin.conf ]; then
+  note "conf present but no chain yet — choose the runbook's step-3 path (fast-path seed or IBD) before starting bitcoind"
 else
   note "bitcoind NOT started yet — finish the runbook, then: systemctl enable --now bitcoind"
 fi
