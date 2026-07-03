@@ -39,6 +39,13 @@ test("provider: cap required; n!=1 rejected; body normalizes cap + include_usage
   expect("store" in out).toBe(false); // unlike the OpenAI provider — Anthropic ignores it
 });
 
+test("provider: strips the native `thinking` trigger (hidden output tokens would under-bill a disconnect)", () => {
+  const p = makeAnthropicCompatProvider(COMPAT);
+  const out = JSON.parse(p.prepareBody("", { model: "claude-opus-4-8", max_completion_tokens: 64, thinking: { type: "enabled", budget_tokens: 1024 } }, true));
+  expect("thinking" in out).toBe(false); // thinking belongs on the full-fidelity native /v1/messages path
+  expect(out.max_completion_tokens).toBe(64); // rest of the body is untouched
+});
+
 test("resolution: claude-* → anthropic-compat on the shared chat path; gpt-* → openai; open-weight → tinfoil", () => {
   const providers = selectProviders({
     openai: { apiKey: "o", baseUrl: "https://o", estimateHold: byteBoundHold },

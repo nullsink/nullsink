@@ -12,7 +12,8 @@
 // Billing is safe by construction: the compat endpoint returns OpenAI-shaped usage (prompt/completion_tokens,
 // with *_details always empty), so extractOpenAIChatUsage meters it and priceUsage resolves the returned
 // claude-* id to the Anthropic rate card. Caching cannot occur here, so the empty cache fields correctly bill
-// all input at the input rate — exactly what Anthropic charges us.
+// all input at the input rate — exactly what Anthropic charges us. prepareBody strips the `thinking` trigger
+// so no hidden (unstreamed) output tokens exist for a mid-stream disconnect to under-count.
 import { providerOf, extractOpenAIChatUsage, openaiChatScanner } from "../cost";
 import type { HoldEstimator } from "../hold";
 import type { Provider } from "./types";
@@ -52,6 +53,12 @@ function compatPrepareBody(_raw: string, body: any, streaming: boolean, injectCa
   const cap = injectCap ?? body?.max_completion_tokens ?? body?.max_tokens; // mirrors compatOutputCap (the hold)
   if (cap != null) out.max_completion_tokens = cap;
   delete out.max_tokens; // forward one unambiguous ceiling; the legacy field can't out-rank the hold
+  // Strip the Anthropic-native `thinking` trigger. On this endpoint it bills as output but the thought tokens
+  // are NOT streamed (verified live: `thinking` inflates completion_tokens with zero streamed reasoning; the
+  // standard OpenAI `reasoning_effort` is ignored), so a mid-stream disconnect would char-estimate visible
+  // text only and under-bill the hidden thinking. No OpenAI-compat client sends this field; thinking belongs
+  // on the full-fidelity native /v1/messages path. Stripping it keeps the disconnect estimate sound.
+  delete out.thinking;
   if (streaming) out.stream_options = { ...(body?.stream_options ?? {}), include_usage: true };
   return JSON.stringify(out);
 }
