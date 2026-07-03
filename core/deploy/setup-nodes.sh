@@ -80,8 +80,16 @@ AllowedIPs = 10.55.0.1/32
 EOF
   )
   note "wrote /etc/wireguard/wg0.conf skeleton — set the app box PublicKey + AllowedIPs, then: systemctl enable --now wg-quick@wg0"
-  note "this node's WireGuard PUBLIC key (hand it to the app box's [Peer]):"
-  cat /etc/wireguard/node.pub
+  note "paste this [Peer] block into the APP box's /etc/wireguard/wg0.conf (fill in this box's public IP):"
+  cat <<PEER
+
+[Peer]
+PublicKey = $(cat /etc/wireguard/node.pub)
+AllowedIPs = 10.55.0.2/32
+Endpoint = <NODE_PUBLIC_IP>:51820
+PersistentKeepalive = 25
+
+PEER
 else
   note "/etc/wireguard/wg0.conf exists — leaving it; enable with: systemctl enable --now wg-quick@wg0"
 fi
