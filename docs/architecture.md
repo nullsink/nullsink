@@ -59,6 +59,12 @@ streaming responses. Each provider is registered only when its key is set — An
 OpenAI, so that path holds more than one provider: a request resolves to the provider that owns
 its model, or to an explicit `provider/model` prefix (stripped before forwarding upstream).
 
+Optionally (`ANTHROPIC_OPENAI_COMPAT=1`), Anthropic also registers on `/v1/chat/completions`
+via its own OpenAI-compatible endpoint, so `claude-*` is reachable from OpenAI-only clients
+through that one path — a forward, not a translation. It reuses the OpenAI usage adapters and
+bills the Anthropic rate. Off by default (Anthropic labels that endpoint non-production); the
+native `/v1/messages` path stays the full-fidelity Claude route.
+
 **Rail seam** (`rails/types.ts`) — what it takes to accept a coin: mint a per-order address
 and detect confirmed deposits. A rail is **watch-only**: it observes incoming payments
 but never holds spend authority — custody stays cold. Active rails come from `PAY_RAILS`

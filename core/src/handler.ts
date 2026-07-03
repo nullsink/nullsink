@@ -165,6 +165,14 @@ export type HandlerDeps = {
     baseUrl: string;
     estimateHold: HoldEstimator;
   };
+  // Anthropic's OpenAI-compat endpoint — present iff the operator opted in (ANTHROPIC_OPENAI_COMPAT, index.ts).
+  // Serves claude-* on /v1/chat/completions so OpenAI-only clients reach Claude through one path. Byte-bound
+  // hold (the OpenAI-shaped body can't use Anthropic's count_tokens).
+  anthropicCompat?: {
+    apiKey: string;
+    baseUrl: string;
+    estimateHold: HoldEstimator;
+  };
   upstreamTimeoutMs: number;
   margin: number;
   buyMinUsd: number;
@@ -239,7 +247,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
   // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
   // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
   // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
-  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
+  const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil, anthropicCompat: d.anthropicCompat });
   // Every active provider, flattened across paths — the source of both the provider-id set and the served-
   // model catalog below.
   const ACTIVE_PROVIDERS = [...PROVIDERS.values()].flat();

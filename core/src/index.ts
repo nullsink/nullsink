@@ -164,6 +164,16 @@ const TINFOIL_API_KEY = process.env.TINFOIL_API_KEY;
 const TINFOIL_BASE_URL = process.env.TINFOIL_BASE_URL ?? "https://inference.tinfoil.sh";
 const tinfoilDeps = TINFOIL_API_KEY ? { apiKey: TINFOIL_API_KEY, baseUrl: TINFOIL_BASE_URL, estimateHold: byteBoundHold } : undefined;
 
+// Anthropic's OpenAI-compat endpoint (<ANTHROPIC_BASE_URL>/v1/chat/completions, claude-* models) — OPT-IN via
+// ANTHROPIC_OPENAI_COMPAT=1, and only when Anthropic is configured. Serves Claude on /v1/chat/completions so
+// OpenAI-only clients (agent frameworks) reach every model through one endpoint. Byte-bound hold (the
+// OpenAI-shaped body can't use Anthropic's count_tokens). Off by default: Anthropic labels this endpoint
+// non-production, so the operator validates it (staging) before enabling; the native /v1/messages path — the
+// full-fidelity Claude route — is unaffected either way.
+const ANTHROPIC_OPENAI_COMPAT = process.env.ANTHROPIC_OPENAI_COMPAT === "1";
+const anthropicCompatDeps =
+  anthropicDeps && ANTHROPIC_OPENAI_COMPAT ? { apiKey: anthropicDeps.apiKey, baseUrl: anthropicDeps.baseUrl, estimateHold: byteBoundHold } : undefined;
+
 // At least one upstream provider must be configured — an all-absent set would 404 every metered path, so the
 // proxy would serve no LLM at all. Fail fast at boot like the other guards (selectProviders also throws as the
 // library-level backstop). Any one provider alone is valid; the buy rails are independent of this.
@@ -199,6 +209,7 @@ const handler = createHandler({
   anthropic: anthropicDeps,
   openai: openaiDeps,
   tinfoil: tinfoilDeps,
+  anthropicCompat: anthropicCompatDeps,
   upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
   streamSettleDeadlineMs: STREAM_SETTLE_DEADLINE_MS,
   margin: MARGIN,
