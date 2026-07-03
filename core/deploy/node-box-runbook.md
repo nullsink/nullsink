@@ -17,8 +17,14 @@ runbook + the final box configs). The drain window is the one place a paid depos
    `rpcbind=<NODE_WG_IP>`, `rpcallowip=127.0.0.1`, `rpcallowip=<APP_WG_IP>`. Leave `wallet=nullsink` out
    until step 4 — bitcoind refuses to start when a conf-listed wallet is missing.
 
-3. **Sync to completion.** `systemctl enable --now bitcoind`; wait for `initialblockdownload:false`
-   (hours-to-days). The app box's rail stays fully live throughout.
+3. **Sync to completion.** `systemctl enable --now bitcoind`; wait for `initialblockdownload:false`.
+   From-scratch IBD is hours-to-days; the app box's rail stays fully live throughout.
+   **Fast path — seed from the app box's own synced node** (same pinned version, both x86-64): stop
+   bitcoind on the app box, copy `blocks/` + `chainstate/` from its datadir to the node box over WG
+   (`rsync`; ~15 GB — do NOT copy `wallets/` or `bitcoin.conf`), restart the app box's bitcoind, start the
+   node box's; it catches up the tail in minutes. Deposit detection pauses while the source is stopped —
+   deposits are on-chain-durable and credit when it's back, but expect a status-check page. Copy only your
+   own node's data; never a third-party snapshot.
 
 4. **Drain, then migrate (the short window).** On the APP box remove `bitcoin` from `PAY_RAILS` in
    `/etc/nullsink.env` + `systemctl restart nullsink`. The drain is the sole defense against a
@@ -44,3 +50,11 @@ runbook + the final box configs). The drain window is the one place a paid depos
 7. **Decommission.** Once step 6 verifies: on the APP box `systemctl disable --now bitcoind`; reclaim
    `/var/lib/bitcoind` when comfortable. Until this step, rollback is one env flip — `BITCOIN_RPC_URL`
    back to localhost + `systemctl restart nullsink`.
+
+**Staging (signet).** Same runbook, rehearsed first — staging IS the release candidate for the prod move.
+Differences: `bitcoin.conf` adds `signet=1`; RPC is 38332 (`BITCOIN_RPC_URL=http://<NODE_WG_IP>:38332/wallet/nullsink`);
+the signet chain is ~1-2 GB so IBD is minutes and the step-3 fast path is unnecessary.
+
+This runbook is not one-shot: it is the standing procedure for provisioning or rebuilding a node box —
+staging, prod, a hosting move, or disaster recovery all re-execute it (a rebuild skips the step-4 drain
+when the wallet is already off the app box; restore it from the app box's backup artifact instead).
