@@ -1,4 +1,4 @@
-# Weekly: flag when a pinned external version (Bun / bitcoind / monero / tinfoil-proxy, in core/deploy/setup.sh) falls behind
+# Weekly: flag when a pinned external version (bitcoind in core/deploy/lib.sh; monero / tinfoil-proxy in core/deploy/setup.sh) falls behind
 # upstream's latest release. NOTIFY-ONLY — opens a GitHub issue, never bumps anything (a bump changes a
 # checksum and must be done deliberately). Run on demand via the "Run workflow" button too. The comparison
 # logic lives in core/scripts/check-pins.sh (runnable locally from the core/ directory).
@@ -44,5 +44,5 @@ jobs:
           if gh issue list --state open --search "$title in:title" --json title --jq '.[].title' | grep -qxF "$title"; then
             echo "an open '$title' issue already exists — leaving it"; exit 0
           fi
-          printf '%s\n\nBump the version + hash in `core/deploy/setup.sh` (and `bun-version` in `.github/workflows/ci.yml` for Bun), verifying the new checksum. Notify-only; nothing was changed.\n' "$REPORT" \
+          printf '%s\n\nBump the version + hash in `core/deploy/lib.sh` (bitcoind) or `core/deploy/setup.sh` (monero, tinfoil-proxy) — and `bun-version` in `.github/workflows/ci.yml` for Bun — verifying the new checksum. Notify-only; nothing was changed.\n' "$REPORT" \
             | gh issue create --title "$title" --body-file -

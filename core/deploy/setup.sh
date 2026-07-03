@@ -38,10 +38,8 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
 RELEASE_TAG="${RELEASE_TAG:-v1.3.4}" # x-release-please-version
-# Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the
-# fanquake-signed SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
-BITCOIN_VERSION="31.0"
-BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074"
+# Bitcoin Core pin + install helper live in lib.sh now (shared with setup-nodes.sh, so the pin can't drift).
+# Monero + tinfoil-proxy pins stay here — they're app-box-only (the node box installs only bitcoind).
 # Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
 # binaryFate-signed hashes.txt (gpg-verified at authoring; key 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92).
 MONERO_VERSION="0.18.5.0"
@@ -55,17 +53,8 @@ MONERO_SHA256_X64="166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e
 TINFOIL_PROXY_VERSION="v0.1.0"
 TINFOIL_PROXY_SHA256_X64="5ac964a7d4252c892e05876ed38c44dc4f37ec7d2a5c0845f1a04fd520b3d566"
 
-# --- Verified-install helpers (pinned + checksum-verified; same model as the Bun block below) ---
-fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; aborts (set -e) on mismatch
-  curl -fsSL "$1" -o "$3"
-  echo "$2  $3" | sha256sum -c -
-}
-require_x86_64() {  # $1=label — these pins are x86_64-only; fail loud rather than install a dud
-  if [ "$(uname -m)" != "x86_64" ]; then
-    echo "    !! setup.sh pins $1 for x86_64 only; this box is $(uname -m). Add the matching asset + hash." >&2
-    exit 1
-  fi
-}
+# --- Env/rail helpers. fetch_verified / require_x86_64 / install_verified_bitcoind (+ the Bitcoin pin) moved
+# to lib.sh, shared with setup-nodes.sh so the pin can't drift; the Monero/tinfoil installers below stay here. ---
 rail_active() {  # $1=rail — true if listed in PAY_RAILS (or legacy PAY_RAIL) in $ENV_FILE
   [ -f "$ENV_FILE" ] || return 1
   local rails
@@ -80,17 +69,6 @@ tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in $ENV_FILE — gat
   local k
   k="$(grep -E '^TINFOIL_API_KEY=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
-}
-install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop calls the cli)
-  if /usr/local/bin/bitcoind --version 2>/dev/null | grep -q "v${BITCOIN_VERSION}"; then return 0; fi
-  require_x86_64 "Bitcoin Core"
-  local tmp; tmp="$(mktemp -d)"
-  fetch_verified "https://bitcoincore.org/bin/bitcoin-core-${BITCOIN_VERSION}/bitcoin-${BITCOIN_VERSION}-x86_64-linux-gnu.tar.gz" \
-    "$BITCOIN_SHA256_X64" "$tmp/bitcoin.tar.gz"
-  tar -xzf "$tmp/bitcoin.tar.gz" -C "$tmp" --strip-components=1   # -> $tmp/bin/{bitcoind,bitcoin-cli}
-  install -m755 "$tmp/bin/bitcoind" "$tmp/bin/bitcoin-cli" /usr/local/bin/
-  rm -rf "$tmp"
-  echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
 }
 install_verified_monero_wallet() {  # monero-wallet-rpc (watcher) + monero-wallet-cli (one-time view-wallet creation)
   if /usr/local/bin/monero-wallet-rpc --version 2>/dev/null | grep -q "v${MONERO_VERSION}"; then return 0; fi

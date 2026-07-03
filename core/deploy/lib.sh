@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Shared "apply repo config to the box" helpers, SOURCED by setup.sh (bootstrap) and deploy.sh (redeploy)
-# so unit/timer install lives in one place and can't drift. No side effects beyond defining helpers + REPO.
+# so unit/timer install lives in one place and can't drift. No side effects beyond defining helpers + REPO +
+# the shared Bitcoin pin (below).
 # Caller must set APP_DIR (and ENV_FILE for health_ok).
 
 # The GitHub repo slug the box pulls release assets from — single source of truth for all four fetch
@@ -11,6 +12,35 @@ REPO="${REPO:-nullsink/nullsink}"
 # curl works — no gh, no auth on the box. -L follows GitHub's 302 to the asset CDN; -f fails the pipeline
 # on a 404/5xx. Callers still `test -f` + `sha256sum -c` what lands here.
 fetch_asset() { curl -fsSL "https://github.com/$REPO/releases/download/$1/$2" -o "$3/$2"; }
+
+# --- Pinned external toolchain + verified-install primitives, shared by setup.sh (app box) and
+# setup-nodes.sh (node box) so the pin + fetch/verify logic is ONE source of truth and can't drift. ---
+# Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the fanquake-signed
+# SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
+BITCOIN_VERSION="31.0"
+BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074"
+
+fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; aborts (set -e) on mismatch
+  curl -fsSL "$1" -o "$3"
+  echo "$2  $3" | sha256sum -c -
+}
+require_x86_64() {  # $1=label — these pins are x86_64-only; fail loud rather than install a dud
+  if [ "$(uname -m)" != "x86_64" ]; then
+    echo "    !! pin for $1 is x86_64 only; this box is $(uname -m). Add the matching asset + hash." >&2
+    exit 1
+  fi
+}
+install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop calls the cli)
+  if /usr/local/bin/bitcoind --version 2>/dev/null | grep -q "v${BITCOIN_VERSION}"; then return 0; fi
+  require_x86_64 "Bitcoin Core"
+  local tmp; tmp="$(mktemp -d)"
+  fetch_verified "https://bitcoincore.org/bin/bitcoin-core-${BITCOIN_VERSION}/bitcoin-${BITCOIN_VERSION}-x86_64-linux-gnu.tar.gz" \
+    "$BITCOIN_SHA256_X64" "$tmp/bitcoin.tar.gz"
+  tar -xzf "$tmp/bitcoin.tar.gz" -C "$tmp" --strip-components=1   # -> $tmp/bin/{bitcoind,bitcoin-cli}
+  install -m755 "$tmp/bin/bitcoind" "$tmp/bin/bitcoin-cli" /usr/local/bin/
+  rm -rf "$tmp"
+  echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
+}
 
 install_units() {  # refresh ALL units + timers from the repo so on-box config can't drift, then reload
   cp "$APP_DIR"/deploy/*.service "$APP_DIR"/deploy/*.timer /etc/systemd/system/
