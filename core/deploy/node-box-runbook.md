@@ -97,7 +97,6 @@ runbook + the final box configs). The drain window is the one place a paid depos
 **Staging (signet).** Same runbook, rehearsed first — staging IS the release candidate for the prod move.
 Differences: `bitcoin.conf` adds `signet=1`; RPC is 38332 (`BITCOIN_RPC_URL=http://<NODE_WG_IP>:38332/wallet/nullsink`);
 the signet chain is ~1-2 GB so IBD is minutes and the step-3 fast path is unnecessary. Conf gotcha: on any
-<<<<<<< HEAD
 non-mainnet chain, network-specific options — `rpcbind`, `rpcport`, `wallet`, `listen` — are silently
 ignored at the top level; put them under a `[signet]` section. The reverse trap on prod: a copy-pasted
 `[signet]` block is silently ignored on mainnet — write the prod conf at the top level.
@@ -108,10 +107,6 @@ order index; the payment↔key link is in the pre-drain backup's pending.db. Fin
 credited), recover the hash from the backup, credit `credit_micros × received/expected`. NOTE: `nsk topup`
 refuses a hash that has never been credited (a first-time buyer has no tokens row) — that case needs a
 one-off `credit()` script, not the CLI.
-=======
-non-mainnet chain, network-specific options — `rpcbind`, `rpcport`, `wallet` — are silently ignored at the
-top level; put them under a `[signet]` section (step 2's rpcbind lines and step 4's `wallet=nullsink` both).
->>>>>>> origin/main
 
 This runbook is not one-shot: it is the standing procedure for provisioning or rebuilding a node box —
 staging, prod, a hosting move, or disaster recovery all re-execute it (a rebuild skips the step-4 drain
