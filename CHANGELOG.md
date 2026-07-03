@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/nullsink/nullsink/compare/v1.4.0...v1.4.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **deploy:** v1.4.0 release-audit fixups ([#54](https://github.com/nullsink/nullsink/issues/54)) ([9b9bf2a](https://github.com/nullsink/nullsink/commit/9b9bf2a22f77f75ca5bab6048d31013f33433f45))
+
 ## [1.4.0](https://github.com/nullsink/nullsink/compare/v1.3.4...v1.4.0) (2026-07-03)
 
 
