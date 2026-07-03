@@ -36,7 +36,9 @@ runbook + the final box configs). The drain window is the one place a paid depos
    `systemctl restart bitcoind`. Migrate, never re-import from the xpub: an order's PK is the wallet's
    derivation index — a fresh keypool collides with keyed orders, and a pruned node can't rescan.
    Open orders freeze during the drain (reaping is rail-scoped) but render `/order-status` in the wrong
-   coin's scale — prefer draining when open BTC orders are near zero.
+   coin's scale — prefer draining when open BTC orders are near zero. Afterwards delete every transient
+   copy of the wallet backup (`.dat` on both boxes and any hop machine) — it holds the xpub, which derives
+   all past and future deposit addresses.
 
 5. **rpcauth.** On the node box: `sudo PRINT_PASSWORD=1 deploy/regen-bitcoin-rpcauth.sh`; paste the
    printed `BITCOIN_RPC_PASSWORD` into the app box's `/etc/nullsink.env`; set
