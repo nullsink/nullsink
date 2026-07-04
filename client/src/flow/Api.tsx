@@ -156,16 +156,6 @@ function EpRow({ method, path }: { method: string; path: string }) {
   );
 }
 
-// The required max-output-tokens field, shown as it appears in the body (no box, no nested chip).
-function Field({ name }: { name: string }) {
-  return (
-    <div className="field">
-      <span className="field-key">{name}</span>
-      <span className="field-val">: 1024</span>
-    </div>
-  );
-}
-
 // A model-id chip row (each id copies on click).
 function Chips({ ids }: { ids: string[] }) {
   return (
@@ -212,8 +202,9 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">!</span>
           <span>
-            <span className="hl">Every request must set a max output tokens</span> — the field name differs
-            per format (below), and omitting it is rejected with <code>max_tokens_required</code>.
+            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
+            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
+            <code>max_tokens_required</code>.
           </span>
         </p>
       </section>
@@ -277,24 +268,6 @@ export function Api() {
         }
       />
 
-      <FormatPair
-        concept="max output tokens"
-        hint="required"
-        req
-        left={
-          <>
-            <Field name="max_tokens" />
-            <p className="rail-note">Set it in the request body.</p>
-          </>
-        }
-        right={
-          <>
-            <Field name="max_completion_tokens" />
-            <p className="rail-note">Set it in the request body.</p>
-          </>
-        }
-      />
-
       <SharedBand title="catalog & balance">
         <EpRow method="GET" path="/v1/models" />
         <EpRow method="GET" path="/balance" />
@@ -312,7 +285,7 @@ export function Api() {
           <>
             <Chips ids={CLAUDE_IDS} />
             <p className="rail-note">
-              Claude, first-party — prompt caching supported. <a href="/models/">All Claude models →</a>
+              Claude, first-party. <a href="/models/">All Claude models →</a>
             </p>
           </>
         }
@@ -381,7 +354,7 @@ export function Api() {
       <SharedBand title="error codes & limits">
         <div className="band-cols">
           <ul className="err-list">
-            <Err code="max_tokens_required">set a max output tokens (above)</Err>
+            <Err code="max_tokens_required">set a max output tokens on the request</Err>
             <Err code="unsupported_model">the id isn&apos;t served — see /models</Err>
             <Err code="unsupported_endpoint">that path or method isn&apos;t proxied</Err>
           </ul>

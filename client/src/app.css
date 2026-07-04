@@ -1135,11 +1135,6 @@ button:disabled { cursor: not-allowed; }
 .rail-body .codeblock, .band-body .codeblock { margin-top: 0; }
 .band-body .kv { margin-top: 0; }
 
-/* max-output-tokens field — shown as it appears in the body, no box, no nested chip */
-.field { font-size: 18px; letter-spacing: -0.01em; }
-.field-key { color: var(--ns-bone); }
-.field-val { color: var(--ns-muted); }
-
 /* served-model chips + the sealed Tinfoil open-weight sub-group */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .subgroup { display: flex; flex-direction: column; gap: 8px; }
@@ -1147,29 +1142,36 @@ button:disabled { cursor: not-allowed; }
 .subgroup-label.seal { color: var(--ns-seal); }
 .subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
 
-/* shared band (format-agnostic) — a quiet hairline box with an outline "shared" tag + underlined header,
-   so it reads as an "applies to both" object without a heavy rail competing with the paired rows. */
-.band {
-  border: 1px solid var(--ns-line);
-  padding: 22px 24px;
-}
+/* shared band (format-agnostic) — the same header language as the /models tier heads: a "shared" tag + title
+   over a neutral hairline, NO surrounding box. The paired rows carry the two-column weight; shared facts sit
+   lighter, as a section header rather than a boxed object. */
 .band-head {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding-bottom: 13px; margin-bottom: 18px;
-  border-bottom: 1px solid var(--ns-line);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ns-line); /* the tier-head hairline, kept neutral — shared belongs to neither format */
 }
 .band-tag {
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ns-muted);
-  border: 1px solid var(--ns-line);   /* outline chip, not filled — quieter than the paired concept ticks */
+  border: 1px solid var(--ns-line); /* the quiet "shared" marker — outline, not filled */
   padding: 3px 8px;
   flex: none;
 }
-.band-head h2 { font-size: 13px; font-weight: var(--ns-weight-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 0; color: var(--ns-bone); }
+.band-head h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em; /* tier-label proportions */
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-bone);
+}
 .band-sub { font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ns-muted); }
-.band-body { display: flex; flex-direction: column; gap: 14px; }
+.band-body { margin-top: 18px; display: flex; flex-direction: column; gap: 14px; }
 .band-note { font-size: 13px; color: var(--ns-muted); line-height: 1.55; margin: 0; }
 .band-note a { color: var(--ns-bone); }
 .band-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 40px; }
