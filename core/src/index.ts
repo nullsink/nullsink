@@ -368,7 +368,6 @@ const shutdown = async () => {
   shuttingDown = true;
   clearInterval(poller); // stop new polls; an in-flight tick is safe to abandon (idempotent)
   clearInterval(metricsTimer);
-  flushMetrics(); // emit the final window's counts before we exit (don't lose them to the restart)
   const handlersReturned = server.stop(); // stop new connections; resolves when handlers return (buffered done)
   const { forceSettled } = await drainInflight({
     inflight,
@@ -380,6 +379,9 @@ const shutdown = async () => {
   });
   if (forceSettled > 0)
     log.warn("shutdown", `force-settled ${forceSettled} in-flight stream(s) at the drain deadline (metered partial billed, rest refunded)`);
+  // Final flush AFTER the drain, so everything that settled during the grace — natural finishes (served)
+  // and force-settles (stream:aborted / stream:partial) — makes the last window and it still reconciles.
+  flushMetrics();
   await server.stop(true); // hard-close anything still open (force-settled streams, buffered stragglers)
   process.exit(0);
 };
