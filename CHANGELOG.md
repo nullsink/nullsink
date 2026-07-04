@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/nullsink/nullsink/compare/v1.4.1...v1.5.0) (2026-07-04)
+
+
+### Features
+
+* GET /v1/models + OpenAI-compatible client setup docs ([#49](https://github.com/nullsink/nullsink/issues/49)) ([65c9776](https://github.com/nullsink/nullsink/commit/65c977622831db02ddeb0f6b00e6eb442612a198))
+
 ## [1.4.1](https://github.com/nullsink/nullsink/compare/v1.4.0...v1.4.1) (2026-07-03)
 
 
