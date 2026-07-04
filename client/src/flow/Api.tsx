@@ -5,11 +5,13 @@ import { EXT, GITHUB_URL } from "../lib/links.ts";
 
 // /api — the API reference, read as TWO WIRE FORMATS side by side. The left rail is always Anthropic
 // Messages, the right rail is always OpenAI-compatible; each format-specific concept (auth, endpoints,
-// max-tokens, models, quickstart, client setup, errors) renders as a two-up <FormatPair> so a caller can
-// scan one format straight down. Format-agnostic facts (base url, catalog, error codes) render as full-width
-// <SharedBand> bands. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if
-// the served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons
-// are the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id.
+// max-tokens, models, quickstart, errors) renders as a two-up <FormatPair> so a caller can scan one format
+// straight down. Format-agnostic facts (base url, catalog, error codes) render as full-width <SharedBand>
+// bands. Per-client setup (Claude Code / Hermes / OpenClaw / Pi) is the README's "Connect a client" guide;
+// this page links out to it rather than carry a second, tutorial-shaped document. Every fact mirrors the
+// proxy's real contract (core src/handler.ts + providers/) — if the served surface changes, change this
+// page. Static: prerenders and reads with JS off (the copy buttons are the only JS). CodeBlock `highlights`
+// tint the two things a caller swaps — their key and the model id.
 
 const ANTHROPIC_HEADERS = `x-api-key: 0sink_YOUR_KEY
 anthropic-version: 2023-06-01`;
@@ -34,102 +36,6 @@ const OPENAI_CURL = `curl https://nullsink.is/v1/chat/completions \\
     "max_completion_tokens": 1024,
     "messages": [{"role": "user", "content": "hello"}]
   }'`;
-
-const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
-export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
-export ANTHROPIC_MODEL=claude-opus-4-8
-claude`;
-
-const HERMES_SETUP = `hermes model              # choose "Custom endpoint"
-#   base url   https://nullsink.is/v1
-#   api key    0sink_YOUR_KEY
-#   model      gpt-5.5
-hermes chat -q "hello"`;
-
-const OPENCLAW_CONFIG = `{
-  models: {
-    providers: {
-      nullsink: {
-        baseUrl: "https://nullsink.is/v1",
-        apiKey: "0sink_YOUR_KEY",
-        api: "openai-completions",
-        models: [{ id: "gpt-5.5", name: "gpt-5.5", reasoning: true }],
-      },
-    },
-  },
-  agents: {
-    defaults: {
-      model: { primary: "nullsink/gpt-5.5" },
-    },
-  },
-}`;
-
-const PI_CONFIG = `{
-  "providers": {
-    "nullsink": {
-      "baseUrl": "https://nullsink.is/v1",
-      "api": "openai-completions",
-      "apiKey": "0sink_YOUR_KEY",
-      "models": [{ "id": "gpt-5.5", "reasoning": true }]
-    }
-  }
-}`;
-
-// The SAME two clients pointed at Claude, via the ANTHROPIC wire format — a genuinely different provider
-// block: root base URL (the client appends /v1/messages), api "anthropic-messages", a Claude id. A CUSTOM
-// Claude reasoning provider MUST carry `compat.forceAdaptiveThinking` — nullsink isn't a built-in adaptive
-// model, so without it the client sends the legacy `thinking.type` and Opus 4.8 400s. `thinkingLevelMap.xhigh`
-// exposes the top thinking tier. This format-vs-format difference is exactly what the side-by-side shows.
-const OPENCLAW_CLAUDE_CONFIG = `{
-  models: {
-    providers: {
-      "nullsink-claude": {
-        baseUrl: "https://nullsink.is",
-        apiKey: "0sink_YOUR_KEY",
-        api: "anthropic-messages",
-        models: [
-          {
-            id: "claude-opus-4-8",
-            name: "claude-opus-4-8",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "max" },
-            compat: { forceAdaptiveThinking: true },
-          },
-        ],
-      },
-    },
-  },
-  agents: {
-    defaults: {
-      model: { primary: "nullsink-claude/claude-opus-4-8" },
-    },
-  },
-}`;
-
-const PI_CLAUDE_CONFIG = `{
-  "providers": {
-    "nullsink-claude": {
-      "baseUrl": "https://nullsink.is",
-      "api": "anthropic-messages",
-      "apiKey": "0sink_YOUR_KEY",
-      "models": [
-        {
-          "id": "claude-opus-4-8",
-          "name": "claude-opus-4-8",
-          "reasoning": true,
-          "thinkingLevelMap": { "xhigh": "max" },
-          "compat": { "forceAdaptiveThinking": true }
-        }
-      ]
-    }
-  }
-}`;
-
-// Client docs — deep-linked to each tool's custom-provider section (not its built-in model catalog).
-const HERMES_DOC = "https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup";
-const OPENCLAW_DOC =
-  "https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url";
-const PI_DOC = "https://pi.dev/docs/latest/custom-provider";
 
 // The error envelope is each format's NATIVE shape (so a stock SDK classifies the failure). The OpenAI form
 // covers /chat/completions, /responses, AND Tinfoil, carrying the reason in `code`; Anthropic's /v1/messages
@@ -332,8 +238,10 @@ export function Api() {
           <KvRow k="base url" values={["https://nullsink.is"]} />
         </dl>
         <p className="band-note">
-          Endpoints live under <code>/v1</code>. OpenAI-compatible SDKs append only the endpoint tail, so give
-          them <code className="code-url">https://nullsink.is/v1</code>.
+          Endpoints live under <code>/v1</code>. An OpenAI SDK takes{" "}
+          <code className="code-url">https://nullsink.is/v1</code> (it appends the tail); an Anthropic SDK
+          takes the root <code className="code-url">https://nullsink.is</code> (it appends{" "}
+          <code>/v1/messages</code>).
         </p>
       </SharedBand>
 
@@ -399,10 +307,13 @@ export function Api() {
 
       <FormatPair
         concept="served models"
+        hint="a slice — full catalog on /models"
         left={
           <>
             <Chips ids={CLAUDE_IDS} />
-            <p className="rail-note">Claude, first-party. Prompt caching is supported on this path.</p>
+            <p className="rail-note">
+              Claude, first-party — prompt caching supported. <a href="/models/">All Claude models →</a>
+            </p>
           </>
         }
         right={
@@ -415,6 +326,9 @@ export function Api() {
               </span>
               <Chips ids={TINFOIL_IDS} />
             </div>
+            <p className="rail-note">
+              <a href="/models/">All models →</a>
+            </p>
           </>
         }
       />
@@ -427,70 +341,20 @@ export function Api() {
         right={<CodeBlock label="curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />}
       />
 
-      <FormatPair
-        concept="client setup"
-        hint="the same tool, one config per format"
-        left={
-          <>
-            <div className="client">
-              <span className="cl-label">Claude Code</span>
-              <CodeBlock label="shell" code={CLAUDE_CODE_ENV} highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]} />
-            </div>
-            <div className="client">
-              <span className="cl-label">OpenClaw</span>
-              <CodeBlock
-                label="~/.openclaw/openclaw.json"
-                code={OPENCLAW_CLAUDE_CONFIG}
-                highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
-              />
-            </div>
-            <div className="client">
-              <span className="cl-label">Pi</span>
-              <CodeBlock
-                label="~/.pi/agent/models.json"
-                code={PI_CLAUDE_CONFIG}
-                highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
-              />
-            </div>
-            <p className="rail-note">
-              A Claude reasoning model on a custom provider needs <code>compat.forceAdaptiveThinking</code> —
-              without it the request is rejected with <code>thinking.type &apos;enabled&apos; is not supported</code>.
-            </p>
-            <p className="rail-note">
-              Anthropic SDK: set <code>base_url</code> to <code className="code-url">https://nullsink.is</code>.
-              Docs:{" "}
-              <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>, <a href={PI_DOC} {...EXT}>Pi</a>.
-            </p>
-          </>
-        }
-        right={
-          <>
-            <div className="client">
-              <span className="cl-label">Hermes agent</span>
-              <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} comment="#" />
-            </div>
-            <div className="client">
-              <span className="cl-label">OpenClaw</span>
-              <CodeBlock
-                label="~/.openclaw/openclaw.json"
-                code={OPENCLAW_CONFIG}
-                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
-              />
-            </div>
-            <div className="client">
-              <span className="cl-label">Pi</span>
-              <CodeBlock label="~/.pi/agent/models.json" code={PI_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
-            </div>
-            <p className="rail-note">Any served OpenAI or open-weight model.</p>
-            <p className="rail-note">
-              OpenAI SDK: set <code>base_url</code> to <code className="code-url">https://nullsink.is/v1</code>.
-              Docs:{" "}
-              <a href={HERMES_DOC} {...EXT}>Hermes</a>, <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>,{" "}
-              <a href={PI_DOC} {...EXT}>Pi</a>.
-            </p>
-          </>
-        }
-      />
+      <section className="section">
+        <p className="note">
+          <span className="marker" aria-hidden="true">→</span>
+          <span>
+            Wiring up an agent? Setup for <strong>Claude Code</strong>, <strong>Hermes</strong>,{" "}
+            <strong>OpenClaw</strong> and <strong>Pi</strong> — including the Claude adaptive-thinking config —
+            is in the{" "}
+            <a href={`${GITHUB_URL}#connect-a-client`} {...EXT}>
+              integration guide
+            </a>
+            .
+          </span>
+        </p>
+      </section>
 
       <FormatPair
         concept="error shape"

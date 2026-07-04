@@ -12,6 +12,134 @@ Two Bun + TypeScript workspaces:
 | [`core/`](core/) | The metered proxy, payment rails, the `nsk` operator CLI, the box deploy machinery, and the billing ledger. Zero runtime dependencies. |
 | [`client/`](client/) | The purchase UI (Vite + React), served at the edge as static files. |
 
+## Connect a client
+
+nullsink mirrors two wire formats, so a stock SDK or agent works once you change the base URL and key:
+
+- **Anthropic Messages** — `POST /v1/messages`, `x-api-key`, serves Claude. Base URL is the **root** `https://nullsink.is` (the SDK/CLI appends `/v1/messages`).
+- **OpenAI-compatible** — `POST /v1/chat/completions` + `/v1/responses`, `Authorization: Bearer`, serves OpenAI and Tinfoil open-weight models. Base URL is `https://nullsink.is/v1`.
+
+Full wire reference: <https://nullsink.is/api>. Model ids and prices: <https://nullsink.is/models>.
+
+**Every request must set a max output tokens** — `max_tokens` (Anthropic) or `max_completion_tokens` (OpenAI) — or it's rejected with `max_tokens_required`.
+
+### Claude Code
+
+```sh
+export ANTHROPIC_BASE_URL=https://nullsink.is       # root; the CLI appends /v1/messages
+export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY          # AUTH_TOKEN, not API_KEY — a logged-in subscription shadows API_KEY
+export ANTHROPIC_MODEL=claude-opus-4-8
+claude
+```
+
+### Hermes agent
+
+OpenAI-compatible custom endpoint ([Hermes docs](https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup)):
+
+```sh
+hermes model              # choose "Custom endpoint"
+#   base url   https://nullsink.is/v1
+#   api key    0sink_YOUR_KEY
+#   model      gpt-5.5
+hermes chat -q "hello"
+```
+
+### OpenClaw
+
+OpenClaw ([docs](https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url)) speaks both formats — add one provider per format in `~/.openclaw/openclaw.json`.
+
+OpenAI-compatible (OpenAI + open-weight):
+
+```json5
+{
+  models: {
+    providers: {
+      nullsink: {
+        baseUrl: "https://nullsink.is/v1",
+        apiKey: "0sink_YOUR_KEY",
+        api: "openai-completions",
+        models: [{ id: "gpt-5.5", name: "gpt-5.5", reasoning: true }],
+      },
+    },
+  },
+  agents: { defaults: { model: { primary: "nullsink/gpt-5.5" } } },
+}
+```
+
+Anthropic (Claude):
+
+```json5
+{
+  models: {
+    providers: {
+      "nullsink-claude": {
+        baseUrl: "https://nullsink.is",              // root — the client appends /v1/messages
+        apiKey: "0sink_YOUR_KEY",
+        api: "anthropic-messages",
+        models: [
+          {
+            id: "claude-opus-4-8",
+            name: "claude-opus-4-8",
+            reasoning: true,
+            thinkingLevelMap: { xhigh: "max" },
+            compat: { forceAdaptiveThinking: true }, // REQUIRED for a custom Claude reasoning provider
+          },
+        ],
+      },
+    },
+  },
+  agents: { defaults: { model: { primary: "nullsink-claude/claude-opus-4-8" } } },
+}
+```
+
+### Pi
+
+Pi ([docs](https://pi.dev/docs/latest/custom-provider)) — the same two providers in `~/.pi/agent/models.json`.
+
+OpenAI-compatible:
+
+```json
+{
+  "providers": {
+    "nullsink": {
+      "baseUrl": "https://nullsink.is/v1",
+      "api": "openai-completions",
+      "apiKey": "0sink_YOUR_KEY",
+      "models": [{ "id": "gpt-5.5", "reasoning": true }]
+    }
+  }
+}
+```
+
+Anthropic (Claude):
+
+```json
+{
+  "providers": {
+    "nullsink-claude": {
+      "baseUrl": "https://nullsink.is",
+      "api": "anthropic-messages",
+      "apiKey": "0sink_YOUR_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "claude-opus-4-8",
+          "reasoning": true,
+          "thinkingLevelMap": { "xhigh": "max" },
+          "compat": { "forceAdaptiveThinking": true }
+        }
+      ]
+    }
+  }
+}
+```
+
+### Gotchas
+
+- A **reasoning** model needs `reasoning: true` on its entry, or the client treats it as non-reasoning and the thinking controls never appear.
+- A **custom Claude** reasoning provider must set `compat.forceAdaptiveThinking: true`, or Opus 4.8 rejects the request with `thinking.type 'enabled' is not supported`. Built-in Claude models set this automatically; a custom nullsink provider does not.
+- Anthropic-format base URL is the **root** (`https://nullsink.is`); OpenAI-format is `https://nullsink.is/v1`. Getting this wrong doubles the path (`/v1/v1/messages`).
+
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together

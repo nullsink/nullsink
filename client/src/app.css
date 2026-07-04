@@ -1132,7 +1132,7 @@ button:disabled { cursor: not-allowed; }
 .rail-note { font-size: 12.5px; color: var(--ns-muted); line-height: 1.5; margin: 0; }
 .rail-note code { white-space: normal; }
 /* rail/band-body already space their children; drop the components' own leading margins */
-.rail-body .codeblock, .band-body .codeblock, .client .codeblock { margin-top: 0; }
+.rail-body .codeblock, .band-body .codeblock { margin-top: 0; }
 .band-body .kv { margin-top: 0; }
 
 /* max-output-tokens field — shown as it appears in the body, no box, no nested chip */
@@ -1147,15 +1147,10 @@ button:disabled { cursor: not-allowed; }
 .subgroup-label.seal { color: var(--ns-seal); }
 .subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
 
-/* client sub-block: one tool's setup inside a rail (label over its snippet) */
-.client { display: flex; flex-direction: column; gap: 6px; }
-.cl-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); }
-
-/* shared band (format-agnostic) — borrows the /models card language: a neutral left rail + a filled
-   bone tag + an underlined header, so it reads as an "applies to both" object, not a grey box. */
+/* shared band (format-agnostic) — a quiet hairline box with an outline "shared" tag + underlined header,
+   so it reads as an "applies to both" object without a heavy rail competing with the paired rows. */
 .band {
   border: 1px solid var(--ns-line);
-  border-left: 3px solid var(--ns-muted);
   padding: 22px 24px;
 }
 .band-head {
@@ -1167,9 +1162,8 @@ button:disabled { cursor: not-allowed; }
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  font-weight: var(--ns-weight-display);
-  color: var(--ns-void);
-  background: var(--ns-bone);   /* filled neutral pill, echoing /models .pill — says "both" */
+  color: var(--ns-muted);
+  border: 1px solid var(--ns-line);   /* outline chip, not filled — quieter than the paired concept ticks */
   padding: 3px 8px;
   flex: none;
 }
