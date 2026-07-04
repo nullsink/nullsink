@@ -37,6 +37,7 @@ const OPENAI_CURL = `curl https://nullsink.is/v1/chat/completions \\
 
 const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
+export ANTHROPIC_MODEL=claude-opus-4-8
 claude`;
 
 const HERMES_SETUP = `hermes model              # choose "Custom endpoint"
@@ -73,6 +74,62 @@ const PI_CONFIG = `{
     }
   }
 }`;
+
+// The SAME two clients pointed at Claude, via the ANTHROPIC wire format — a genuinely different provider
+// block: root base URL (the client appends /v1/messages), api "anthropic-messages", a Claude id. A CUSTOM
+// Claude reasoning provider MUST carry `compat.forceAdaptiveThinking` — nullsink isn't a built-in adaptive
+// model, so without it the client sends the legacy `thinking.type` and Opus 4.8 400s. `thinkingLevelMap.xhigh`
+// exposes the top thinking tier. This format-vs-format difference is exactly what the side-by-side shows.
+const OPENCLAW_CLAUDE_CONFIG = `{
+  models: {
+    providers: {
+      "nullsink-claude": {
+        baseUrl: "https://nullsink.is",
+        apiKey: "0sink_YOUR_KEY",
+        api: "anthropic-messages",
+        models: [
+          {
+            id: "claude-opus-4-8",
+            name: "claude-opus-4-8",
+            reasoning: true,
+            thinkingLevelMap: { xhigh: "max" },
+            compat: { forceAdaptiveThinking: true },
+          },
+        ],
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      model: { primary: "nullsink-claude/claude-opus-4-8" },
+    },
+  },
+}`;
+
+const PI_CLAUDE_CONFIG = `{
+  "providers": {
+    "nullsink-claude": {
+      "baseUrl": "https://nullsink.is",
+      "api": "anthropic-messages",
+      "apiKey": "0sink_YOUR_KEY",
+      "models": [
+        {
+          "id": "claude-opus-4-8",
+          "name": "claude-opus-4-8",
+          "reasoning": true,
+          "thinkingLevelMap": { "xhigh": "max" },
+          "compat": { "forceAdaptiveThinking": true }
+        }
+      ]
+    }
+  }
+}`;
+
+// Client docs — deep-linked to each tool's custom-provider section (not its built-in model catalog).
+const HERMES_DOC = "https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup";
+const OPENCLAW_DOC =
+  "https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url";
+const PI_DOC = "https://pi.dev/docs/latest/custom-provider";
 
 // The error envelope is each format's NATIVE shape (so a stock SDK classifies the failure). The OpenAI form
 // covers /chat/completions, /responses, AND Tinfoil, carrying the reason in `code`; Anthropic's /v1/messages
@@ -371,20 +428,36 @@ export function Api() {
 
       <FormatPair
         concept="client setup"
-        hint="point an existing tool at nullsink"
+        hint="the same tool, one config per format"
         left={
           <>
             <div className="client">
               <span className="cl-label">Claude Code</span>
-              <CodeBlock label="shell" code={CLAUDE_CODE_ENV} highlights={["0sink_YOUR_KEY"]} />
+              <CodeBlock label="shell" code={CLAUDE_CODE_ENV} highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]} />
+            </div>
+            <div className="client">
+              <span className="cl-label">OpenClaw</span>
+              <CodeBlock
+                label="~/.openclaw/openclaw.json"
+                code={OPENCLAW_CLAUDE_CONFIG}
+                highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
+              />
+            </div>
+            <div className="client">
+              <span className="cl-label">Pi</span>
+              <CodeBlock
+                label="~/.pi/agent/models.json"
+                code={PI_CLAUDE_CONFIG}
+                highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
+              />
             </div>
             <p className="rail-note">
-              Use <code>ANTHROPIC_AUTH_TOKEN</code> — a logged-in subscription overrides{" "}
-              <code>ANTHROPIC_API_KEY</code>.
+              A Claude reasoning model on a custom provider needs <code>compat.forceAdaptiveThinking</code> —
+              without it the request is rejected with <code>thinking.type &apos;enabled&apos; is not supported</code>.
             </p>
             <p className="rail-note">
-              OpenClaw and Pi can also target Claude here — set <code>api: anthropic-messages</code> and base
-              URL <code>https://nullsink.is</code> (root).
+              Anthropic SDK: set <code>base_url</code> to <code>https://nullsink.is</code>. Docs:{" "}
+              <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>, <a href={PI_DOC} {...EXT}>Pi</a>.
             </p>
           </>
         }
@@ -392,19 +465,7 @@ export function Api() {
           <>
             <div className="client">
               <span className="cl-label">Hermes agent</span>
-              <CodeBlock
-                label="shell"
-                code={HERMES_SETUP}
-                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
-                comment="#"
-              />
-              <p className="rail-note">
-                Any OpenAI or open-weight model.{" "}
-                <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup" {...EXT}>
-                  Hermes docs
-                </a>
-                .
-              </p>
+              <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} comment="#" />
             </div>
             <div className="client">
               <span className="cl-label">OpenClaw</span>
@@ -413,30 +474,17 @@ export function Api() {
                 code={OPENCLAW_CONFIG}
                 highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
               />
-              <p className="rail-note">
-                <a
-                  href="https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url"
-                  {...EXT}
-                >
-                  OpenClaw docs
-                </a>
-                .
-              </p>
             </div>
             <div className="client">
               <span className="cl-label">Pi</span>
-              <CodeBlock
-                label="~/.pi/agent/models.json"
-                code={PI_CONFIG}
-                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
-              />
-              <p className="rail-note">
-                <a href="https://pi.dev/docs/latest/custom-provider" {...EXT}>
-                  Pi docs
-                </a>
-                .
-              </p>
+              <CodeBlock label="~/.pi/agent/models.json" code={PI_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
             </div>
+            <p className="rail-note">Any served OpenAI or open-weight model.</p>
+            <p className="rail-note">
+              OpenAI SDK: set <code>base_url</code> to <code>https://nullsink.is/v1</code>. Docs:{" "}
+              <a href={HERMES_DOC} {...EXT}>Hermes</a>, <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>,{" "}
+              <a href={PI_DOC} {...EXT}>Pi</a>.
+            </p>
           </>
         }
       />
