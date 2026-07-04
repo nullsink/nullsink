@@ -72,6 +72,10 @@ const RAILS = {
   openai: { marks: [OpenAiMark, TinfoilMark], name: "openai-compatible" },
 } as const;
 
+// The three provider marks together — the "applies to both formats" signal that marks a shared band and the
+// legend's middle cell (it replaces a "shared" text tag: all three coins = every provider).
+const SHARED_MARKS = [AnthropicMark, OpenAiMark, TinfoilMark];
+
 // Provider coins — the page's signature accent, shared by the legend and every rail head.
 function Coins({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   return (
@@ -134,7 +138,7 @@ function SharedBand({ title, sub, children }: { title: string; sub?: string; chi
     <section className="section">
       <div className="band">
         <div className="band-head">
-          <span className="band-tag">shared</span>
+          <Coins marks={SHARED_MARKS} />
           <h2>{title}</h2>
           {sub && <span className="band-sub">{sub}</span>}
         </div>
@@ -191,22 +195,24 @@ export function Api() {
             <a href="/models/">models</a> page.
           </span>
         </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            This page reads as two columns: the <strong>left rail</strong> is the Anthropic Messages format,
-            the <strong>right rail</strong> is OpenAI-compatible. Each row lines up the same concept in both;
-            full-width bands apply to both.
-          </span>
-        </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">!</span>
-          <span>
-            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
-            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
-            <code>max_tokens_required</code>.
-          </span>
-        </p>
+        <div className="note-cols">
+          <p className="note">
+            <span className="marker" aria-hidden="true">?</span>
+            <span>
+              This page reads as two columns: the <strong>left rail</strong> is the Anthropic Messages format,
+              the <strong>right rail</strong> is OpenAI-compatible. Each row lines up the same concept in both;
+              full-width bands apply to both.
+            </span>
+          </p>
+          <p className="note">
+            <span className="marker" aria-hidden="true">!</span>
+            <span>
+              <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
+              (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
+              <code>max_tokens_required</code>.
+            </span>
+          </p>
+        </div>
       </section>
 
       <div className="legend" aria-label="how to read this page">
@@ -215,7 +221,7 @@ export function Api() {
           <span className="legend-name">anthropic messages</span>
         </div>
         <div className="legend-item">
-          <span className="band-tag">shared</span>
+          <Coins marks={SHARED_MARKS} />
           <span className="legend-name">both formats</span>
         </div>
         <div className="legend-item">
@@ -280,7 +286,6 @@ export function Api() {
 
       <FormatPair
         concept="served models"
-        hint="a slice — full catalog on /models"
         left={
           <>
             <Chips ids={CLAUDE_IDS} />

@@ -1142,9 +1142,13 @@ button:disabled { cursor: not-allowed; }
 .subgroup-label.seal { color: var(--ns-seal); }
 .subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
 
-/* shared band (format-agnostic) — the same header language as the /models tier heads: a "shared" tag + title
-   over a neutral hairline, NO surrounding box. The paired rows carry the two-column weight; shared facts sit
-   lighter, as a section header rather than a boxed object. */
+/* shared band (format-agnostic) — a left accent rail (the /models pcard language) with the three provider
+   coins as a header marker over a neutral hairline. The rail marks it as a distinct "applies to both" object;
+   the coins (all three providers at once) say "shared" without a text tag. */
+.band {
+  border-left: 3px solid var(--ns-muted); /* the left rail, like the /models pcard-rail — neutral (shared belongs to neither format) */
+  padding-left: 22px;
+}
 .band-head {
   display: flex;
   align-items: center;
@@ -1152,15 +1156,6 @@ button:disabled { cursor: not-allowed; }
   flex-wrap: wrap;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--ns-line); /* the tier-head hairline, kept neutral — shared belongs to neither format */
-}
-.band-tag {
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ns-muted);
-  border: 1px solid var(--ns-line); /* the quiet "shared" marker — outline, not filled */
-  padding: 3px 8px;
-  flex: none;
 }
 .band-head h2 {
   margin: 0;
@@ -1186,10 +1181,9 @@ button:disabled { cursor: not-allowed; }
   margin-left: 50%;
   transform: translateX(-50%);
 }
-/* prose keeps a comfortable reading measure even though the doc is now wide */
-.api-doc .note { max-width: 78ch; }
-.band-note { max-width: 78ch; }
-.band .kv { max-width: 560px; } /* keep the base-url label + value from spreading across the whole band */
+/* the two secondary intro notes sit side by side so the wide doc isn't left half-empty (stack on mobile) */
+.note-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 40px; }
+.note-cols .note { margin: 0; }
 /* the base url — the value you point a client at — reads acid, like the key and model id in the samples */
 .band .kvval { color: var(--ns-acid); }
 code.code-url { color: var(--ns-acid); }
@@ -1202,6 +1196,7 @@ code.code-url { color: var(--ns-acid); }
   .legend { grid-template-columns: 1fr; }
   .legend-item + .legend-item { border-left: none; border-top: 1px solid var(--ns-line); }
   .band-cols { grid-template-columns: 1fr; gap: 0; }
+  .note-cols { grid-template-columns: 1fr; }
 }
 
 /* ---- footer — the never-collect chips, then a thin row with the links ---- */
