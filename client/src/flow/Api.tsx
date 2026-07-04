@@ -39,16 +39,32 @@ const HERMES_SETUP = `hermes model              # choose "Custom endpoint"
 hermes chat -q "hello"`;
 
 const OPENCLAW_CONFIG = `{
-  models: { providers: { nullsink: {
-    baseUrl: "https://nullsink.is/v1",
-    apiKey: "0sink_YOUR_KEY",
-    api: "openai-completions",
-    models: [{ id: "gpt-5.5", name: "gpt-5.5", maxTokens: 8192 }],
-  } } },
-  agents: { defaults: {
-    model: { primary: "nullsink/gpt-5.5" },
-    models: { "nullsink/gpt-5.5": {} },
-  } },
+  models: {
+    providers: {
+      nullsink: {
+        baseUrl: "https://nullsink.is/v1",
+        apiKey: "0sink_YOUR_KEY",
+        api: "openai-completions",
+        models: [{ id: "gpt-5.5", name: "gpt-5.5", reasoning: true }],
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      model: { primary: "nullsink/gpt-5.5" },
+    },
+  },
+}`;
+
+const PI_CONFIG = `{
+  "providers": {
+    "nullsink": {
+      "baseUrl": "https://nullsink.is/v1",
+      "api": "openai-completions",
+      "apiKey": "0sink_YOUR_KEY",
+      "models": [{ "id": "gpt-5.5", "reasoning": true }]
+    }
+  }
 }`;
 
 // The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
@@ -200,12 +216,12 @@ export function Api() {
 
       <section className="section">
         <h2>hermes agent</h2>
-        <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} comment="#" />
         <p className="note">
           <span className="marker" aria-hidden="true">?</span>
           <span>
             Any OpenAI or open-weight <a href="/models/">model</a> works.{" "}
-            <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers" {...EXT}>
+            <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup" {...EXT}>
               Hermes docs
             </a>
             .
@@ -220,9 +236,28 @@ export function Api() {
           <span className="marker" aria-hidden="true">?</span>
           <span>
             Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
-            add an <code>anthropic-messages</code> provider at <code>https://nullsink.is/v1</code>.{" "}
-            <a href="https://docs.openclaw.ai/concepts/model-providers" {...EXT}>
+            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
+            <a
+              href="https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url"
+              {...EXT}
+            >
               OpenClaw docs
+            </a>
+            .
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>pi</h2>
+        <CodeBlock label="~/.pi/agent/models.json" code={PI_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
+            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
+            <a href="https://pi.dev/docs/latest/custom-provider" {...EXT}>
+              Pi docs
             </a>
             .
           </span>
