@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
 
@@ -262,24 +262,62 @@ export function KvRow({ k, values }: { k: string; values: string[] }) {
 // A static code sample: labelled head with a copy control, then a <pre>. Render-pure (no browser APIs),
 // so it prerenders; the copy button needs JS, but the code itself still reads (and selects) without it.
 // `highlights` lists exact substrings (the placeholder key, the model id) to tint acid — the eye lands
-// on what to replace / what to change. Copy always copies the raw, untinted string.
+// on what to replace / what to change. `comment` (a `#` or `//` token) sets off annotation text so it
+// reads as a note, not a command — a highlight substring INSIDE a comment still tints acid, so the value
+// to replace stays loud. Copy always copies the raw, untinted string.
 const RE_ESCAPE = /[.*+?^${}()|[\]\\]/g;
+
+// Split `text` so every highlight substring survives as its own part (to tint individually). Deterministic
+// string work — safe for prerender and identical on hydration.
+function splitHighlights(text: string, highlights: string[]): string[] {
+  if (highlights.length === 0 || text === "") return [text];
+  return text.split(new RegExp(`(${highlights.map((h) => h.replace(RE_ESCAPE, "\\$&")).join("|")})`, "g"));
+}
+
+// Index where a line's comment begins, or -1. The marker must sit at line start or after whitespace, so a
+// mid-token `#` (a URL fragment) or the `//` in `https://` is never mistaken for the start of a comment.
+function commentStart(line: string, token: "#" | "//"): number {
+  const m = (token === "#" ? /(^|\s)#/ : /(^|\s)\/\//).exec(line);
+  return m ? m.index + m[1].length : -1;
+}
 
 export function CodeBlock({
   label,
   code,
   highlights = [],
+  comment,
 }: {
   label: string;
   code: string;
   highlights?: string[];
+  comment?: "#" | "//";
 }) {
-  // Split on a capturing group so the matched substrings survive as their own parts, then tint
-  // exactly those. Deterministic string work — safe for prerender and identical on hydration.
-  const set = new Set(highlights);
-  const parts = highlights.length
-    ? code.split(new RegExp(`(${highlights.map((h) => h.replace(RE_ESCAPE, "\\$&")).join("|")})`, "g"))
-    : [code];
+  const hl = new Set(highlights);
+  // Tint a run of text: highlight substrings acid, the rest either dimmed (comment) or plain (code).
+  const tint = (text: string, cls: string | undefined, key: string): ReactNode[] =>
+    splitHighlights(text, highlights).map((p, i) =>
+      hl.has(p) ? (
+        <span key={`${key}h${i}`} className="code-hl">
+          {p}
+        </span>
+      ) : cls ? (
+        <span key={`${key}c${i}`} className={cls}>
+          {p}
+        </span>
+      ) : (
+        p
+      ),
+    );
+  // Work line by line so a comment marker only affects its own line; rejoin with newlines for the <pre>.
+  const lines = code.split("\n");
+  const body = lines.flatMap((line, li) => {
+    const at = comment ? commentStart(line, comment) : -1;
+    const nodes =
+      at < 0
+        ? tint(line, undefined, `${li}a`)
+        : [...tint(line.slice(0, at), undefined, `${li}a`), ...tint(line.slice(at), "code-comment", `${li}b`)];
+    return li < lines.length - 1 ? [...nodes, "\n"] : nodes;
+  });
   return (
     <div className="codeblock">
       <div className="code-head">
@@ -287,17 +325,7 @@ export function CodeBlock({
         <Copy value={code} />
       </div>
       <pre className="code-body">
-        <code>
-          {parts.map((p, i) =>
-            set.has(p) ? (
-              <span key={i} className="code-hl">
-                {p}
-              </span>
-            ) : (
-              p
-            ),
-          )}
-        </code>
+        <code>{body}</code>
       </pre>
     </div>
   );
