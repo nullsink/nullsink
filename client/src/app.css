@@ -1183,6 +1183,21 @@ button:disabled { cursor: not-allowed; }
 .band .err-list { margin-top: 0; }
 .band .err-list li { flex-direction: column; align-items: flex-start; gap: 3px; }
 
+/* the doc breaks out of the 760 shell to a wider measure so the two-format columns can breathe — the same
+   trick the home uses; the header + footer stay in the shell, so they're identical across pages. */
+.api-doc {
+  width: min(1000px, calc(100vw - 40px));
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+/* prose keeps a comfortable reading measure even though the doc is now wide */
+.api-doc .note { max-width: 78ch; }
+.band-note { max-width: 78ch; }
+.band .kv { max-width: 560px; } /* keep the base-url label + value from spreading across the whole band */
+/* the base url — the value you point a client at — reads acid, like the key and model id in the samples */
+.band .kvval { color: var(--ns-acid); }
+code.code-url { color: var(--ns-acid); }
+
 /* responsive: rails stack, concept grouping preserved */
 @media (max-width: 720px) {
   .fpair-grid { grid-template-columns: 1fr; }

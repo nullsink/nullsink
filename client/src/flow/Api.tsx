@@ -284,6 +284,7 @@ function Err({ code, children }: { code: string; children: ReactNode }) {
 export function Api() {
   return (
     <Layout nav="api">
+      <div className="api-doc">
       <section className="section">
         <h1 className="page-h1">api</h1>
         <p className="note">
@@ -332,7 +333,7 @@ export function Api() {
         </dl>
         <p className="band-note">
           Endpoints live under <code>/v1</code>. OpenAI-compatible SDKs append only the endpoint tail, so give
-          them <code>https://nullsink.is/v1</code>.
+          them <code className="code-url">https://nullsink.is/v1</code>.
         </p>
       </SharedBand>
 
@@ -456,7 +457,8 @@ export function Api() {
               without it the request is rejected with <code>thinking.type &apos;enabled&apos; is not supported</code>.
             </p>
             <p className="rail-note">
-              Anthropic SDK: set <code>base_url</code> to <code>https://nullsink.is</code>. Docs:{" "}
+              Anthropic SDK: set <code>base_url</code> to <code className="code-url">https://nullsink.is</code>.
+              Docs:{" "}
               <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>, <a href={PI_DOC} {...EXT}>Pi</a>.
             </p>
           </>
@@ -481,7 +483,8 @@ export function Api() {
             </div>
             <p className="rail-note">Any served OpenAI or open-weight model.</p>
             <p className="rail-note">
-              OpenAI SDK: set <code>base_url</code> to <code>https://nullsink.is/v1</code>. Docs:{" "}
+              OpenAI SDK: set <code>base_url</code> to <code className="code-url">https://nullsink.is/v1</code>.
+              Docs:{" "}
               <a href={HERMES_DOC} {...EXT}>Hermes</a>, <a href={OPENCLAW_DOC} {...EXT}>OpenClaw</a>,{" "}
               <a href={PI_DOC} {...EXT}>Pi</a>.
             </p>
@@ -542,6 +545,7 @@ export function Api() {
           .
         </p>
       </SharedBand>
+      </div>
     </Layout>
   );
 }
