@@ -1,13 +1,20 @@
 import type { ComponentType, ReactNode } from "react";
 import { Layout } from "../Layout.tsx";
-import { AnthropicMark, CodeBlock, Copy, KvRow, Ns, OpenAiMark, TinfoilMark } from "../ui.tsx";
+import { AnthropicMark, CodeBlock, Copy, KvRow, ModelChip, Ns, OpenAiMark, SquareGlyph, TinfoilMark } from "../ui.tsx";
 import { EXT, GITHUB_URL } from "../lib/links.ts";
 
-// /api — the API reference. nullsink mirrors the Anthropic and OpenAI wire formats, so a stock SDK works once
-// the base URL + key change. Minimal prose: the served routes, what each does, and the few snippets any
-// caller needs. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if the
-// served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons are
-// the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id — acid.
+// /api — the API reference, read as TWO WIRE FORMATS side by side. The left rail is always Anthropic
+// Messages, the right rail is always OpenAI-compatible; each format-specific concept (auth, endpoints,
+// max-tokens, models, quickstart, client setup, errors) renders as a two-up <FormatPair> so a caller can
+// scan one format straight down. Format-agnostic facts (base url, catalog, error codes) render as full-width
+// <SharedBand> bands. Every fact mirrors the proxy's real contract (core src/handler.ts + providers/) — if
+// the served surface changes, change this page. Static: prerenders and reads with JS off (the copy buttons
+// are the only JS). CodeBlock `highlights` tint the two things a caller swaps — their key and the model id.
+
+const ANTHROPIC_HEADERS = `x-api-key: 0sink_YOUR_KEY
+anthropic-version: 2023-06-01`;
+
+const OPENAI_HEADERS = `Authorization: Bearer 0sink_YOUR_KEY`;
 
 const ANTHROPIC_CURL = `curl https://nullsink.is/v1/messages \\
   -H "x-api-key: 0sink_YOUR_KEY" \\
@@ -67,17 +74,9 @@ const PI_CONFIG = `{
   }
 }`;
 
-// The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
-// shown below. The OpenAI form covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible), carrying
-// the reason in `code`; Anthropic's /v1/messages wears its own, carrying the reason in `message`. Same reason
-// string either way.
-const ERROR_SHAPE = `{
-  "error": {
-    "message": "max_tokens_required",
-    "type": "invalid_request_error",
-    "code": "max_tokens_required"
-  }
-}`;
+// The error envelope is each format's NATIVE shape (so a stock SDK classifies the failure). The OpenAI form
+// covers /chat/completions, /responses, AND Tinfoil, carrying the reason in `code`; Anthropic's /v1/messages
+// wears its own, carrying the reason in `message`. Same reason string either way.
 const ANTHROPIC_ERROR_SHAPE = `{
   "type": "error",
   "error": {
@@ -85,15 +84,35 @@ const ANTHROPIC_ERROR_SHAPE = `{
     "message": "max_tokens_required"
   }
 }`;
+const OPENAI_ERROR_SHAPE = `{
+  "error": {
+    "message": "max_tokens_required",
+    "type": "invalid_request_error",
+    "code": "max_tokens_required"
+  }
+}`;
+
+// A representative slice of each format's served ids — the full, live catalog is GET /v1/models and the
+// /models page. Tinfoil's open-weight set is sealed (a TEE that can't read your text), so it takes the seal.
+const CLAUDE_IDS = ["claude-opus-4-8", "claude-haiku-4-5", "claude-fable-5"];
+const OPENAI_IDS = ["gpt-5.5", "gpt-5.5-pro"];
+const TINFOIL_IDS = ["gpt-oss-120b", "glm-5-2", "kimi-k2-6"];
 
 // Tinfoil is the sealed-enclave provider, so its coin takes the purple seal ring instead of acid (same
 // semantic as the SquareGlyph sealed marker on /models).
 const SEALED = new Set<ComponentType<{ className?: string }>>([TinfoilMark]);
 
-// Provider mark(s) in coins — the page's signature accent, shared by the base-url and endpoint rows.
-function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
+// The two rails, defined once: which coin(s) each carries and its name. LEFT is always Anthropic Messages,
+// RIGHT is always OpenAI-compatible (OpenAI + the sealed Tinfoil provider share that wire format).
+const RAILS = {
+  anthropic: { marks: [AnthropicMark], name: "anthropic messages" },
+  openai: { marks: [OpenAiMark, TinfoilMark], name: "openai-compatible" },
+} as const;
+
+// Provider coins — the page's signature accent, shared by the legend and every rail head.
+function Coins({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   return (
-    <span className="ep-marks" aria-hidden="true">
+    <span className="coins" aria-hidden="true">
       {marks.map((M, i) => (
         <span key={i} className={"ep-disc" + (SEALED.has(M) ? " sealed" : "")}>
           <M className="ep-ico" />
@@ -103,28 +122,99 @@ function Marks({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   );
 }
 
-// One endpoint row: method · path · a copy button for the full URL · the provider mark(s). The whole site is
-// monospace, so the path needs no special face — bone path against the muted method.
-function Ep({
-  marks,
-  method,
-  path,
+// One rail: a head (coins + format name) over a body. `side` picks which format it is.
+function Rail({ side, children }: { side: keyof typeof RAILS; children: ReactNode }) {
+  const r = RAILS[side];
+  return (
+    <div className="rail">
+      <div className="rail-head">
+        <Coins marks={[...r.marks]} />
+        <span className="rail-name">{r.name}</span>
+      </div>
+      <div className="rail-body">{children}</div>
+    </div>
+  );
+}
+
+// A format-specific concept, rendered as an aligned two-up: an eyebrow (the concept + an optional hint —
+// `req` makes the hint an acid "required" badge) over the Anthropic | OpenAI rails.
+function FormatPair({
+  concept,
+  hint,
+  req = false,
+  left,
+  right,
 }: {
-  marks: ComponentType<{ className?: string }>[];
-  method: string;
-  path: string;
+  concept: string;
+  hint?: string;
+  req?: boolean;
+  left: ReactNode;
+  right: ReactNode;
 }) {
+  return (
+    <section className="section">
+      <div className="fpair-eyebrow">
+        <span className="concept">{concept}</span>
+        {hint && <span className={"fpair-hint" + (req ? " req" : "")}>{hint}</span>}
+      </div>
+      <div className="fpair-grid">
+        <Rail side="anthropic">{left}</Rail>
+        <Rail side="openai">{right}</Rail>
+      </div>
+    </section>
+  );
+}
+
+// A format-agnostic fact: a full-width band with the filled "shared" tag, a title, an optional sub-note.
+function SharedBand({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {
+  return (
+    <section className="section">
+      <div className="band">
+        <div className="band-head">
+          <span className="band-tag">shared</span>
+          <h2>{title}</h2>
+          {sub && <span className="band-sub">{sub}</span>}
+        </div>
+        <div className="band-body">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+// One endpoint row inside a rail or band: method · path · a copy button for the full URL. No provider coin
+// here — the rail head already carries it (bands are format-agnostic).
+function EpRow({ method, path }: { method: string; path: string }) {
   return (
     <div className="ep">
       <span className="ep-method">{method}</span>
       <span className="ep-path">{path}</span>
       <Copy value={`https://nullsink.is${path}`} />
-      <Marks marks={marks} />
     </div>
   );
 }
 
-// One error row: the machine-readable code beside its cause.
+// The required max-output-tokens field, shown as it appears in the body (no box, no nested chip).
+function Field({ name }: { name: string }) {
+  return (
+    <div className="field">
+      <span className="field-key">{name}</span>
+      <span className="field-val">: 1024</span>
+    </div>
+  );
+}
+
+// A model-id chip row (each id copies on click).
+function Chips({ ids }: { ids: string[] }) {
+  return (
+    <div className="chips">
+      {ids.map((id) => (
+        <ModelChip key={id} id={id} />
+      ))}
+    </div>
+  );
+}
+
+// One error code beside its cause.
 function Err({ code, children }: { code: string; children: ReactNode }) {
   return (
     <li>
@@ -142,130 +232,250 @@ export function Api() {
         <p className="note">
           <span className="marker" aria-hidden="true">→</span>
           <span>
-            <Ns /> mirrors the Anthropic and OpenAI APIs. Point a stock SDK at it — only the base URL and the
-            key change. <a href="/#buy">Mint a key</a>; model ids are on the <a href="/models/">models</a>{" "}
-            page.
+            <Ns /> mirrors the Anthropic and OpenAI wire formats. Point a stock SDK at it — only the base URL
+            and the key change. <a href="/#buy">Mint a key</a>; model ids are on the{" "}
+            <a href="/models/">models</a> page.
+          </span>
+        </p>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            This page reads as two columns: the <strong>left rail</strong> is the Anthropic Messages format,
+            the <strong>right rail</strong> is OpenAI-compatible. Each row lines up the same concept in both;
+            full-width bands apply to both.
           </span>
         </p>
         <p className="note">
           <span className="marker" aria-hidden="true">!</span>
           <span>
-            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
-            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
-            <code>max_tokens_required</code>.
+            <span className="hl">Every request must set a max output tokens</span> — the field name differs
+            per format (below), and omitting it is rejected with <code>max_tokens_required</code>.
           </span>
         </p>
       </section>
 
-      <section className="section">
-        <h2>base url &amp; auth</h2>
+      <div className="legend" aria-label="how to read this page">
+        <div className="legend-item">
+          <Coins marks={[AnthropicMark]} />
+          <span className="legend-name">anthropic messages</span>
+        </div>
+        <div className="legend-item">
+          <span className="band-tag">shared</span>
+          <span className="legend-name">both formats</span>
+        </div>
+        <div className="legend-item">
+          <Coins marks={[OpenAiMark, TinfoilMark]} />
+          <span className="legend-name">openai-compatible</span>
+        </div>
+      </div>
+
+      <SharedBand title="base url" sub="identical in both formats">
         <dl className="kv">
           <KvRow k="base url" values={["https://nullsink.is"]} />
-          <KvRow k="auth headers" values={["x-api-key", "Authorization: Bearer"]} />
         </dl>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Endpoints live under <code>/v1</code>. OpenAI-compatible SDKs append only the endpoint tail, so
-            give them the base URL with it — <code>https://nullsink.is/v1</code>.
-          </span>
+        <p className="band-note">
+          Endpoints live under <code>/v1</code>. OpenAI-compatible SDKs append only the endpoint tail, so give
+          them <code>https://nullsink.is/v1</code>.
         </p>
-      </section>
+      </SharedBand>
 
-      <section className="section">
-        <h2>endpoints</h2>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>Request and response bodies are each provider&apos;s native schema.</span>
+      <FormatPair
+        concept="auth"
+        left={
+          <>
+            <CodeBlock label="request headers" code={ANTHROPIC_HEADERS} highlights={["0sink_YOUR_KEY"]} />
+            <p className="rail-note">
+              <code>Authorization: Bearer</code> is also accepted.
+            </p>
+          </>
+        }
+        right={
+          <>
+            <CodeBlock label="request headers" code={OPENAI_HEADERS} highlights={["0sink_YOUR_KEY"]} />
+            <p className="rail-note">
+              <code>x-api-key</code> is also accepted.
+            </p>
+          </>
+        }
+      />
+
+      <FormatPair
+        concept="endpoints"
+        hint="native request/response schema each"
+        left={<EpRow method="POST" path="/v1/messages" />}
+        right={
+          <>
+            <EpRow method="POST" path="/v1/chat/completions" />
+            <EpRow method="POST" path="/v1/responses" />
+          </>
+        }
+      />
+
+      <FormatPair
+        concept="max output tokens"
+        hint="required"
+        req
+        left={
+          <>
+            <Field name="max_tokens" />
+            <p className="rail-note">Set it in the request body.</p>
+          </>
+        }
+        right={
+          <>
+            <Field name="max_completion_tokens" />
+            <p className="rail-note">Set it in the request body.</p>
+          </>
+        }
+      />
+
+      <SharedBand title="catalog & balance">
+        <EpRow method="GET" path="/v1/models" />
+        <EpRow method="GET" path="/balance" />
+        <p className="band-note">
+          <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price;{" "}
+          <code>GET /balance</code> returns a key&apos;s remaining credit. Full catalog on the{" "}
+          <a href="/models/">models</a> page.
         </p>
-        <div className="ep-group">
-          <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" />
-          <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" />
-          <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" />
-          <Ep marks={[]} method="GET" path="/v1/models" />
+      </SharedBand>
+
+      <FormatPair
+        concept="served models"
+        left={
+          <>
+            <Chips ids={CLAUDE_IDS} />
+            <p className="rail-note">Claude, first-party. Prompt caching is supported on this path.</p>
+          </>
+        }
+        right={
+          <>
+            <Chips ids={OPENAI_IDS} />
+            <div className="subgroup seal">
+              <span className="subgroup-label seal">
+                <SquareGlyph sealed className="tee-mark" />
+                tinfoil · sealed enclave
+              </span>
+              <Chips ids={TINFOIL_IDS} />
+            </div>
+          </>
+        }
+      />
+
+      <FormatPair
+        concept="quickstart"
+        left={
+          <CodeBlock label="curl" code={ANTHROPIC_CURL} highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]} />
+        }
+        right={<CodeBlock label="curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />}
+      />
+
+      <FormatPair
+        concept="client setup"
+        hint="point an existing tool at nullsink"
+        left={
+          <>
+            <div className="client">
+              <span className="cl-label">Claude Code</span>
+              <CodeBlock label="shell" code={CLAUDE_CODE_ENV} highlights={["0sink_YOUR_KEY"]} />
+            </div>
+            <p className="rail-note">
+              Use <code>ANTHROPIC_AUTH_TOKEN</code> — a logged-in subscription overrides{" "}
+              <code>ANTHROPIC_API_KEY</code>.
+            </p>
+            <p className="rail-note">
+              OpenClaw and Pi can also target Claude here — set <code>api: anthropic-messages</code> and base
+              URL <code>https://nullsink.is</code> (root).
+            </p>
+          </>
+        }
+        right={
+          <>
+            <div className="client">
+              <span className="cl-label">Hermes agent</span>
+              <CodeBlock
+                label="shell"
+                code={HERMES_SETUP}
+                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
+                comment="#"
+              />
+              <p className="rail-note">
+                Any OpenAI or open-weight model.{" "}
+                <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup" {...EXT}>
+                  Hermes docs
+                </a>
+                .
+              </p>
+            </div>
+            <div className="client">
+              <span className="cl-label">OpenClaw</span>
+              <CodeBlock
+                label="~/.openclaw/openclaw.json"
+                code={OPENCLAW_CONFIG}
+                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
+              />
+              <p className="rail-note">
+                <a
+                  href="https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url"
+                  {...EXT}
+                >
+                  OpenClaw docs
+                </a>
+                .
+              </p>
+            </div>
+            <div className="client">
+              <span className="cl-label">Pi</span>
+              <CodeBlock
+                label="~/.pi/agent/models.json"
+                code={PI_CONFIG}
+                highlights={["0sink_YOUR_KEY", "gpt-5.5"]}
+              />
+              <p className="rail-note">
+                <a href="https://pi.dev/docs/latest/custom-provider" {...EXT}>
+                  Pi docs
+                </a>
+                .
+              </p>
+            </div>
+          </>
+        }
+      />
+
+      <FormatPair
+        concept="error shape"
+        hint="each format's native envelope"
+        left={
+          <>
+            <CodeBlock label="error · json" code={ANTHROPIC_ERROR_SHAPE} />
+            <p className="rail-note">
+              Reason carried in <code>error.message</code>.
+            </p>
+          </>
+        }
+        right={
+          <>
+            <CodeBlock label="error · json" code={OPENAI_ERROR_SHAPE} />
+            <p className="rail-note">
+              Reason carried in <code>error.code</code>. Covers <code>/chat/completions</code>,{" "}
+              <code>/responses</code> and Tinfoil.
+            </p>
+          </>
+        }
+      />
+
+      <SharedBand title="error codes & limits">
+        <div className="band-cols">
+          <ul className="err-list">
+            <Err code="max_tokens_required">set a max output tokens (above)</Err>
+            <Err code="unsupported_model">the id isn&apos;t served — see /models</Err>
+            <Err code="unsupported_endpoint">that path or method isn&apos;t proxied</Err>
+          </ul>
+          <ul className="err-list">
+            <Err code="insufficient_balance">the key is out of credit — top up</Err>
+            <Err code="invalid_token">the key is unknown or malformed</Err>
+            <Err code="rate_limited">too many requests right now — retry shortly</Err>
+          </ul>
         </div>
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price.
-          </span>
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>quickstart</h2>
-        <CodeBlock
-          label="anthropic · curl"
-          code={ANTHROPIC_CURL}
-          highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]}
-        />
-        <CodeBlock label="openai · curl" code={OPENAI_CURL} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
-      </section>
-
-      <section className="section">
-        <h2>claude code</h2>
-        <CodeBlock label="shell" code={CLAUDE_CODE_ENV} highlights={["0sink_YOUR_KEY"]} />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Use <code>ANTHROPIC_AUTH_TOKEN</code> — a logged-in Claude subscription silently overrides{" "}
-            <code>ANTHROPIC_API_KEY</code>. Then point it at a <a href="/models/">supported model</a>.
-          </span>
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>hermes agent</h2>
-        <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} comment="#" />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Any OpenAI or open-weight <a href="/models/">model</a> works.{" "}
-            <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup" {...EXT}>
-              Hermes docs
-            </a>
-            .
-          </span>
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>openclaw</h2>
-        <CodeBlock label="~/.openclaw/openclaw.json" code={OPENCLAW_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
-            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
-            <a
-              href="https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url"
-              {...EXT}
-            >
-              OpenClaw docs
-            </a>
-            .
-          </span>
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>pi</h2>
-        <CodeBlock label="~/.pi/agent/models.json" code={PI_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
-        <p className="note">
-          <span className="marker" aria-hidden="true">?</span>
-          <span>
-            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
-            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
-            <a href="https://pi.dev/docs/latest/custom-provider" {...EXT}>
-              Pi docs
-            </a>
-            .
-          </span>
-        </p>
-      </section>
-
-      <section className="section">
-        <h2>limits</h2>
         <ul className="dash-list">
           <li>
             <span className="lead-term">options</span> — <code>n</code> and <code>best_of</code> must be 1;
@@ -276,29 +486,14 @@ export function Api() {
             org / project ids are stripped before forwarding.
           </li>
         </ul>
-        <p className="section-copy">
-          Need a stripped feature or an unlisted model? Email{" "}
-          <a href="mailto:admin@nullsink.is">admin@nullsink.is</a> or open a{" "}
+        <p className="band-note">
+          Need a stripped feature or an unlisted model? Open a{" "}
           <a href={GITHUB_URL} {...EXT}>
             GitHub issue
           </a>
           .
         </p>
-      </section>
-
-      <section className="section">
-        <h2>errors</h2>
-        <ul className="err-list">
-          <Err code="max_tokens_required">set a max output tokens (above)</Err>
-          <Err code="unsupported_model">the model id isn&apos;t served — see /models</Err>
-          <Err code="unsupported_endpoint">that path or method isn&apos;t proxied</Err>
-          <Err code="insufficient_balance">the key is out of credit — top up</Err>
-          <Err code="invalid_token">the key is unknown or malformed</Err>
-          <Err code="rate_limited">too many requests right now — retry shortly</Err>
-        </ul>
-        <CodeBlock label="openai · tinfoil" code={ERROR_SHAPE} />
-        <CodeBlock label="anthropic" code={ANTHROPIC_ERROR_SHAPE} />
-      </section>
+      </SharedBand>
     </Layout>
   );
 }

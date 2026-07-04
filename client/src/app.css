@@ -1069,6 +1069,130 @@ button:disabled { cursor: not-allowed; }
    (they're set on top of this), so a placeholder value in a comment still stands out. */
 .code-comment { color: var(--ns-muted); font-style: italic; }
 
+/* ============================================================================
+   /api — side-by-side format layout. One primitive (.fpair) renders every
+   format-specific concept as a two-up: LEFT rail = Anthropic Messages, RIGHT rail
+   = OpenAI-compatible, aligned by concept. Format-agnostic parts render as
+   full-width .band bands. Coins reuse the endpoint-row .ep-disc discs.
+   ============================================================================ */
+
+/* coins for rail-heads + the legend — the same discs as the endpoint rows (.ep-disc),
+   but left-aligned (no margin-left:auto) and overlapped when a rail carries two. */
+.coins { display: inline-flex; align-items: center; flex: none; }
+.coins .ep-disc:not(:first-child) { margin-left: -8px; }
+
+/* legend — teach the two-rail reading model once: anthropic | shared | openai */
+.legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-top: 1px solid var(--ns-line);
+  border-bottom: 1px solid var(--ns-line);
+  margin-top: 34px;
+}
+.legend-item { display: flex; align-items: center; gap: 12px; padding: 15px 18px; }
+.legend-item + .legend-item { border-left: 1px solid var(--ns-line); }
+.legend-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-bone); }
+
+/* the format-pair primitive: an eyebrow (concept + optional hint) over a two-rail grid */
+.fpair-eyebrow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.concept {
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ns-bone);
+  font-weight: var(--ns-weight-display);
+  display: inline-flex;
+  align-items: center;
+}
+.concept::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--ns-acid);   /* the pairing tick — every paired concept carries it */
+  margin-right: 10px;
+}
+.fpair-hint { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ns-muted); }
+.fpair-hint.req { background: var(--ns-acid); color: var(--ns-ink); padding: 3px 8px; font-weight: var(--ns-weight-display); letter-spacing: 0.06em; }
+
+.fpair-grid { display: grid; grid-template-columns: 1fr 1fr; }
+.rail { min-width: 0; display: flex; flex-direction: column; }
+.fpair-grid > .rail:first-child { padding-right: 28px; }
+.fpair-grid > .rail:last-child { padding-left: 28px; border-left: 1px solid var(--ns-line); }
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--ns-line);
+}
+.rail-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-muted); }
+.rail-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rail-note { font-size: 12.5px; color: var(--ns-muted); line-height: 1.5; margin: 0; }
+.rail-note code { white-space: normal; }
+/* rail/band-body already space their children; drop the components' own leading margins */
+.rail-body .codeblock, .band-body .codeblock, .client .codeblock { margin-top: 0; }
+.band-body .kv { margin-top: 0; }
+
+/* max-output-tokens field — shown as it appears in the body, no box, no nested chip */
+.field { font-size: 18px; letter-spacing: -0.01em; }
+.field-key { color: var(--ns-bone); }
+.field-val { color: var(--ns-muted); }
+
+/* served-model chips + the sealed Tinfoil open-weight sub-group */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.subgroup { display: flex; flex-direction: column; gap: 8px; }
+.subgroup-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 7px; color: var(--ns-muted); }
+.subgroup-label.seal { color: var(--ns-seal); }
+.subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
+
+/* client sub-block: one tool's setup inside a rail (label over its snippet) */
+.client { display: flex; flex-direction: column; gap: 6px; }
+.cl-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ns-muted); }
+
+/* shared band (format-agnostic) — borrows the /models card language: a neutral left rail + a filled
+   bone tag + an underlined header, so it reads as an "applies to both" object, not a grey box. */
+.band {
+  border: 1px solid var(--ns-line);
+  border-left: 3px solid var(--ns-muted);
+  padding: 22px 24px;
+}
+.band-head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding-bottom: 13px; margin-bottom: 18px;
+  border-bottom: 1px solid var(--ns-line);
+}
+.band-tag {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-void);
+  background: var(--ns-bone);   /* filled neutral pill, echoing /models .pill — says "both" */
+  padding: 3px 8px;
+  flex: none;
+}
+.band-head h2 { font-size: 13px; font-weight: var(--ns-weight-display); letter-spacing: 0.02em; text-transform: uppercase; margin: 0; color: var(--ns-bone); }
+.band-sub { font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ns-muted); }
+.band-body { display: flex; flex-direction: column; gap: 14px; }
+.band-note { font-size: 13px; color: var(--ns-muted); line-height: 1.55; margin: 0; }
+.band-note a { color: var(--ns-bone); }
+.band-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 40px; }
+/* inside a band the error rows stack (code on its own line, cause under it) — one consistent shape */
+.band .err-list { margin-top: 0; }
+.band .err-list li { flex-direction: column; align-items: flex-start; gap: 3px; }
+
+/* responsive: rails stack, concept grouping preserved */
+@media (max-width: 720px) {
+  .fpair-grid { grid-template-columns: 1fr; }
+  .fpair-grid > .rail:first-child { padding-right: 0; padding-bottom: 24px; border-bottom: 1px solid var(--ns-line); }
+  .fpair-grid > .rail:last-child { padding-left: 0; padding-top: 24px; border-left: none; }
+  .legend { grid-template-columns: 1fr; }
+  .legend-item + .legend-item { border-left: none; border-top: 1px solid var(--ns-line); }
+  .band-cols { grid-template-columns: 1fr; gap: 0; }
+}
+
 /* ---- footer — the never-collect chips, then a thin row with the links ---- */
 .foot {
   margin-top: 64px;
