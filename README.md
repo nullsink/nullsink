@@ -134,6 +134,48 @@ Anthropic (Claude):
 }
 ```
 
+### Open WebUI
+
+[Open WebUI](https://github.com/open-webui/open-webui) is OpenAI-protocol only, so through nullsink it reaches gpt-5.5 and the open-weight models (not Claude — nullsink serves Claude only on `/v1/messages`). Add an OpenAI connection in ⚙️ **Admin Settings → Connections → OpenAI → ＋ Add Connection** (URL `https://nullsink.is/v1`, key `0sink_YOUR_KEY`), or by env:
+
+```sh
+ENABLE_OPENAI_API=true
+OPENAI_API_BASE_URLS=https://nullsink.is/v1
+OPENAI_API_KEYS=0sink_YOUR_KEY
+```
+
+Restrict the connection's **Model IDs** to the OpenAI-format ids (`gpt-5.5`, `gpt-5.5-pro`, `gpt-oss-120b`, `glm-5-2`, …) — nullsink lists Claude in `/v1/models`, but Claude is only callable on the Anthropic path. [Docs](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/).
+
+### LibreChat
+
+[LibreChat](https://github.com/danny-avila/LibreChat) reaches **both** formats — gpt/open-weight via a custom endpoint, and Claude via its built-in Anthropic endpoint.
+
+OpenAI + open-weight — in `librechat.yaml`:
+
+```yaml
+endpoints:
+  custom:
+    - name: 'nullsink'
+      apiKey: '${NULLSINK_API_KEY}'
+      baseURL: 'https://nullsink.is/v1'
+      models:
+        default: ['gpt-5.5', 'gpt-5.5-pro', 'gpt-oss-120b', 'glm-5-2', 'kimi-k2-6']
+        fetch: false
+      titleConvo: true
+      titleModel: 'gpt-5.5'
+```
+
+Claude — in `.env` (the built-in Anthropic endpoint; base URL is the **root**):
+
+```sh
+NULLSINK_API_KEY=0sink_YOUR_KEY                # for the ${NULLSINK_API_KEY} above
+ANTHROPIC_API_KEY=0sink_YOUR_KEY
+ANTHROPIC_REVERSE_PROXY=https://nullsink.is    # root — the SDK appends /v1/messages
+ANTHROPIC_MODELS=claude-opus-4-8,claude-sonnet-5,claude-haiku-4-5,claude-fable-5
+```
+
+[Custom-endpoint docs](https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/custom_endpoint) · [.env docs](https://www.librechat.ai/docs/configuration/dotenv).
+
 ### Gotchas
 
 - A **reasoning** model needs `reasoning: true` on its entry, or the client treats it as non-reasoning and the thinking controls never appear.
