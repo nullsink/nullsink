@@ -1064,6 +1064,10 @@ button:disabled { cursor: not-allowed; }
 /* the tinted substrings inside a sample (the placeholder key, the model id): acid TEXT, like .token —
    "this is the part you change". Acid-as-block (.hl) stays reserved for prose emphasis. */
 .code-hl { color: var(--ns-acid); }
+/* comment text inside a sample (the `#`/`//` annotations): dimmed + italic so it reads as a note beside the
+   commands, never mistaken for something to type. Highlight substrings inside a comment keep their acid tint
+   (they're set on top of this), so a placeholder value in a comment still stands out. */
+.code-comment { color: var(--ns-muted); font-style: italic; }
 
 /* ---- footer — the never-collect chips, then a thin row with the links ---- */
 .foot {

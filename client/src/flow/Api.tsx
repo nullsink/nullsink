@@ -32,6 +32,41 @@ const CLAUDE_CODE_ENV = `export ANTHROPIC_BASE_URL=https://nullsink.is
 export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY
 claude`;
 
+const HERMES_SETUP = `hermes model              # choose "Custom endpoint"
+#   base url   https://nullsink.is/v1
+#   api key    0sink_YOUR_KEY
+#   model      gpt-5.5
+hermes chat -q "hello"`;
+
+const OPENCLAW_CONFIG = `{
+  models: {
+    providers: {
+      nullsink: {
+        baseUrl: "https://nullsink.is/v1",
+        apiKey: "0sink_YOUR_KEY",
+        api: "openai-completions",
+        models: [{ id: "gpt-5.5", name: "gpt-5.5", reasoning: true }],
+      },
+    },
+  },
+  agents: {
+    defaults: {
+      model: { primary: "nullsink/gpt-5.5" },
+    },
+  },
+}`;
+
+const PI_CONFIG = `{
+  "providers": {
+    "nullsink": {
+      "baseUrl": "https://nullsink.is/v1",
+      "api": "openai-completions",
+      "apiKey": "0sink_YOUR_KEY",
+      "models": [{ "id": "gpt-5.5", "reasoning": true }]
+    }
+  }
+}`;
+
 // The error envelope is each provider's NATIVE shape (so a stock SDK classifies the failure), and BOTH are
 // shown below. The OpenAI form covers /chat/completions, /responses, AND Tinfoil (OpenAI-compatible), carrying
 // the reason in `code`; Anthropic's /v1/messages wears its own, carrying the reason in `message`. Same reason
@@ -147,7 +182,14 @@ export function Api() {
           <Ep marks={[AnthropicMark]} method="POST" path="/v1/messages" />
           <Ep marks={[OpenAiMark, TinfoilMark]} method="POST" path="/v1/chat/completions" />
           <Ep marks={[OpenAiMark]} method="POST" path="/v1/responses" />
+          <Ep marks={[]} method="GET" path="/v1/models" />
         </div>
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price.
+          </span>
+        </p>
       </section>
 
       <section className="section">
@@ -168,6 +210,56 @@ export function Api() {
           <span>
             Use <code>ANTHROPIC_AUTH_TOKEN</code> — a logged-in Claude subscription silently overrides{" "}
             <code>ANTHROPIC_API_KEY</code>. Then point it at a <a href="/models/">supported model</a>.
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>hermes agent</h2>
+        <CodeBlock label="shell" code={HERMES_SETUP} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} comment="#" />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Any OpenAI or open-weight <a href="/models/">model</a> works.{" "}
+            <a href="https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup" {...EXT}>
+              Hermes docs
+            </a>
+            .
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>openclaw</h2>
+        <CodeBlock label="~/.openclaw/openclaw.json" code={OPENCLAW_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
+            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
+            <a
+              href="https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url"
+              {...EXT}
+            >
+              OpenClaw docs
+            </a>
+            .
+          </span>
+        </p>
+      </section>
+
+      <section className="section">
+        <h2>pi</h2>
+        <CodeBlock label="~/.pi/agent/models.json" code={PI_CONFIG} highlights={["0sink_YOUR_KEY", "gpt-5.5"]} />
+        <p className="note">
+          <span className="marker" aria-hidden="true">?</span>
+          <span>
+            Swap <code>gpt-5.5</code> for any OpenAI or open-weight <a href="/models/">model</a>. For Claude,
+            add an <code>anthropic-messages</code> provider with base URL <code>https://nullsink.is</code>.{" "}
+            <a href="https://pi.dev/docs/latest/custom-provider" {...EXT}>
+              Pi docs
+            </a>
+            .
           </span>
         </p>
       </section>

@@ -118,6 +118,22 @@ export function providerOf(model: string): string | undefined {
   return findModel(model)?.provider;
 }
 
+// One entry in the served-model catalog: a price-book id, its provider tag, and the four USD/Mtok rates
+// exactly as they sit in prices.json (pre-scaling — these are the human-facing dollar figures the /models
+// page shows, not the internal micro-dollar rates).
+export type ModelListing = { id: string; provider: string; input: number; output: number; cache_read: number; cache_write: number };
+
+// The whole price book, enumerated — the ONLY place RATES is listed rather than point-queried by id. Powers
+// GET /v1/models: the handler filters this to the models an ACTIVE provider owns, giving a catalog whose ids
+// are exactly the set that won't 400 unsupported_model. Sorted by id for a stable, deterministic listing.
+// (An upstream's own /v1/models can't stand in: none return prices, and each returns its FULL catalog, not
+// our curated served subset.)
+export function pricedModels(): ModelListing[] {
+  return RAW_PRICES.map(([id, c]) => ({ id, provider: c.provider, input: c.input, output: c.output, cache_read: c.cache_read, cache_write: c.cache_write })).sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
+}
+
 // Model ids whose REAL billing falls outside the flat per-token rate card: bundled fee-bearing built-in
 // tools (web search, deep research — a PER-CALL fee no token rate covers) and non-text token rates
 // (audio/realtime — audio tokens bill ~16× the text input rate, and our usage mapping doesn't split them
