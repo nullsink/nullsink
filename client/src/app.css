@@ -632,8 +632,6 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ---- /api endpoint + error reference — method · path · note in hairline rows --- */
-.ep-group { margin-top: 16px; }
-.ep-group + .ep-group { margin-top: 22px; }
 .ep {
   display: flex;
   flex-wrap: wrap;
@@ -644,7 +642,6 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the far right; the copy button sits next to the path */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -661,7 +658,7 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep .copy { margin-left: 4px; } /* sits just after the path; the coins get pushed to the far right (.ep-marks) */
+.ep .copy { margin-left: 4px; } /* trails the path — endpoint rows carry no coins (the rail head / band marks the format) */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }
@@ -1003,8 +1000,6 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ---- docs prose + inline code — /api and the landing explainers --------- */
-/* short explanatory paragraph inside a docs section — sized between the body prose and the legal fine print */
-.section-copy { margin: 10px 0 0; color: var(--ns-bone); font-size: 14px; line-height: 1.6; }
 /* inline code — a hairline chip, echoing the site's existing "bordered = literal/control" language
    (the copy buttons, the coming-soon tag): transparent fill, 1px line border, a touch smaller than
    the prose around it. Marks "this exact string" without spending accent budget. Scoped to inline
@@ -1068,6 +1063,140 @@ button:disabled { cursor: not-allowed; }
    commands, never mistaken for something to type. Highlight substrings inside a comment keep their acid tint
    (they're set on top of this), so a placeholder value in a comment still stands out. */
 .code-comment { color: var(--ns-muted); font-style: italic; }
+
+/* ============================================================================
+   /api — side-by-side format layout. One primitive (.fpair) renders every
+   format-specific concept as a two-up: LEFT rail = Anthropic Messages, RIGHT rail
+   = OpenAI-compatible, aligned by concept. Format-agnostic parts render as
+   full-width .band bands. Coins reuse the endpoint-row .ep-disc discs.
+   ============================================================================ */
+
+/* coins for rail-heads + the legend — the same discs as the endpoint rows (.ep-disc),
+   but left-aligned (no margin-left:auto) and overlapped when a rail carries two. */
+.coins { display: inline-flex; align-items: center; flex: none; }
+.coins .ep-disc:not(:first-child) { margin-left: -8px; }
+
+/* legend — teach the two-rail reading model once: anthropic | shared | openai */
+.legend {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  border-top: 1px solid var(--ns-line);
+  border-bottom: 1px solid var(--ns-line);
+  margin-top: 34px;
+}
+.legend-item { display: flex; align-items: center; gap: 12px; padding: 15px 18px; }
+.legend-item + .legend-item { border-left: 1px solid var(--ns-line); }
+.legend-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-bone); }
+
+/* the format-pair primitive: an eyebrow (concept + optional hint) over a two-rail grid */
+.fpair-eyebrow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+.concept {
+  margin: 0; /* it's an <h2> now — drop the UA heading margin */
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ns-bone);
+  font-weight: var(--ns-weight-display);
+  display: inline-flex;
+  align-items: center;
+}
+.concept::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--ns-acid);   /* the pairing tick — every paired concept carries it */
+  margin-right: 10px;
+}
+.fpair-hint { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ns-muted); }
+
+.fpair-grid { display: grid; grid-template-columns: 1fr 1fr; }
+.rail { min-width: 0; display: flex; flex-direction: column; }
+.fpair-grid > .rail:first-child { padding-right: 28px; }
+.fpair-grid > .rail:last-child { padding-left: 28px; border-left: 1px solid var(--ns-line); }
+.rail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--ns-line);
+}
+.rail-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-bone); } /* the coins are aria-hidden, so this is the load-bearing format label — keep it bright */
+.rail-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.rail-note { font-size: 12.5px; color: var(--ns-muted); line-height: 1.5; margin: 0; }
+.rail-note code { white-space: normal; }
+/* rail/band-body already space their children; drop the components' own leading margins */
+.rail-body .codeblock, .band-body .codeblock { margin-top: 0; }
+.band-body .kv { margin: 0; } /* the <dl> keeps its UA bottom margin otherwise — that was the extra gap under base url */
+
+/* served-model chips + the sealed Tinfoil open-weight sub-group */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.subgroup { display: flex; flex-direction: column; gap: 8px; }
+.subgroup-label { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; display: inline-flex; align-items: center; gap: 7px; color: var(--ns-muted); }
+.subgroup-label.seal { color: var(--ns-seal); }
+.subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
+
+/* shared band (format-agnostic) — a tier-head heading (the three provider coins + title over a hairline), then
+   the content set off by just a left accent rail (no box). The rail lives on the CARD body, not the heading;
+   the coins (all three providers) say "shared". */
+.band-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ns-line); /* the tier-head hairline, kept neutral — shared belongs to neither format */
+}
+.band-head h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em; /* tier-label proportions */
+  text-transform: uppercase;
+  font-weight: var(--ns-weight-display);
+  color: var(--ns-bone);
+}
+.band-sub { font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ns-muted); }
+.band-body {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-left: 3px solid var(--ns-muted); /* just the left rail — no box */
+  padding-left: 20px;
+}
+.band-body .kvrow { padding: 2px 0; } /* single base-url row — trim the list-row padding so the note sits close */
+.band-note { font-size: 13px; color: var(--ns-muted); line-height: 1.55; margin: 0; }
+.band-note a { color: var(--ns-bone); }
+.band-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 40px; }
+/* inside a band the error rows stack (code on its own line, cause under it) — one consistent shape */
+.band .err-list { margin-top: 0; }
+.band .err-list li { flex-direction: column; align-items: flex-start; gap: 3px; }
+
+/* the doc breaks out of the 760 shell to a wider measure so the two-format columns can breathe — the same
+   trick the home uses; the header + footer stay in the shell, so they're identical across pages. */
+.api-doc {
+  width: min(1000px, calc(100vw - 40px));
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+/* the two intro notes sit side by side so the wide doc isn't left half-empty (stack on mobile) */
+.note-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 40px; align-items: start; }
+.note-cols .note { margin: 0; }
+/* the base url — the value you point a client at — reads acid, like the key and model id in the samples */
+.band .kvval { color: var(--ns-acid); }
+code.code-url { color: var(--ns-acid); }
+
+/* responsive: rails stack, concept grouping preserved */
+@media (max-width: 720px) {
+  .fpair-grid { grid-template-columns: 1fr; }
+  .fpair-grid > .rail:first-child { padding-right: 0; padding-bottom: 24px; border-bottom: 1px solid var(--ns-line); }
+  .fpair-grid > .rail:last-child { padding-left: 0; padding-top: 24px; border-left: none; }
+  .legend { grid-template-columns: 1fr; }
+  .legend-item + .legend-item { border-left: none; border-top: 1px solid var(--ns-line); }
+  .band-cols { grid-template-columns: 1fr; gap: 0; }
+  .note-cols { grid-template-columns: 1fr; }
+}
 
 /* ---- footer — the never-collect chips, then a thin row with the links ---- */
 .foot {
