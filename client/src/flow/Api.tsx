@@ -103,26 +103,25 @@ function Rail({ side, children }: { side: keyof typeof RAILS; children: ReactNod
   );
 }
 
-// A format-specific concept, rendered as an aligned two-up: an eyebrow (the concept + an optional hint —
-// `req` makes the hint an acid "required" badge) over the Anthropic | OpenAI rails.
+// A format-specific concept, rendered as an aligned two-up: an eyebrow (the concept heading + an optional
+// hint) over the Anthropic | OpenAI rails. The concept is a real <h2> so the section outline stays intact
+// for screen readers (it matches the <h2> a SharedBand renders).
 function FormatPair({
   concept,
   hint,
-  req = false,
   left,
   right,
 }: {
   concept: string;
   hint?: string;
-  req?: boolean;
   left: ReactNode;
   right: ReactNode;
 }) {
   return (
     <section className="section">
       <div className="fpair-eyebrow">
-        <span className="concept">{concept}</span>
-        {hint && <span className={"fpair-hint" + (req ? " req" : "")}>{hint}</span>}
+        <h2 className="concept">{concept}</h2>
+        {hint && <span className="fpair-hint">{hint}</span>}
       </div>
       <div className="fpair-grid">
         <Rail side="anthropic">{left}</Rail>
@@ -132,7 +131,8 @@ function FormatPair({
   );
 }
 
-// A format-agnostic fact: a full-width band with the filled "shared" tag, a title, an optional sub-note.
+// A format-agnostic fact: a full-width band headed by the three provider coins (the "shared" marker), a
+// title, and an optional sub-note, over a pcard-style left-railed body.
 function SharedBand({ title, sub, children }: { title: string; sub?: string; children: ReactNode }) {
   return (
     <section className="section">
@@ -215,7 +215,9 @@ export function Api() {
         </div>
       </section>
 
-      <div className="legend" aria-label="how to read this page">
+      {/* Decorative visual key for the coins — the two-rail model is already conveyed in real text by the
+          intro note and each rail's visible name, so this is hidden from the a11y tree to avoid SR noise. */}
+      <div className="legend" aria-hidden="true">
         <div className="legend-item">
           <Coins marks={[AnthropicMark]} />
           <span className="legend-name">anthropic messages</span>

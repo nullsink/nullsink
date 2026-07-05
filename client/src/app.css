@@ -632,8 +632,6 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ---- /api endpoint + error reference — method · path · note in hairline rows --- */
-.ep-group { margin-top: 16px; }
-.ep-group + .ep-group { margin-top: 22px; }
 .ep {
   display: flex;
   flex-wrap: wrap;
@@ -644,7 +642,6 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px;
 }
 .ep:last-child { border-bottom: none; }
-.ep-marks { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: auto; } /* the coins sit at the far right; the copy button sits next to the path */
 /* each provider mark sits in an acid-ringed coin — the page's signature accent */
 .ep-disc {
   display: inline-flex;
@@ -661,7 +658,7 @@ button:disabled { cursor: not-allowed; }
 .ep-disc.sealed { border-color: var(--ns-seal); } /* Tinfoil — the sealed-enclave coin takes the purple seal ring, not acid */
 .ep-method { flex: none; min-width: 40px; color: var(--ns-acid); font-size: 11px; font-weight: var(--ns-weight-display); letter-spacing: 0.08em; }
 .ep-path { color: var(--ns-bone); }
-.ep .copy { margin-left: 4px; } /* sits just after the path; the coins get pushed to the far right (.ep-marks) */
+.ep .copy { margin-left: 4px; } /* trails the path — endpoint rows carry no coins (the rail head / band marks the format) */
 
 /* the error table shares the endpoint rhythm: the code, then its cause */
 .err-list { list-style: none; margin: 16px 0 0; padding: 0; }
@@ -1003,8 +1000,6 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ---- docs prose + inline code — /api and the landing explainers --------- */
-/* short explanatory paragraph inside a docs section — sized between the body prose and the legal fine print */
-.section-copy { margin: 10px 0 0; color: var(--ns-bone); font-size: 14px; line-height: 1.6; }
 /* inline code — a hairline chip, echoing the site's existing "bordered = literal/control" language
    (the copy buttons, the coming-soon tag): transparent fill, 1px line border, a touch smaller than
    the prose around it. Marks "this exact string" without spending accent budget. Scoped to inline
@@ -1096,6 +1091,7 @@ button:disabled { cursor: not-allowed; }
 /* the format-pair primitive: an eyebrow (concept + optional hint) over a two-rail grid */
 .fpair-eyebrow { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
 .concept {
+  margin: 0; /* it's an <h2> now — drop the UA heading margin */
   font-size: 12px;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1113,7 +1109,6 @@ button:disabled { cursor: not-allowed; }
   margin-right: 10px;
 }
 .fpair-hint { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ns-muted); }
-.fpair-hint.req { background: var(--ns-acid); color: var(--ns-ink); padding: 3px 8px; font-weight: var(--ns-weight-display); letter-spacing: 0.06em; }
 
 .fpair-grid { display: grid; grid-template-columns: 1fr 1fr; }
 .rail { min-width: 0; display: flex; flex-direction: column; }
@@ -1127,7 +1122,7 @@ button:disabled { cursor: not-allowed; }
   margin-bottom: 16px;
   border-bottom: 1px solid var(--ns-line);
 }
-.rail-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-muted); }
+.rail-name { font-size: 12px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ns-bone); } /* the coins are aria-hidden, so this is the load-bearing format label — keep it bright */
 .rail-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .rail-note { font-size: 12.5px; color: var(--ns-muted); line-height: 1.5; margin: 0; }
 .rail-note code { white-space: normal; }
