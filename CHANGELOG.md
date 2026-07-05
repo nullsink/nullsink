@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/nullsink/nullsink/compare/v1.6.0...v1.6.1) (2026-07-05)
+
+
+### Bug Fixes
+
+* **client:** rename /api coins class off the shared .coins (pay-picker regression) ([#61](https://github.com/nullsink/nullsink/issues/61)) ([8dcc6fa](https://github.com/nullsink/nullsink/commit/8dcc6fa922fb3ef6b03496fbf47ba4e5378fa59b))
+
 ## [1.6.0](https://github.com/nullsink/nullsink/compare/v1.5.0...v1.6.0) (2026-07-05)
 
 
