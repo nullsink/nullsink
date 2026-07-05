@@ -1133,7 +1133,7 @@ button:disabled { cursor: not-allowed; }
 .rail-note code { white-space: normal; }
 /* rail/band-body already space their children; drop the components' own leading margins */
 .rail-body .codeblock, .band-body .codeblock { margin-top: 0; }
-.band-body .kv { margin-top: 0; }
+.band-body .kv { margin: 0; } /* the <dl> keeps its UA bottom margin otherwise — that was the extra gap under base url */
 
 /* served-model chips + the sealed Tinfoil open-weight sub-group */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
