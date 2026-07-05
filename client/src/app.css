@@ -1180,6 +1180,9 @@ button:disabled { cursor: not-allowed; }
   margin-left: 50%;
   transform: translateX(-50%);
 }
+/* the two intro notes sit side by side so the wide doc isn't left half-empty (stack on mobile) */
+.note-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 40px; align-items: start; }
+.note-cols .note { margin: 0; }
 /* the base url — the value you point a client at — reads acid, like the key and model id in the samples */
 .band .kvval { color: var(--ns-acid); }
 code.code-url { color: var(--ns-acid); }
@@ -1192,6 +1195,7 @@ code.code-url { color: var(--ns-acid); }
   .legend { grid-template-columns: 1fr; }
   .legend-item + .legend-item { border-left: none; border-top: 1px solid var(--ns-line); }
   .band-cols { grid-template-columns: 1fr; gap: 0; }
+  .note-cols { grid-template-columns: 1fr; }
 }
 
 /* ---- footer — the never-collect chips, then a thin row with the links ---- */

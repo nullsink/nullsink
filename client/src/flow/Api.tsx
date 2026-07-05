@@ -187,22 +187,24 @@ export function Api() {
       <div className="api-doc">
       <section className="section">
         <h1 className="page-h1">api</h1>
-        <p className="note">
-          <span className="marker" aria-hidden="true">→</span>
-          <span>
-            <Ns /> mirrors the Anthropic and OpenAI wire formats. Point a stock SDK at it — only the base URL
-            and the key change. <a href="/#buy">Mint a key</a>; model ids are on the{" "}
-            <a href="/models/">models</a> page.
-          </span>
-        </p>
-        <p className="note">
-          <span className="marker" aria-hidden="true">!</span>
-          <span>
-            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
-            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
-            <code>max_tokens_required</code>.
-          </span>
-        </p>
+        <div className="note-cols">
+          <p className="note">
+            <span className="marker" aria-hidden="true">→</span>
+            <span>
+              <Ns /> mirrors the Anthropic and OpenAI wire formats. Point a stock SDK at it — only the base
+              URL and the key change. <a href="/#buy">Mint a key</a>; model ids are on the{" "}
+              <a href="/models/">models</a> page.
+            </span>
+          </p>
+          <p className="note">
+            <span className="marker" aria-hidden="true">!</span>
+            <span>
+              <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
+              (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
+              <code>max_tokens_required</code>.
+            </span>
+          </p>
+        </div>
       </section>
 
       {/* Decorative visual key for the coins — the two-rail model is already conveyed in real text by the
