@@ -79,7 +79,7 @@ const SHARED_MARKS = [AnthropicMark, OpenAiMark, TinfoilMark];
 // Provider coins — the page's signature accent, shared by the legend and every rail head.
 function Coins({ marks }: { marks: ComponentType<{ className?: string }>[] }) {
   return (
-    <span className="coins" aria-hidden="true">
+    <span className="ep-coins" aria-hidden="true">
       {marks.map((M, i) => (
         <span key={i} className={"ep-disc" + (SEALED.has(M) ? " sealed" : "")}>
           <M className="ep-ico" />
