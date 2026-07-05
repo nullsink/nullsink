@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/nullsink/nullsink/compare/v1.5.0...v1.6.0) (2026-07-05)
+
+
+### Features
+
+* **client:** rebuild /api as a side-by-side two-format reference ([#57](https://github.com/nullsink/nullsink/issues/57)) ([e60286c](https://github.com/nullsink/nullsink/commit/e60286ce9c3e74c3e6d21f383973d33927585f68))
+
+
+### Bug Fixes
+
+* **metrics:** flush the final window after the shutdown drain ([#59](https://github.com/nullsink/nullsink/issues/59)) ([a686d71](https://github.com/nullsink/nullsink/commit/a686d71ce3ca986a1832861b58b83608adabbdff))
+
 ## [1.5.0](https://github.com/nullsink/nullsink/compare/v1.4.1...v1.5.0) (2026-07-04)
 
 
