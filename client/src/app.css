@@ -1071,10 +1071,11 @@ button:disabled { cursor: not-allowed; }
    full-width .band bands. Coins reuse the endpoint-row .ep-disc discs.
    ============================================================================ */
 
-/* coins for rail-heads + the legend — the same discs as the endpoint rows (.ep-disc),
-   but left-aligned (no margin-left:auto) and overlapped when a rail carries two. */
-.coins { display: inline-flex; align-items: center; flex: none; }
-.coins .ep-disc:not(:first-child) { margin-left: -8px; }
+/* coins for rail-heads + the legend — the same discs as the endpoint rows (.ep-disc), left-aligned (no
+   margin-left:auto) and overlapped when a rail carries two. Named .ep-coins, NOT .coins: the pay-rail picker
+   is <div class="seg coins">, so a bare .coins rule leaks onto it and breaks its equal-width segments. */
+.ep-coins { display: inline-flex; align-items: center; flex: none; }
+.ep-coins .ep-disc:not(:first-child) { margin-left: -8px; }
 
 /* legend — teach the two-rail reading model once: anthropic | shared | openai */
 .legend {
