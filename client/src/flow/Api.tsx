@@ -195,24 +195,14 @@ export function Api() {
             <a href="/models/">models</a> page.
           </span>
         </p>
-        <div className="note-cols">
-          <p className="note">
-            <span className="marker" aria-hidden="true">?</span>
-            <span>
-              This page reads as two columns: the <strong>left rail</strong> is the Anthropic Messages format,
-              the <strong>right rail</strong> is OpenAI-compatible. Each row lines up the same concept in both;
-              full-width bands apply to both.
-            </span>
-          </p>
-          <p className="note">
-            <span className="marker" aria-hidden="true">!</span>
-            <span>
-              <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
-              (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
-              <code>max_tokens_required</code>.
-            </span>
-          </p>
-        </div>
+        <p className="note">
+          <span className="marker" aria-hidden="true">!</span>
+          <span>
+            <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
+            (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
+            <code>max_tokens_required</code>.
+          </span>
+        </p>
       </section>
 
       {/* Decorative visual key for the coins — the two-rail model is already conveyed in real text by the
