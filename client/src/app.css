@@ -1142,13 +1142,9 @@ button:disabled { cursor: not-allowed; }
 .subgroup-label.seal { color: var(--ns-seal); }
 .subgroup.seal .model-chip { border-color: color-mix(in srgb, var(--ns-seal) 55%, transparent); }
 
-/* shared band (format-agnostic) — a left accent rail (the /models pcard language) with the three provider
-   coins as a header marker over a neutral hairline. The rail marks it as a distinct "applies to both" object;
-   the coins (all three providers at once) say "shared" without a text tag. */
-.band {
-  border-left: 3px solid var(--ns-muted); /* the left rail, like the /models pcard-rail — neutral (shared belongs to neither format) */
-  padding-left: 22px;
-}
+/* shared band (format-agnostic) — mirrors the /models layout exactly: a tier-head-style heading (the three
+   provider coins + title over a hairline), THEN the content as a pcard-style card (a hairline box with a left
+   accent rail). The rail lives on the CARD body, not the heading; the coins (all three providers) say "shared". */
 .band-head {
   display: flex;
   align-items: center;
@@ -1166,7 +1162,15 @@ button:disabled { cursor: not-allowed; }
   color: var(--ns-bone);
 }
 .band-sub { font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ns-muted); }
-.band-body { margin-top: 18px; display: flex; flex-direction: column; gap: 14px; }
+.band-body {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--ns-line);
+  border-left: 3px solid var(--ns-muted); /* the /models pcard rail — on the card body, not the heading */
+  padding: 18px 20px;
+}
 .band-note { font-size: 13px; color: var(--ns-muted); line-height: 1.55; margin: 0; }
 .band-note a { color: var(--ns-bone); }
 .band-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 40px; }
