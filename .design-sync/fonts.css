@@ -1,0 +1,24 @@
+/* IBM Plex Mono for the design-system bundle (latin, 300/400/600), pulled from the same
+ * @fontsource package the app vendors. The app's own fonts.css uses `font-display: optional`
+ * (a first-paint optimization); here designs must always end up in Plex Mono, so `swap`. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("../client/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-300-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../client/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../client/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+}

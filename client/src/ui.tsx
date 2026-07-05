@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
 
-// The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
-// so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
+/**
+ * The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
+ * so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
+ * @category brand
+ */
 export function Mark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 350 350" role="img" aria-label="nullsink mark" fill="currentColor">
@@ -18,10 +21,6 @@ export function Mark({ className }: { className?: string }) {
   );
 }
 
-// The sink mark with the "alive" pulse: seven squares fade on a shared 2.2s loop, each phase-offset by a
-// per-square animation-delay so the funnel breathes. The offsets live in app.css (.pulse-mark rect:nth-child)
-// as static CSS, so they survive the strict production CSP, which drops inline style attributes. Decorative
-// motion → yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
 const PULSE_GEO = [
   { x: 0, y: 0, w: 70, h: 70 },
   { x: 140, y: 0, w: 70, h: 70 },
@@ -31,6 +30,13 @@ const PULSE_GEO = [
   { x: 140, y: 140, w: 70, h: 70 },
   { x: 0, y: 280, w: 350, h: 70 },
 ];
+/**
+ * The sink mark with the "alive" pulse: seven squares fade on a shared 2.2s loop, each phase-offset by a
+ * per-square animation-delay so the funnel breathes. The offsets live in app.css (.pulse-mark rect:nth-child)
+ * as static CSS, so they survive the strict production CSP, which drops inline style attributes. Decorative
+ * motion → yields to prefers-reduced-motion (see .pulse-mark in app.css). This is the brand wordmark's mark.
+ * @category brand
+ */
 export function PulseMark({ className }: { className?: string }) {
   return (
     <svg
@@ -47,9 +53,12 @@ export function PulseMark({ className }: { className?: string }) {
   );
 }
 
-// Provider marks for the /models page. Single-path, monochrome, fill=currentColor (viewBox 0 0 40 40) —
-// sourced from models.dev's logo set and inlined (NOT <img>) so they inherit `color` and stay on a
-// self-origin page under CSP `default-src 'self'`. Same inline + currentColor treatment as the brand Mark.
+/**
+ * OpenAI's provider mark for the /models page. Single-path, monochrome, fill=currentColor (viewBox 0 0 40 40) —
+ * sourced from models.dev's logo set and inlined (NOT <img>) so it inherits `color` and stays on a
+ * self-origin page under CSP `default-src 'self'`. Same inline + currentColor treatment as the brand Mark.
+ * @category providers
+ */
 export function OpenAiMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 40" role="img" aria-label="OpenAI" fill="currentColor">
@@ -58,6 +67,10 @@ export function OpenAiMark({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Anthropic's provider mark — same inline + currentColor treatment as the other provider marks.
+ * @category providers
+ */
 export function AnthropicMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 40" role="img" aria-label="Anthropic" fill="currentColor">
@@ -66,6 +79,10 @@ export function AnthropicMark({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Google Gemini's provider mark — same inline + currentColor treatment as the other provider marks.
+ * @category providers
+ */
 export function GeminiMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 40" role="img" aria-label="Google Gemini" fill="currentColor">
@@ -74,6 +91,10 @@ export function GeminiMark({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Groq's provider mark — same inline + currentColor treatment as the other provider marks.
+ * @category providers
+ */
 export function GroqMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 40 40" role="img" aria-label="Groq" fill="currentColor">
@@ -82,8 +103,11 @@ export function GroqMark({ className }: { className?: string }) {
   );
 }
 
-// Privatemode AI's mark (sourced from models.dev's logo set, like the others) — a sealed-enclave provider;
-// same inline + currentColor treatment so it inherits the row's ink and stays self-origin under CSP.
+/**
+ * Privatemode AI's mark (sourced from models.dev's logo set, like the others) — a sealed-enclave provider;
+ * same inline + currentColor treatment so it inherits the row's ink and stays self-origin under CSP.
+ * @category providers
+ */
 export function PrivatemodeMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 61 63" role="img" aria-label="Privatemode AI" fill="currentColor">
@@ -94,8 +118,11 @@ export function PrivatemodeMark({ className }: { className?: string }) {
   );
 }
 
-// Tinfoil's mark (a crumpled-foil triangle; viewBox 0 0 960 960) — same inline + currentColor treatment as
-// the provider marks above, so it inherits the card's text colour and stays on a self-origin page under CSP.
+/**
+ * Tinfoil's mark (a crumpled-foil triangle; viewBox 0 0 960 960) — same inline + currentColor treatment as
+ * the provider marks above, so it inherits the card's text colour and stays on a self-origin page under CSP.
+ * @category providers
+ */
 export function TinfoilMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 960 960" role="img" aria-label="Tinfoil" fill="currentColor">
@@ -104,16 +131,23 @@ export function TinfoilMark({ className }: { className?: string }) {
   );
 }
 
-// The square glyph the /models tiers are built on: a hairline square = a frontier provider that reads your
-// text; `sealed` fills an inner square — the enclave/TEE mark, "can't read it at all". 1em + currentColor,
-// so it scales and tints to its context (a tier header, a status badge, the trust diagram). Decorative —
-// the visible text label always carries the meaning, so it's aria-hidden.
+/**
+ * The square glyph the /models tiers are built on: a hairline square = a frontier provider that reads your
+ * text; `sealed` fills an inner square — the enclave/TEE mark, "can't read it at all". 1em + currentColor,
+ * so it scales and tints to its context (a tier header, a status badge, the trust diagram). Decorative —
+ * the visible text label always carries the meaning, so it's aria-hidden.
+ * @category brand
+ */
 export function SquareGlyph({ sealed = false, className }: { sealed?: boolean; className?: string }) {
   return <span className={"sqg" + (sealed ? " sealed" : "") + (className ? " " + className : "")} aria-hidden="true" />;
 }
 
-// Coin marks for the pay-rail picker (Simple Icons, CC0; viewBox 0 0 24 24) — same inline + currentColor
-// treatment as the provider marks, so they take the mono ink / acid-on-selection colour of the .seg button.
+/**
+ * Monero's coin mark for the pay-rail picker (Simple Icons, CC0; viewBox 0 0 24 24) — same inline +
+ * currentColor treatment as the provider marks, so it takes the mono ink / acid-on-selection colour
+ * of the .seg button.
+ * @category coins
+ */
 export function MoneroMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" role="img" aria-label="Monero" fill="currentColor">
@@ -121,6 +155,10 @@ export function MoneroMark({ className }: { className?: string }) {
     </svg>
   );
 }
+/**
+ * Bitcoin's coin mark for the pay-rail picker — same treatment as MoneroMark.
+ * @category coins
+ */
 export function BitcoinMark({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" role="img" aria-label="Bitcoin" fill="currentColor">
@@ -128,13 +166,21 @@ export function BitcoinMark({ className }: { className?: string }) {
     </svg>
   );
 }
-// Pick the mark for a rail by its server name; an unknown rail (a future coin) renders no glyph, just its label.
+/**
+ * Pick the mark for a rail by its server name; an unknown rail (a future coin) renders no glyph, just its label.
+ * @category coins
+ */
 export function CoinMark({ name, className }: { name: string; className?: string }) {
   if (name === "monero") return <MoneroMark className={className} />;
   if (name === "bitcoin") return <BitcoinMark className={className} />;
   return null;
 }
 
+/**
+ * The brand lockup: the pulsing mark, the name, and the deployed build tag. Lives in the header bar
+ * (wrapped in the home link by Layout).
+ * @category brand
+ */
 export function Wordmark() {
   return (
     <span className="wordmark">
@@ -145,11 +191,17 @@ export function Wordmark() {
   );
 }
 
-// The brand name, always as a highlighter mark wherever it appears in body text.
+/**
+ * The brand name, always as a highlighter mark wherever it appears in body text.
+ * @category brand
+ */
 export const Ns = () => <span className="hl">nullsink</span>;
 
-// The rate-source attribution for the active coin, venue names emphasized as a small trust signal. Takes the
-// unit so it reads "XMR price…" / "BTC price…" — the quote's coin, never a hard-coded one.
+/**
+ * The rate-source attribution for the active coin, venue names emphasized as a small trust signal. Takes the
+ * unit so it reads "XMR price…" / "BTC price…" — the quote's coin, never a hard-coded one.
+ * @category ui
+ */
 export function RateSource({ unit }: { unit: string }) {
   return (
     <>
@@ -176,8 +228,11 @@ function useCopy(value: string, ms: number = COPY_FEEDBACK_MS): { copied: boolea
   return { copied, copy };
 }
 
-// Copy button whose label swaps to "copied" for ~1.5s. No toast. `filled` swaps the bordered
-// default for the acid (filled) variant — used where copy is the primary action (the key cell).
+/**
+ * Copy button whose label swaps to "copied" for ~1.5s. No toast. `filled` swaps the bordered
+ * default for the acid (filled) variant — used where copy is the primary action (the key cell).
+ * @category ui
+ */
 export function Copy({ value, label = "copy", filled = false }: { value: string; label?: string; filled?: boolean }) {
   const { copied, copy } = useCopy(value);
   return (
@@ -191,8 +246,11 @@ export function Copy({ value, label = "copy", filled = false }: { value: string;
   );
 }
 
-// "Opens in a new tab" glyph — a box with an arrow leaving it. A generic UI mark (not a brand logo),
-// stroked in currentColor so it tints to context. Shown on hover beside an external link.
+/**
+ * "Opens in a new tab" glyph — a box with an arrow leaving it. A generic UI mark (not a brand logo),
+ * stroked in currentColor so it tints to context. Shown on hover beside an external link.
+ * @category ui
+ */
 export function ExtMark({ className }: { className?: string }) {
   return (
     <svg
@@ -213,11 +271,14 @@ export function ExtMark({ className }: { className?: string }) {
   );
 }
 
-// A model id as a copy-on-click chip, for the /models cards: a click copies the exact id to paste into a
-// config or SDK call, with a brief ✓. `down` flags an id the proxy prices but the upstream currently 404s
-// for us — the danger register (a red tag + red-tinted border), still copyable since a call just refunds.
-// Copy needs JS; with it off the chip still reads as the plain id (and is selectable). Same copy mechanics
-// as <Copy>, so the "copied" acknowledgement and timing match.
+/**
+ * A model id as a copy-on-click chip, for the /models cards: a click copies the exact id to paste into a
+ * config or SDK call, with a brief ✓. `down` flags an id the proxy prices but the upstream currently 404s
+ * for us — the danger register (a red tag + red-tinted border), still copyable since a call just refunds.
+ * Copy needs JS; with it off the chip still reads as the plain id (and is selectable). Same copy mechanics
+ * as <Copy>, so the "copied" acknowledgement and timing match.
+ * @category ui
+ */
 export function ModelChip({ id, down = false }: { id: string; down?: boolean }) {
   // copy feedback floats a small acid "copied" badge ABOVE the chip (.chip-copied, absolutely positioned),
   // so the chip text never moves — no layout shift in the row. Short-lived.
@@ -242,8 +303,11 @@ export function ModelChip({ id, down = false }: { id: string; down?: boolean }) 
   );
 }
 
-// One key/value integration row ("base url" → value + copy). `values` is a list so an endpoint row can
-// carry more than one (OpenAI's two endpoints). Used by the /api reference.
+/**
+ * One key/value integration row ("base url" → value + copy). `values` is a list so an endpoint row can
+ * carry more than one (OpenAI's two endpoints). Used by the /api reference.
+ * @category ui
+ */
 export function KvRow({ k, values }: { k: string; values: string[] }) {
   return (
     <div className="kvrow">
@@ -259,12 +323,6 @@ export function KvRow({ k, values }: { k: string; values: string[] }) {
   );
 }
 
-// A static code sample: labelled head with a copy control, then a <pre>. Render-pure (no browser APIs),
-// so it prerenders; the copy button needs JS, but the code itself still reads (and selects) without it.
-// `highlights` lists exact substrings (the placeholder key, the model id) to tint acid — the eye lands
-// on what to replace / what to change. `comment` (a `#` or `//` token) sets off annotation text so it
-// reads as a note, not a command — a highlight substring INSIDE a comment still tints acid, so the value
-// to replace stays loud. Copy always copies the raw, untinted string.
 const RE_ESCAPE = /[.*+?^${}()|[\]\\]/g;
 
 // Split `text` so every highlight substring survives as its own part (to tint individually). Deterministic
@@ -281,6 +339,15 @@ function commentStart(line: string, token: "#" | "//"): number {
   return m ? m.index + m[1].length : -1;
 }
 
+/**
+ * A static code sample: labelled head with a copy control, then a <pre>. Render-pure (no browser APIs),
+ * so it prerenders; the copy button needs JS, but the code itself still reads (and selects) without it.
+ * `highlights` lists exact substrings (the placeholder key, the model id) to tint acid — the eye lands
+ * on what to replace / what to change. `comment` (a `#` or `//` token) sets off annotation text so it
+ * reads as a note, not a command — a highlight substring INSIDE a comment still tints acid, so the value
+ * to replace stays loud. Copy always copies the raw, untinted string.
+ * @category ui
+ */
 export function CodeBlock({
   label,
   code,
@@ -331,17 +398,23 @@ export function CodeBlock({
   );
 }
 
-// Renders the QR as inline SVG markup from the bundled encoder (no network).
+/**
+ * Renders the QR as inline SVG markup from the bundled encoder (no network).
+ * @category ui
+ */
 export function Qr({ data }: { data: string }) {
   const svg = useMemo(() => qrSvg(data), [data]);
   return <div className="qr" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-// The one key component — used for both a freshly-minted key and an existing one being topped
-// up. Masked by default (last 4 shown); reveal with "show". Copy is the filled (acid) control —
-// it's the primary action here (save your key); show/hide is the bordered secondary one.
-// UNRECOVERABLE is acid TEXT (a label, not a button) — that's the clickable-vs-decorative
-// distinction: a fill/border carries an action, plain acid text is status.
+/**
+ * The one key component — used for both a freshly-minted key and an existing one being topped
+ * up. Masked by default (last 4 shown); reveal with "show". Copy is the filled (acid) control —
+ * it's the primary action here (save your key); show/hide is the bordered secondary one.
+ * UNRECOVERABLE is acid TEXT (a label, not a button) — that's the clickable-vs-decorative
+ * distinction: a fill/border carries an action, plain acid text is status.
+ * @category ui
+ */
 export function KeyBlock({ token }: { token: string }) {
   const [hidden, setHidden] = useState(true);
   // Full-length mask so it reads as a real key on desktop (one line). On narrow screens the • run

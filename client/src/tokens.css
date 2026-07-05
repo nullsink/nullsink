@@ -17,7 +17,6 @@
 
   /* — type — */
   --ns-font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace; /* primary: everything */
-  --ns-font-sans: "IBM Plex Sans", system-ui, sans-serif;          /* secondary: long body only */
   --ns-weight-display: 600;
   --ns-weight-pipe: 300; /* the "|" in the wordmark is light */
   --ns-tracking-display: -0.045em;

@@ -2,13 +2,16 @@ import type { ReactNode } from "react";
 import { Wordmark } from "./ui.tsx";
 import { DISCORD_URL, EXT, GITHUB_URL, MATRIX_URL } from "./lib/links.ts";
 
-// The shell shared by every route: the centered column, the header bar with the brand (a home link) and
-// the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
-// adoption pages (api → models). The footer opens with the
-// never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
-// unqualified negations only; anything needing a caveat stays off the row) — then the policy links
-// (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
-// <a> navigations are unaffected by the strict CSP.
+/**
+ * The shell shared by every route: the centered column, the header bar with the brand (a home link) and
+ * the nav, and the footer. Page content is the children. Kept deliberately thin — the nav links the
+ * adoption pages (api → models). The footer opens with the
+ * never-collect chips — the site-wide trust signature (red = the "hard absolute" grammar: short,
+ * unqualified negations only; anything needing a caveat stays off the row) — then the policy links
+ * (privacy + terms) on the left and the community links (GitHub, Discord, Matrix) on the right; external
+ * <a> navigations are unaffected by the strict CSP.
+ * @category shell
+ */
 export function Layout({
   children,
   center = false,

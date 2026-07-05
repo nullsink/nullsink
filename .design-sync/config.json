@@ -1,0 +1,42 @@
+{
+  "projectId": "517bd1a8-3f70-482e-bc3d-13ed589d58e8",
+  "shape": "package",
+  "pkg": "nullsink-client",
+  "globalName": "Nullsink",
+  "entry": "./client/src/ui.tsx",
+  "readmeHeader": ".design-sync/conventions.md",
+  "cssEntry": "src/app.css",
+  "tokensPkg": "..",
+  "tokensGlob": "src/tokens.css",
+  "extraFonts": ["../.design-sync/fonts.css"],
+  "extraEntries": ["./src/Layout.tsx"],
+  "overrides": {
+    "Layout": { "cardMode": "single", "viewport": "1024x900" },
+    "ExtMark": { "cardMode": "column" }
+  },
+  "componentSrcMap": {
+    "Mark": "src/ui.tsx",
+    "PulseMark": "src/ui.tsx",
+    "OpenAiMark": "src/ui.tsx",
+    "AnthropicMark": "src/ui.tsx",
+    "GeminiMark": "src/ui.tsx",
+    "GroqMark": "src/ui.tsx",
+    "PrivatemodeMark": "src/ui.tsx",
+    "TinfoilMark": "src/ui.tsx",
+    "SquareGlyph": "src/ui.tsx",
+    "MoneroMark": "src/ui.tsx",
+    "BitcoinMark": "src/ui.tsx",
+    "CoinMark": "src/ui.tsx",
+    "Wordmark": "src/ui.tsx",
+    "Ns": "src/ui.tsx",
+    "RateSource": "src/ui.tsx",
+    "Copy": "src/ui.tsx",
+    "ExtMark": "src/ui.tsx",
+    "ModelChip": "src/ui.tsx",
+    "KvRow": "src/ui.tsx",
+    "CodeBlock": "src/ui.tsx",
+    "Qr": "src/ui.tsx",
+    "KeyBlock": "src/ui.tsx",
+    "Layout": "src/Layout.tsx"
+  }
+}
