@@ -50,8 +50,8 @@ MONERO_SHA256_X64="166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e
 # trust-on-first-use (checked once at authoring) then pinned by SHA. NOTE: only the verifier BINARY is pinned;
 # the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated) and the proxy CLI gives
 # no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil rail is active.
-TINFOIL_PROXY_VERSION="v0.1.0"
-TINFOIL_PROXY_SHA256_X64="5ac964a7d4252c892e05876ed38c44dc4f37ec7d2a5c0845f1a04fd520b3d566"
+TINFOIL_PROXY_VERSION="v0.1.5"
+TINFOIL_PROXY_SHA256_X64="f5bdeee2eeb678d21b1bcb4491de302cda99a2e1941ee1ebec355d2b480ab705"
 
 # --- Env/rail helpers. fetch_verified / require_x86_64 / install_verified_bitcoind (+ the Bitcoin pin) moved
 # to lib.sh, shared with setup-nodes.sh so the pin can't drift; the Monero/tinfoil installers below stay here. ---
