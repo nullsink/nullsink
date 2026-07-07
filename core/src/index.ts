@@ -2,8 +2,8 @@
 // settlement timer, signal handlers. Request logic is in handler.ts, settlement in settle.ts; both are
 // pure/injectable and import-safe (importing them binds no port, starts no timer), which makes them
 // testable and reusable.
-import { balances } from "./ledger/db";
-import { orders } from "./ledger/orders";
+import { openDb, DB_PATH } from "./ledger/db";
+import { openOrderStore, PENDING_DB_PATH } from "./ledger/orders";
 import { createHandler, type RailView } from "./handler";
 import { makeOrderStatus } from "./ledger/orderstatus";
 import { byteBoundHold, makeCountTokensHold, ANTHROPIC_COUNT_OMIT, OPENAI_COUNT_OMIT } from "./hold";
@@ -171,6 +171,13 @@ if (!anthropicDeps && !openaiDeps && !tinfoilDeps) {
   log.error("boot", "no providers configured — set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY");
   process.exit(1);
 }
+
+// Open the two on-disk stores this process owns (a composition-root side effect — see the header). balances.db:
+// tokens + holds journal + applied_orders (the money ledger). pending.db: in-flight payment↔token orders. The
+// stores are import-safe (openDb/openOrderStore open nothing until called), so they're constructed HERE and
+// injected into the handler + poller below — the stage-2 split then gives each service only the store it owns.
+const balances = openDb(DB_PATH);
+const orders = openOrderStore(PENDING_DB_PATH);
 
 // Ephemeral live payment progress for /order-status, fed by the poller each tick (orderstatus.ts). Held
 // here, not the DB — it's a display aid, not money, and is re-derived on the next poll after a restart.

@@ -11,7 +11,7 @@
 // Rows sort by balance, largest first. `table` (default) is a human view: a short hash PREFIX + balance.
 // `csv`/`json` carry the FULL 64-char hash for export (csv prints the rows to stdout and the summary to
 // stderr, so `> balances.csv` yields a clean import file — same convention as `nsk financials`).
-import { listBalances, liabilityTotal } from "../src/ledger/db";
+import { openDb, DB_PATH } from "../src/ledger/db";
 import { formatUsd } from "../src/ledger/financials";
 import { parseFormat } from "./format";
 
@@ -22,6 +22,7 @@ const HASH_PREFIX = 16;
 export function runBalances(args: string[]): void {
   const format = parseFormat(args);
 
+  const { listBalances, liabilityTotal } = openDb(DB_PATH); // opened inside run, post-guard (see cli/index.ts)
   const rows = listBalances();
   const { tokens, micros } = liabilityTotal(); // count + total — reconciles with `nsk financials`
 

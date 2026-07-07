@@ -11,8 +11,8 @@ export function rootGuardViolation(euid: number | undefined, allowRoot: string |
 }
 
 // Thin process shell around the policy: if violated, explain how to run it right and exit non-zero. index.ts
-// calls this AFTER a ledger-opening command is resolved but BEFORE that command's module (and its DB
-// singleton) is imported — so the refusal lands before that ledger is ever opened.
+// calls this AFTER a ledger-opening command is resolved but BEFORE that command's run() opens the ledger —
+// so the refusal lands before the DB (and its root-owned WAL sidecars) is ever created.
 export function refuseRootOrExit(cmd?: string): void {
   if (!rootGuardViolation(process.geteuid?.(), process.env.NSK_ALLOW_ROOT)) return;
   console.error(

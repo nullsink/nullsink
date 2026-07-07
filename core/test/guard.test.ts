@@ -1,11 +1,11 @@
 // nsk's refuse-as-root guard. Two groups of tests:
 //   1. the pure policy (rootGuardViolation) — the unit-tested surface; refuseRootOrExit is the thin
 //      print+exit shell around it (codebase convention: test the pure helper, not the process exit).
-//   2. the guard's load-bearing INVARIANT: cli/index.ts must open NO ledger before the guard runs — which
-//      holds only while index.ts statically imports nothing that reaches src/ledger/db (whose module-load
-//      singleton opens balances.db at import). We pin it by spawning the real CLI for the non-DB commands
-//      with a throwaway DB_PATH and asserting no balances.db* appears, so a future static import that opens
-//      the DB before the guard (defeating it) fails here.
+//   2. the guard's load-bearing INVARIANT: cli/index.ts must open NO ledger before the guard runs. Each
+//      subcommand opens its DB inside run() (after the guard), and version/usage never load a ledger module.
+//      We pin it by spawning the real CLI for the non-DB commands with a throwaway DB_PATH and asserting no
+//      balances.db* appears, so a regression that opens the DB before the guard (a module-top open, or a
+//      static import that does I/O at load) fails here.
 import { test, expect, afterEach } from "bun:test";
 import { existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";

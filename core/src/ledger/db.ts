@@ -5,15 +5,14 @@
 // crash-safe.
 import { openSqlite } from "./sqlite";
 
-// sha256(token) as lowercase hex. The token is a bearer secret; only its hash ever touches disk. Pure
-// (no DB) so it stays a free function.
-export function hashToken(token: string): string {
-  return new Bun.CryptoHasher("sha256").update(token).digest("hex");
-}
+// hashToken lives in ./hash (pure, DB-free) so the metering/proxy path can hash a token without importing
+// this balance store. Re-exported here for the CLIs + tests that already open this store anyway.
+export { hashToken } from "./hash";
 
-// Build a balance store bound to one SQLite path. Prod uses the singleton below; tests call
-// openDb(":memory:") for an isolated store per case (prepared statements close over `db`, so each store
-// is fully self-contained).
+// Build a balance store bound to one SQLite path. Each composition root (or a CLI subcommand, post-guard)
+// calls openDb(DB_PATH); tests call openDb(":memory:") for an isolated store per case (prepared statements
+// close over `db`, so each store is fully self-contained). Importing this module opens NOTHING — the DB is
+// opened only when openDb() is actually called.
 export function openDb(path: string) {
   const db = openSqlite(path); // WAL + busy_timeout + synchronous=FULL — see sqlite.ts
   db.run(`CREATE TABLE IF NOT EXISTS tokens (
@@ -240,10 +239,8 @@ export function openDb(path: string) {
 
 export type BalanceStore = ReturnType<typeof openDb>;
 
-const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
-
-// Prod singleton. index.ts consumes `balances` as a whole store for the handler/poller; re-exporting its
-// methods as named bindings preserves the original import surface (`import { hold, credit, ... }`) for
-// the CLIs, so no call sites change.
-export const balances = openDb(DB_PATH);
-export const { getBalance, hold, credit, creditOnce, openHold, settleHold, recoverHolds, purgeApplied, listRevenue, liabilityTotal, listBalances } = balances;
+// Default on-disk path. The composition root (src/index.ts) and each nsk subcommand pass this to openDb();
+// no store is opened at import time — a module-load singleton would reunify the two DBs across the stage-2
+// process split (the proxy would open pending.db and payments would open balances.db just by importing a
+// shared module). Callers construct + inject their own store instead.
+export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";

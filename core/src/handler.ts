@@ -1,7 +1,7 @@
 // Request handler factory over an injected dependency bag, so tests supply in-memory stores, a stubbed
 // upstream fetch, and fake rate/wallet calls — no port, no network. index.ts wires production deps; pure
 // helpers (pricing, usage, hashing) are imported directly.
-import { hashToken } from "./ledger/db";
+import { hashToken } from "./ledger/hash";
 import { priceUsage, isReasoningModel, pricedModels } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";

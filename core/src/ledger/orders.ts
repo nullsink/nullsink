@@ -25,8 +25,9 @@ export type PendingOrder = {
   // rate in force then, making the revenue book's gross figure independent of any later MARGIN change.
 };
 
-// Build a pending-orders store bound to one SQLite path. Prod uses the singleton below; tests call
-// openOrderStore(":memory:") for an isolated store per case (prepared statements close over `db`).
+// Build a pending-orders store bound to one SQLite path. The composition root calls openOrderStore(path);
+// tests call openOrderStore(":memory:") for an isolated store per case (prepared statements close over
+// `db`). Importing this module opens nothing.
 export function openOrderStore(path: string) {
   // synchronous=FULL matters doubly here: this store holds the IRREPLACEABLE payment↔token link (the
   // deposit is on-chain; a lost row = a paid user we can never credit). See sqlite.ts for the shared PRAGMAs.
@@ -161,15 +162,13 @@ export function openOrderStore(path: string) {
 
 export type OrdersStore = ReturnType<typeof openOrderStore>;
 
-const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
+// Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The composition root
+// (src/index.ts) and `nsk orders` pass this to openOrderStore(); nothing opens at import time — see the
+// note in ledger/db.ts on why the stage-2 split forbids a module-load singleton.
+export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
 
 function defaultPendingPath(): string {
   const balances = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
   const slash = balances.lastIndexOf("/");
   return slash === -1 ? "pending.db" : balances.slice(0, slash + 1) + "pending.db";
 }
-
-// Prod singleton. The bootstrap consumes `orders` as a whole store; the named bindings preserve the
-// original import surface for the CLIs.
-export const orders = openOrderStore(PENDING_DB_PATH);
-export const { tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale } = orders;
