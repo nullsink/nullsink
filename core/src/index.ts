@@ -8,6 +8,7 @@ import { createHandler, type RailView } from "./handler";
 import { makeOrderStatus } from "./ledger/orderstatus";
 import { byteBoundHold, makeCountTokensHold, ANTHROPIC_COUNT_OMIT, OPENAI_COUNT_OMIT } from "./hold";
 import { settle } from "./ledger/settle";
+import { drainCreditOutbox } from "./ledger/drain";
 import { selectRails, type PayRail } from "./rails";
 import type { Incoming } from "./rails/types";
 import { makeTokenBucket } from "./ratelimit";
@@ -304,7 +305,7 @@ async function pollRail(rail: PayRail): Promise<void> {
   if (recovered.event === "recovered")
     log.info("poll", `[${rail.name}] poll recovered after ${prevFails} consecutive failures — deposit detection restored`);
   pollFailsByRail.set(rail.name, recovered.fails);
-  settle(transfers, orders, balances, Date.now(), {
+  settle(transfers, orders, Date.now(), {
     scale: rail.scale,
     asset: rail.name,
     rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
@@ -321,6 +322,11 @@ async function pollRail(rail: PayRail): Promise<void> {
 // Each tick polls every active rail independently — allSettled so one rail's failure can't block another.
 async function pollOnce(): Promise<void> {
   await Promise.allSettled([...rails.values()].map((r) => pollRail(r)));
+  // Deliver any credits settle() enqueued this tick into the balance ledger (the in-process sender; PR-C moves
+  // this hop over the credit socket to the proxy). Rail-agnostic — one drain covers every rail. Idempotent, so
+  // a crash before ack re-delivers next tick, and the startup tick clears any outbox rows a prior crash left.
+  const { delivered } = drainCreditOutbox(orders, balances, Date.now());
+  if (delivered > 0) log.info("credit", `delivered ${delivered} credit(s) from the outbox`);
 }
 
 let polling = false;

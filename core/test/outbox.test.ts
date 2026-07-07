@@ -4,6 +4,8 @@
 // now books here in pending.db instead of balances.db.
 import { test, expect } from "bun:test";
 import { openOrderStore } from "../src/ledger/orders";
+import { openDb } from "../src/ledger/db";
+import { drainCreditOutbox } from "../src/ledger/drain";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
 const HASH = "a".repeat(64);
@@ -57,4 +59,35 @@ test("a bitcoin sale books in sats at its own scale (not mislabelled as XMR)", (
   expect(o.listRevenue()).toEqual([
     { at: 500, asset: "bitcoin", asset_atomic: 100_000, scale: SATS_PER_BTC, usd_micros: 60_000_000, gross_micros: 60_000_000 },
   ]);
+});
+
+// The crossing's money-safety crux. The outbox is at-least-once delivery; creditOnce's applied_orders is the
+// idempotent receiver. A crash between creditOnce committing and ackCredit leaves the row unacked → the sender
+// re-delivers next tick, and the receiver must credit AT MOST once.
+test("crash before ack: re-delivery credits exactly once (applied_orders dedupes the redelivery)", () => {
+  const store = openOrderStore(":memory:");
+  const balances = openDb(":memory:");
+  store.enqueueCredit("tx:1", HASH, 5_000_000, 100);
+  // Simulate a crash mid-drain: the credit APPLIED (creditOnce committed to balances.db) but the outbox row's
+  // ackCredit never ran — so the row is still unacked.
+  expect(balances.creditOnce(HASH, 5_000_000, "tx:1", 100)).toBe(true);
+  expect(store.listUnackedCredits()).toHaveLength(1);
+  // Next tick's drain re-delivers the still-unacked row: creditOnce sees the marker → already_applied → no
+  // second credit, and the row finally acks.
+  drainCreditOutbox(store, balances, 200);
+  expect(balances.getBalance(HASH)).toBe(5_000_000); // credited exactly once, not 10_000_000
+  expect(store.listUnackedCredits()).toEqual([]); // outbox drained clean
+});
+
+// F3 defense at the row level: commitSettlement books revenue ONLY when the outbox enqueue is fresh. If the key
+// already exists (e.g. a pre-cutover zombie deposit re-processed), the INSERT OR IGNORE is a no-op → no second
+// sale is booked and the original credit amount is preserved — while the order still closes.
+test("commitSettlement books no second sale when the outbox key already exists (INSERT OR IGNORE + fresh guard)", () => {
+  const store = openOrderStore(":memory:");
+  store.tryAddOrder({ rail: "monero", order_index: 3, address: "a3", hash: HASH, expected_atomic: 1_000_000, credit_micros: 5_000_000, received_atomic: 0, created_at: 100, rate_usd: 0 }, Number.MAX_SAFE_INTEGER);
+  store.enqueueCredit("k", HASH, 5_000_000, 100); // key already enqueued (simulate the zombie's credit)
+  store.commitSettlement("k", HASH, 5_000_000, 200, { asset: "monero", assetAtomic: 1_000_000, scale: ATOMIC_PER_XMR, grossMicros: 999 }, 3, "monero");
+  expect(store.listRevenue()).toHaveLength(0); // NOT booked — the enqueue wasn't fresh
+  expect(store.listUnackedCredits()).toEqual([{ idempotency_key: "k", hash: HASH, micros: 5_000_000 }]); // original row intact
+  expect(store.openOrders()).toHaveLength(0); // order still closed regardless
 });

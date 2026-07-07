@@ -24,8 +24,8 @@ test("settle SKIPS an order with expected_atomic === 0 (no divide-by-zero, no cr
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
   store.tryAddOrder(mk({ order_index: 0, hash: "h1", expected_atomic: 0, credit_micros: 5_000_000 }), SEED_MAX);
-  settle([{ orderIndex: 0, idempotencyKey: "tx:0", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, CFG);
-  expect(balances.getBalance("h1")).toBeNull(); // not credited (mutant would write Infinity)
+  settle([{ orderIndex: 0, idempotencyKey: "tx:0", amount: 1_000_000, confirmations: CONF, final: true }], store, NOW, CFG);
+  expect(balances.getBalance("h1")).toBeNull(); // not credited (mutant would write Infinity; the 0-expected order is skipped → nothing even enqueued)
   expect(store.openOrders().length).toBe(1); // untouched (mutant would credit + close it)
   store.db.close();
   balances.db.close();

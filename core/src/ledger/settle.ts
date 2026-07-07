@@ -1,12 +1,12 @@
-// Settlement core, extracted from the poller so it can run on synthetic inbounds and in-memory stores (no
-// wallet-rpc, no server). I/O-pure: takes the already-fetched, rail-normalised inbounds plus the two
-// stores and credits the matching tokens; the network fetch + retry glue lives in index.ts. Coin-agnostic:
-// the rail pre-computes each inbound's finality (`final`) + an opaque idempotencyKey, so this core never
-// sees txids or coin-specific finality flags. Idempotent per idempotencyKey via creditOnce(), so
-// re-scanning the same deposit (every tick, forever) can't double-credit.
+// Settlement core, extracted from the poller so it can run on synthetic inbounds and an in-memory store (no
+// wallet-rpc, no server). I/O-pure and PAYMENT-world only: takes the already-fetched, rail-normalised inbounds
+// plus the orders store and, for each confirmed deposit, ENQUEUES a credit + books the sale + closes the order
+// in one pending.db transaction (orders.commitSettlement). The actual balance credit is delivered
+// asynchronously by the sender (ledger/drain.ts), idempotent per idempotencyKey — so re-scanning the same
+// deposit (every tick, forever) can't double-credit. Coin-agnostic: the rail pre-computes each inbound's
+// finality (`final`) + an opaque idempotencyKey, so this core never sees txids or coin-specific finality flags.
 import type { Incoming } from "../rails/types";
 import type { OrdersStore } from "./orders";
-import type { BalanceStore } from "./db";
 
 export type SettleConfig = {
   scale: number; // rail atomic-units per whole coin (PayRail.scale) — for booking gross USD at the locked rate
@@ -21,18 +21,17 @@ export type SettleConfig = {
   // so a transient blind tick can't fast-reap an order a prior tick spared. See below.
 };
 
-// Match the rail's confirmed inbounds to open orders and credit each exactly once. `now` is injected
+// Match the rail's confirmed inbounds to open orders and enqueue each credit exactly once. `now` is injected
 // (caller passes Date.now()) so settlement is deterministic under test.
 //
 // CONCURRENCY INVARIANT — settle() MUST stay synchronous (NO `await` in its body). The poller runs one
-// settle() per active rail, all sharing balances.db + pending.db; because settle is await-free, the single-
-// threaded event loop runs each rail's settle to completion before the next begins, so two rails can never
-// interleave mid-settle on the shared DBs (no double-credit, no lost reap). Adding an await here would break
-// that — a regression test asserts settle()'s return is not a thenable.
+// settle() per active rail, all sharing pending.db; because settle is await-free, the single-threaded event
+// loop runs each rail's settle to completion before the next begins, so two rails can never interleave
+// mid-settle on the shared store (no double-enqueue, no lost reap). Adding an await here would break that —
+// a regression test asserts settle()'s return is not a thenable.
 export function settle(
   inbounds: Incoming[],
   orders: OrdersStore,
-  balances: BalanceStore,
   now: number,
   cfg: SettleConfig,
 ): void {
@@ -69,22 +68,15 @@ export function settle(
     // Credit proportional to coin received vs. the locked expectation. Multiply credit_micros by the
     // ratio — never amount × credit_micros, which would overflow Number for large atomics.
     const share = Math.round(o.credit_micros * (g.amount / o.expected_atomic));
-    // Book the sale in creditOnce's transaction: gross USD at the order's LOCKED rate (cfg.scale = rail
-    // atomic scale) so the books don't drift if MARGIN changes. The revenue row carries only {when, coin
-    // atomic, usd_credited, usd_gross} — no hash/index.
+    // Gross USD at the order's LOCKED rate (cfg.scale = rail atomic scale) so the books don't drift if MARGIN
+    // changes. The revenue row carries only {when, coin atomic, usd_credited, usd_gross} — no hash/index.
     const grossMicros = Math.round((g.amount / cfg.scale) * o.rate_usd * 1_000_000);
-    balances.creditOnce(o.hash, share, key, now, { asset: cfg.asset, assetAtomic: g.amount, scale: cfg.scale, grossMicros });
-    // Pay-once / single-use address: credit this confirmed payment and CLOSE the order (drop the
-    // index→hash link) regardless of whether it covered the full quote — a later top-up is a NEW order.
-    // The buyer is told to send the full amount in ONE transaction (multiple outputs WITHIN one tx are
-    // summed into `g` above). Only a SEPARATE LATER tx to a closed address misses — the documented
-    // one-transaction rule.
-    //
-    // Close on EITHER creditOnce outcome: a false return means this deposit was ALREADY credited — i.e. a
-    // crash landed between creditOnce committing (balances.db) and removeOrder (pending.db; two DBs, not
-    // atomic) — and the order is a zombie that would otherwise linger to the backstop, keeping the
-    // index→hash link alive and misreporting /order-status as "finalizing".
-    orders.removeOrder(o.order_index, rail);
+    // Enqueue the credit + book the sale + close the order in ONE pending.db transaction (see
+    // orders.commitSettlement). The credit is delivered to the balance ledger asynchronously by the sender
+    // (ledger/drain.ts), idempotent per `key` — so this stays synchronous and the money-critical step is a
+    // single atomic write on one DB (the old two-DB credit→remove zombie window is gone). Pay-once: the order
+    // closes on this first confirmed payment regardless of coverage — a later top-up is a NEW order.
+    orders.commitSettlement(key, o.hash, share, now, { asset: cfg.asset, assetAtomic: g.amount, scale: cfg.scale, grossMicros }, o.order_index, rail);
   }
 
   // Absolute safety backstop: drop everything past the long horizon, including a paid-but-never-confirmed
@@ -105,5 +97,7 @@ export function settle(
     const stillOpen = new Set(orders.openOrders(rail).map((o) => o.order_index));
     for (const idx of cfg.seen) if (!stillOpen.has(idx)) cfg.seen.delete(idx);
   }
-  balances.purgeApplied(now - cfg.backstopMs);
+  // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is NOT purged
+  // in stage 2 (D4): purging on the payments-side clock could drop a marker while an outbox retry is still in
+  // flight → double-credit. It is ~50 bytes/sale; a payments→proxy safe-point watermark can prune it later.
 }

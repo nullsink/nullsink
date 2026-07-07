@@ -9,6 +9,9 @@
 //
 import { Database } from "bun:sqlite";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { openOrderStore } from "../src/ledger/orders";
+import { openDb } from "../src/ledger/db";
+import { migrateRevenue } from "../src/ledger/migrate-revenue";
 
 const dir = process.argv[2];
 if (!dir) {
@@ -54,27 +57,24 @@ const beforeB = {
 };
 bRaw.close();
 
-// 3) neutralise the app modules' load-time prod singletons (they open PENDING_DB_PATH/DB_PATH at import),
-//    then open the COPIES through the real stores so the migrations run ------------------------------------
-process.env.PENDING_DB_PATH = `${work}/.singleton-pending.db`;
-process.env.DB_PATH = `${work}/.singleton-balances.db`;
-const { openOrderStore } = await import("../src/ledger/orders");
-const { openDb } = await import("../src/ledger/db");
-
+// 3) open the COPIES through the real stores so the in-place pending.db migrations run, then rehearse the D5
+//    cross-DB revenue move (balances.db → pending.db) — migrateRevenue reads the old balances.db revenue table
+//    raw and writes the pending.db sales book. (openDb/openOrderStore open nothing at import, so no singleton
+//    to neutralise since the stage-2 DI change.) ---------------------------------------------------------------
 const orders = openOrderStore(`${work}/pending.db`);
 const balances = openDb(`${work}/balances.db`);
 const afterOrders = orders.openOrders();
-const afterRevenue = balances.listRevenue();
+migrateRevenue(balances.db, orders); // move the sales book into the pending.db copy
+const afterRevenue = orders.listRevenue();
 orders.db.close();
 balances.db.close();
 
-// 4) idempotency: a second open (mirrors a service restart re-running the migration) must be a no-op -------
+// 4) idempotency: reopening pending.db (mirrors a service restart re-running the in-place migrations) must be a
+//    no-op, and the moved sales book must persist. -------------------------------------------------------------
 const orders2 = openOrderStore(`${work}/pending.db`);
-const balances2 = openDb(`${work}/balances.db`);
 const reopenPending = orders2.openOrders().length;
-const reopenRevenue = balances2.listRevenue().length;
+const reopenRevenue = orders2.listRevenue().length;
 orders2.db.close();
-balances2.db.close();
 
 // 5) report -----------------------------------------------------------------------------------------------
 const ok = (b: boolean) => (b ? "✓" : "✗ MISMATCH");

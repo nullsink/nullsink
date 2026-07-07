@@ -9,6 +9,7 @@ import fc from "fast-check";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { settle, type SettleConfig } from "../src/ledger/settle";
+import { drainCreditOutbox } from "../src/ledger/drain";
 import type { Incoming } from "../src/rails/types";
 import type { PendingOrder } from "../src/ledger/orders";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
@@ -86,14 +87,22 @@ function snapshot(balances: ReturnType<typeof openDb>, store: ReturnType<typeof 
   };
 }
 
+// settle() now ENQUEUES credits into the outbox; the sender (drainCreditOutbox) delivers them to the balance
+// ledger. These tests assert the end-to-end credit, so drive both — same 5-arg shape as the pre-outbox settle,
+// so the crediting-logic tests below read unchanged. (Reap-only calls drain an empty outbox — a harmless no-op.)
+const settleAndDrain = (inbounds: Incoming[], store: ReturnType<typeof openOrderStore>, balances: ReturnType<typeof openDb>, now: number, cfg: SettleConfig): void => {
+  settle(inbounds, store, now, cfg);
+  drainCreditOutbox(store, balances, now);
+};
+
 test("replaying the same inbounds credits exactly once (idempotent)", () => {
   fc.assert(
     fc.property(fc.array(orderArb, { maxLength: 5 }), fc.array(transferArb, { maxLength: 12 }), (rawOrders, transfers) => {
       const { balances, store } = fresh(dedupe(rawOrders));
-      settle(transfers, store, balances, NOW, CFG);
+      settleAndDrain(transfers, store, balances, NOW, CFG);
       const after1 = snapshot(balances, store);
-      settle(transfers, store, balances, NOW, CFG); // re-scan, as the poller does every tick
-      settle(transfers, store, balances, NOW, CFG);
+      settleAndDrain(transfers, store, balances, NOW, CFG); // re-scan, as the poller does every tick
+      settleAndDrain(transfers, store, balances, NOW, CFG);
       expect(snapshot(balances, store)).toEqual(after1);
     }),
     { numRuns: 400 },
@@ -105,9 +114,9 @@ test("settlement is independent of inbound order", () => {
     fc.property(fc.array(orderArb, { maxLength: 5 }), fc.array(transferArb, { maxLength: 12 }), (rawOrders, transfers) => {
       const orders = dedupe(rawOrders);
       const a = fresh(orders);
-      settle(transfers, a.store, a.balances, NOW, CFG);
+      settleAndDrain(transfers, a.store, a.balances, NOW, CFG);
       const b = fresh(orders);
-      settle([...transfers].reverse(), b.store, b.balances, NOW, CFG);
+      settleAndDrain([...transfers].reverse(), b.store, b.balances, NOW, CFG);
       expect(snapshot(b.balances, b.store)).toEqual(snapshot(a.balances, a.store));
     }),
     { numRuns: 400 },
@@ -129,7 +138,7 @@ test("non-final inbounds credit nothing", () => {
   fc.assert(
     fc.property(fc.array(ineligibleArb, { maxLength: 12 }), (transfers) => {
       const { balances, store } = fresh(orders);
-      settle(transfers, store, balances, NOW, CFG);
+      settleAndDrain(transfers, store, balances, NOW, CFG);
       for (const h of HASHES) expect(balances.getBalance(h)).toBeNull(); // nothing credited
       expect(store.openOrders().every((o) => o.received_atomic === 0)).toBe(true); // nothing consumed
     }),
@@ -161,7 +170,7 @@ test("proportional credit sums per-idempotency-key amounts then rounds once", ()
           confirmations: CONF,
           final: true,
         }));
-        settle(transfers, store, balances, NOW, CFG);
+        settleAndDrain(transfers, store, balances, NOW, CFG);
         // Oracle: group by key (txid:0), sum amounts, round the share ONCE per key, total the rounded shares.
         const perKey = new Map<string, number>();
         for (const o of outs) perKey.set(o.txid, (perKey.get(o.txid) ?? 0) + o.amount);
@@ -179,7 +188,7 @@ test("an exactly-fully-paid order is dropped (>= boundary, not >)", () => {
     fc.property(fc.integer({ min: 1_000_000, max: 2_000_000_000_000 }), fc.integer({ min: 1, max: 50_000_000 }), (expected, credit) => {
       const { balances, store } = fresh([{ sub: 0, hash: "h1", expected, credit }]);
       // amount === expected: received reaches expected exactly → must drop the row.
-      settle([{ orderIndex: 0, idempotencyKey: "tx1:0", amount: expected, confirmations: CONF, final: true }], store, balances, NOW, CFG);
+      settleAndDrain([{ orderIndex: 0, idempotencyKey: "tx1:0", amount: expected, confirmations: CONF, final: true }], store, balances, NOW, CFG);
       expect(store.openOrders().length).toBe(0);
       expect(balances.getBalance("h1")).toBe(credit); // round(credit × expected/expected) === credit
     }),
@@ -192,7 +201,7 @@ test("credit stays finite and non-negative even for huge atomic amounts", () => 
   fc.assert(
     fc.property(huge, fc.integer({ min: 1, max: 50_000_000 }), huge, (expected, credit, amount) => {
       const { balances, store } = fresh([{ sub: 0, hash: "h1", expected, credit }]);
-      settle([{ orderIndex: 0, idempotencyKey: "tx1:0", amount, confirmations: CONF, final: true }], store, balances, NOW, CFG);
+      settleAndDrain([{ orderIndex: 0, idempotencyKey: "tx1:0", amount, confirmations: CONF, final: true }], store, balances, NOW, CFG);
       const bal = balances.getBalance("h1")!;
       expect(Number.isFinite(bal)).toBe(true);
       expect(bal).toBeGreaterThanOrEqual(0);
@@ -209,7 +218,7 @@ test("pay-once: any final payment credits proportionally and closes the order (p
       fc.integer({ min: 1, max: 4_000_000_000_000 }),
       (expected, credit, amount) => {
         const { balances, store } = fresh([{ sub: 0, hash: "h1", expected, credit }]);
-        settle([{ orderIndex: 0, idempotencyKey: "tx1:0", amount, confirmations: CONF, final: true }], store, balances, NOW, CFG);
+        settleAndDrain([{ orderIndex: 0, idempotencyKey: "tx1:0", amount, confirmations: CONF, final: true }], store, balances, NOW, CFG);
         // Single-use address: the order closes on the FIRST final payment — partial or full — and a later
         // top-up is a new order. Credit is still proportional to the locked quote either way.
         expect(store.openOrders().length).toBe(0);
@@ -234,7 +243,7 @@ test("unfunded fast-reap drops abandoned orders but spares ones with seen (even 
   // A non-final (still-confirming) payment to index 1: it's in get_transfers `in` (monotonic — never
   // flickers out), so it marks index 1 active and spares it, but final=false so it does NOT yet credit.
   const seen: Incoming = { orderIndex: 1, idempotencyKey: "txP:1", amount: 500_000, confirmations: 3, final: false };
-  settle([seen], store, balances, NOW, cfg);
+  settleAndDrain([seen], store, balances, NOW, cfg);
   expect(store.openOrders().map((o) => o.order_index).sort()).toEqual([1, 2]);
   expect(balances.getBalance("h2")).toBeNull(); // non-final → credited nothing yet
 });
@@ -252,15 +261,15 @@ test("cross-tick seen: an order spared by a sighting survives a later EMPTY tick
   store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX);
   const pay = (confirmations: number): Incoming => ({ orderIndex: 0, idempotencyKey: "txP:0", amount: 1_000_000, confirmations, final: confirmations >= CONF });
   // Tick A: a non-final sighting → marks the order seen + spares it, credits nothing yet.
-  settle([pay(3)], store, balances, NOW, cfg);
+  settleAndDrain([pay(3)], store, balances, NOW, cfg);
   expect(store.openOrders().length).toBe(1);
   expect(seen.has(0)).toBe(true);
   // Tick B: the wallet goes transiently blind (empty list). The pre-fix per-tick reaper would drop the
   // order here; cross-tick `seen` must keep sparing it.
-  settle([], store, balances, NOW, cfg);
+  settleAndDrain([], store, balances, NOW, cfg);
   expect(store.openOrders().length).toBe(1);
   // Tick C: the payment goes final → credited + closed (pay-once), and `seen` is pruned.
-  settle([pay(CONF)], store, balances, NOW, cfg);
+  settleAndDrain([pay(CONF)], store, balances, NOW, cfg);
   expect(balances.getBalance("h1")).toBe(1_000_000);
   expect(store.openOrders().length).toBe(0);
   expect(seen.has(0)).toBe(false);
@@ -276,7 +285,7 @@ test("a final payment to an order PAST the reap cutoff is credited, not reaped",
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
   store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX); // past the cutoff
-  settle([{ orderIndex: 0, idempotencyKey: "txC:0", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, cfg);
+  settleAndDrain([{ orderIndex: 0, idempotencyKey: "txC:0", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, cfg);
   expect(balances.getBalance("h1")).toBe(1_000_000); // credited, not stranded
   expect(store.openOrders().length).toBe(0); // closed by pay-once, not reaped-without-credit
 });
@@ -305,7 +314,7 @@ test("one tx paying two of our addresses credits both orders correctly", () => {
           { orderIndex: 1, idempotencyKey: "txX:1", amount: a1, confirmations: CONF, final: true },
           { orderIndex: 2, idempotencyKey: "txX:2", amount: a2, confirmations: CONF, final: true },
         ];
-        settle(transfers, store, balances, NOW, CFG);
+        settleAndDrain(transfers, store, balances, NOW, CFG);
         expect(balances.getBalance("h1")).toBe(Math.round(credit1 * (a1 / expected1)));
         expect(balances.getBalance("h2")).toBe(Math.round(credit2 * (a2 / expected2)));
       },
@@ -314,10 +323,10 @@ test("one tx paying two of our addresses credits both orders correctly", () => {
   );
 });
 
-// The backstop horizon: stale orders + their applied-markers are reaped, and the reap can't open a
-// double-credit window. The exact window length is immaterial here — the test only needs a finite,
-// positive backstop (settle's default CFG neutralizes it with backstopMs=NOW ⇒ cutoff 0). Use the
-// prod ORDER_BACKSTOP_MS default (24h) so the value isn't a stale magic number.
+// The backstop horizon: stale unpaid orders are reaped, and a re-scan after an order has closed can't open a
+// double-credit window (the order is gone, so settle enqueues nothing; applied_orders is not purged in stage 2,
+// D4). The exact window length is immaterial here — the test only needs a finite, positive backstop (settle's
+// default CFG neutralizes it with backstopMs=NOW ⇒ cutoff 0). Use the prod ORDER_BACKSTOP_MS default (24h).
 test("backstop reaps stale orders and re-scan after purge never double-credits", () => {
   const BACKSTOP = 24 * 60 * 60 * 1000;
   const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: BACKSTOP };
@@ -332,18 +341,18 @@ test("backstop reaps stale orders and re-scan after purge never double-credits",
         store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: expected, credit_micros: credit, received_atomic: 0, created_at: NOW - BACKSTOP - 1, rate_usd: 0 }, SEED_MAX);
         store.tryAddOrder({ rail: "monero", order_index: 1, address: "a1", hash: "h2", expected_atomic: expected, credit_micros: credit, received_atomic: 0, created_at: NOW - BACKSTOP + 1000, rate_usd: 0 }, SEED_MAX);
 
-        settle([], store, balances, NOW, cfg); // no deposits: reap the stale order, keep the fresh one
+        settleAndDrain([], store, balances, NOW, cfg); // no deposits: reap the stale order, keep the fresh one
         expect(store.openOrders().map((o) => o.order_index).sort()).toEqual([1]);
 
         // Fully pay the surviving order (drops its row, leaves the idempotency marker at applied=NOW).
         const pay: Incoming = { orderIndex: 1, idempotencyKey: "txB:1", amount: expected, confirmations: CONF, final: true };
-        settle([pay], store, balances, NOW, cfg);
+        settleAndDrain([pay], store, balances, NOW, cfg);
         expect(balances.getBalance("h2")).toBe(credit);
         expect(store.openOrders().length).toBe(0);
 
-        // Advance past the backstop so the marker is now stale and gets purged, then re-scan the SAME
-        // deposit: the order is gone so it can't re-credit, and the balance must not move.
-        settle([pay], store, balances, NOW + BACKSTOP + 1, cfg);
+        // Re-scan the SAME deposit long after the order closed (past the backstop): the order is gone, so
+        // settle enqueues nothing and the balance must not move.
+        settleAndDrain([pay], store, balances, NOW + BACKSTOP + 1, cfg);
         expect(balances.getBalance("h2")).toBe(credit);
       },
     ),
@@ -351,20 +360,25 @@ test("backstop reaps stale orders and re-scan after purge never double-credits",
   );
 });
 
-// The crash window between creditOnce (balances.db) and removeOrder (pending.db) — two databases, not
-// atomic. A re-scan after such a crash hits the idempotency guard (creditOnce → false); the order must
-// STILL close, or it lingers as a zombie to the backstop: index→hash link kept alive, /order-status stuck
-// on "finalizing", and the address still accepting further credits.
-test("a deposit already credited (crash between credit and close) still CLOSES the order on re-scan", () => {
+// The old two-DB crash zombie (credit committed to balances.db, removeOrder to pending.db not yet) is GONE:
+// settle now enqueues the credit, books revenue, and closes the order in ONE pending.db transaction. Pin the
+// atomic outcome + its idempotency under a poller re-scan, and exactly-once delivery through the sender.
+test("settle enqueues credit + books revenue + closes the order atomically; re-scan and re-drain stay exactly-once", () => {
   const { balances, store } = fresh([{ sub: 1, hash: "h1", expected: 1_000_000, credit: 5_000_000 }]);
-  // Simulate the crash: the credit + idempotency marker committed, but removeOrder never ran.
-  expect(balances.creditOnce("h1", 5_000_000, "tx1:1", NOW, { asset: "monero", assetAtomic: 1_000_000, scale: ATOMIC_PER_XMR, grossMicros: 0 })).toBe(true);
-  expect(store.openCount()).toBe(1);
-
   const pay: Incoming = { orderIndex: 1, idempotencyKey: "tx1:1", amount: 1_000_000, confirmations: CONF, final: true };
-  settle([pay], store, balances, NOW, CFG); // the poller re-scans the same deposit on the next tick
-  expect(balances.getBalance("h1")).toBe(5_000_000); // not double-credited
-  expect(store.openCount()).toBe(0); // the zombie order is closed, not left to the backstop
+  settle([pay], store, NOW, CFG);
+  // one outbox credit + one revenue row + the order closed, all from the single settle transaction:
+  expect(store.listUnackedCredits()).toEqual([{ idempotency_key: "tx1:1", hash: "h1", micros: 5_000_000 }]);
+  expect(store.listRevenue().length).toBe(1);
+  expect(store.openCount()).toBe(0);
+  // a poller re-scan of the same (now-closed) deposit enqueues nothing new and books no second sale:
+  settle([pay], store, NOW, CFG);
+  expect(store.listUnackedCredits().length).toBe(1);
+  expect(store.listRevenue().length).toBe(1);
+  // the sender delivers it to the balance ledger exactly once, even across repeated drains:
+  drainCreditOutbox(store, balances, NOW);
+  drainCreditOutbox(store, balances, NOW);
+  expect(balances.getBalance("h1")).toBe(5_000_000);
 });
 
 // Task 3: settle scopes every pending_orders read/reap to cfg.rail, so one rail's tick can never reap the
@@ -378,12 +392,12 @@ test("settle is rail-scoped: a monero tick reaps only monero orders, never the o
   store.tryAddOrder(mk("bitcoin", 5), SEED_MAX);
 
   // a monero settle tick (no inbounds) reaps the stale monero order but must NOT touch bitcoin's index-5:
-  settle([], store, balances, NOW, { scale: ATOMIC_PER_XMR, asset: "monero", rail: "monero", backstopMs: NOW, unfundedReapMs: REAP });
+  settleAndDrain([], store, balances, NOW, { scale: ATOMIC_PER_XMR, asset: "monero", rail: "monero", backstopMs: NOW, unfundedReapMs: REAP });
   expect(store.openOrders("monero").length).toBe(0); // monero-5 reaped
   expect(store.openOrders("bitcoin").length).toBe(1); // bitcoin-5 untouched by the monero tick
 
   // the bitcoin tick reaps its own:
-  settle([], store, balances, NOW, { scale: 100_000_000, asset: "bitcoin", rail: "bitcoin", backstopMs: NOW, unfundedReapMs: REAP });
+  settleAndDrain([], store, balances, NOW, { scale: 100_000_000, asset: "bitcoin", rail: "bitcoin", backstopMs: NOW, unfundedReapMs: REAP });
   expect(store.openOrders("bitcoin").length).toBe(0);
   store.db.close();
   balances.db.close();
@@ -394,7 +408,7 @@ test("settle is rail-scoped: a monero tick reaps only monero orders, never the o
 test("settle() is synchronous — returns undefined, never a thenable (the poller's serialization invariant)", () => {
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
-  const ret = settle([], store, balances, NOW, CFG);
+  const ret = settle([], store, NOW, CFG);
   expect(ret).toBeUndefined();
   expect(typeof (ret as unknown as { then?: unknown })?.then).not.toBe("function");
   store.db.close();
@@ -411,8 +425,8 @@ test("two rails settle the same order_index + same txid: each credits its own ha
   // Same index 5 AND same txid "T". Monero's key is the legacy "T:5"; bitcoin's rail prefixes it to
   // "bitcoin:T:5". If both were "T:5", the shared applied_orders would dedupe the second → strand bitcoin.
   // The poller calls settle ONCE PER RAIL:
-  settle([{ orderIndex: 5, idempotencyKey: "T:5", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, { ...CFG, rail: "monero" });
-  settle([{ orderIndex: 5, idempotencyKey: "bitcoin:T:5", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, { ...CFG, asset: "bitcoin", rail: "bitcoin" });
+  settleAndDrain([{ orderIndex: 5, idempotencyKey: "T:5", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, { ...CFG, rail: "monero" });
+  settleAndDrain([{ orderIndex: 5, idempotencyKey: "bitcoin:T:5", amount: 1_000_000, confirmations: CONF, final: true }], store, balances, NOW, { ...CFG, asset: "bitcoin", rail: "bitcoin" });
   expect(balances.getBalance("hmon")).toBe(5_000_000); // monero credited its own hash
   expect(balances.getBalance("hbtc")).toBe(5_000_000); // bitcoin credited too — the prefix kept the keys distinct
   expect(store.openOrders("monero").length).toBe(0); // each closed only its own row

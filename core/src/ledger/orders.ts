@@ -234,9 +234,32 @@ export function openOrderStore(path: string) {
     return listRevenueStmt.all(fromMs, toMs);
   }
 
+  // The settle path, as ONE atomic pending.db transaction: enqueue the credit (INSERT OR IGNORE — idempotent
+  // per key, never throws so it can't roll the txn back), book revenue IFF the enqueue was NEW ("booked iff a
+  // credit is requested" — mirrors the old creditOnce guard, so a re-processed key can't double-count), and
+  // close the order. The whole money-critical step is a single write on ONE database — the two-DB credit→remove
+  // window the old zombie handling guarded against is gone. removeOrder runs unconditionally (pay-once close;
+  // also cleans up a would-be zombie). Synchronous, so settle keeps its no-await invariant.
+  function commitSettlement(
+    key: string,
+    hash: string,
+    micros: number,
+    atMs: number,
+    revenue: { asset: string; assetAtomic: number; scale: number; grossMicros: number },
+    orderIndex: number,
+    rail: string,
+  ): void {
+    const apply = db.transaction(() => {
+      const fresh = enqueueCreditStmt.run(key, hash, micros, atMs).changes > 0;
+      if (fresh) recordRevenueStmt.run(atMs, revenue.asset, revenue.assetAtomic, revenue.scale, micros, revenue.grossMicros);
+      deleteStmt.run(rail, orderIndex);
+    });
+    apply();
+  }
+
   return {
     db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale,
-    enqueueCredit, listUnackedCredits, ackCredit, recordRevenue, listRevenue,
+    enqueueCredit, listUnackedCredits, ackCredit, recordRevenue, listRevenue, commitSettlement,
   };
 }
 

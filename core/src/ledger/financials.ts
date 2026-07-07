@@ -3,7 +3,7 @@
 // XMR to BTC); only the coin-independent USD figures sum across the whole journal, and each row renders at
 // its OWN scale. All sums are BigInt so a going concern's lifetime total can't overflow Number.
 
-// The revenue-row fields this module needs (a subset of db.ts listRevenue()'s shape).
+// The revenue-row fields this module needs (a subset of the orders store's listRevenue() shape).
 export type RevenueRow = { asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number };
 
 // Exact fixed-point USD from micros.

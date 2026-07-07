@@ -9,6 +9,8 @@ import { unlinkSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
 import { settle } from "../src/ledger/settle";
+import { drainCreditOutbox } from "../src/ledger/drain";
+import { migrateRevenue } from "../src/ledger/migrate-revenue";
 
 const PENDING = "/tmp/nullsink-mig-pending.db";
 const BALANCES = "/tmp/nullsink-mig-balances.db";
@@ -50,27 +52,50 @@ test("pending_orders migrates subaddr_index -> order_index (+ address), preservi
   again.db.close();
 });
 
-test("revenue migrates xmr_atomic -> asset_atomic (+ asset/scale); balances + sales journal preserved", () => {
+// D5: the sales book moves balances.db → pending.db at cutover (migrateRevenue), normalising the pre-seam
+// (xmr_atomic, no asset/scale) schema on the way. Real XMR sales exist, so this must copy them exactly and
+// refuse to double-book on a re-run. (balances.db no longer keeps a revenue table; tokens/balances are untouched.)
+test("migrateRevenue moves the sales book balances.db -> pending.db, normalising a pre-seam (xmr_atomic) schema", () => {
   rm(BALANCES);
+  rm(PENDING);
   const old = new Database(BALANCES);
   old.run(`CREATE TABLE tokens (hash TEXT PRIMARY KEY, balance INTEGER NOT NULL)`);
-  old.run(`CREATE TABLE applied_orders (order_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
   old.run(`CREATE TABLE revenue (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, xmr_atomic INTEGER NOT NULL, usd_micros INTEGER NOT NULL, gross_micros INTEGER NOT NULL DEFAULT 0)`);
-  old.run(`INSERT INTO tokens (hash, balance) VALUES ('aa', 7500000)`); // a real XMR-user balance
+  old.run(`INSERT INTO tokens (hash, balance) VALUES ('aa', 7500000)`); // a real XMR-user balance (stays put)
   old.run(`INSERT INTO revenue (at, xmr_atomic, usd_micros, gross_micros) VALUES (1000, 50000000000, 7500000, 8250000)`);
   old.close();
 
-  const db = openDb(BALANCES); // opening runs the migration
-  expect(db.getBalance("aa")).toBe(7500000); // balance untouched (tokens is schema-unchanged)
-  expect(db.listRevenue()).toEqual([
-    // the historical Monero sale reads correctly through the new columns
+  const balancesDb = new Database(BALANCES);
+  const orders = openOrderStore(PENDING);
+  expect(migrateRevenue(balancesDb, orders).copied).toBe(1);
+  // the pre-seam row lands in pending.db, back-filled monero / 1e12 through the new columns:
+  expect(orders.listRevenue()).toEqual([
     { at: 1000, asset: "monero", asset_atomic: 50000000000, scale: 1000000000000, usd_micros: 7500000, gross_micros: 8250000 },
   ]);
-  db.db.close();
+  expect(openDb(BALANCES).getBalance("aa")).toBe(7500000); // balances untouched by the move
+  // idempotent: a second run REFUSES (pending.db already has revenue) rather than doubling the book:
+  expect(() => migrateRevenue(balancesDb, orders)).toThrow(/already/);
+  expect(orders.listRevenue()).toHaveLength(1);
+  balancesDb.close();
+  orders.db.close();
+});
 
-  const again = openDb(BALANCES); // idempotent
-  expect(again.listRevenue()).toHaveLength(1);
-  again.db.close();
+test("migrateRevenue copies a post-seam (asset_atomic) book, preserving each row's own asset + scale", () => {
+  rm(BALANCES);
+  rm(PENDING);
+  const old = new Database(BALANCES);
+  old.run(`CREATE TABLE revenue (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, asset TEXT NOT NULL DEFAULT 'monero', asset_atomic INTEGER NOT NULL, scale INTEGER NOT NULL DEFAULT 1000000000000, usd_micros INTEGER NOT NULL, gross_micros INTEGER NOT NULL DEFAULT 0)`);
+  old.run(`INSERT INTO revenue (at, asset, asset_atomic, scale, usd_micros, gross_micros) VALUES (500, 'bitcoin', 100000, 100000000, 60000000, 60000000)`);
+  old.close();
+
+  const balancesDb = new Database(BALANCES);
+  const orders = openOrderStore(PENDING);
+  expect(migrateRevenue(balancesDb, orders).copied).toBe(1);
+  expect(orders.listRevenue()).toEqual([
+    { at: 500, asset: "bitcoin", asset_atomic: 100000, scale: 100000000, usd_micros: 60000000, gross_micros: 60000000 },
+  ]);
+  balancesDb.close();
+  orders.db.close();
 });
 
 test("composite-PK migration chains onto the seam migration: a pre-seam DB ends rail='monero' and frees the index for the other rail", () => {
@@ -136,8 +161,9 @@ test("a migrated pre-seam order still SETTLES: chain the migration, then credit 
 
   const store = openOrderStore(PENDING); // runs the seam + composite migrations
   const balances = openDb(BALANCES);
-  // a confirmed deposit to the migrated order's index settles + credits it on the monero rail:
-  settle([{ orderIndex: 7, idempotencyKey: "live:7", amount: 1000000, confirmations: 10, final: true }], store, balances, 2000, { scale: 1_000_000_000_000, asset: "monero", rail: "monero", backstopMs: 9_999_999_999_999 });
+  // a confirmed deposit to the migrated order's index settles (enqueues) on the monero rail; the sender delivers:
+  settle([{ orderIndex: 7, idempotencyKey: "live:7", amount: 1000000, confirmations: 10, final: true }], store, 2000, { scale: 1_000_000_000_000, asset: "monero", rail: "monero", backstopMs: 9_999_999_999_999 });
+  drainCreditOutbox(store, balances, 2000);
   expect(balances.getBalance("hlive")).toBe(5000000); // the migrated order credited correctly
   expect(store.openOrders().length).toBe(0); // and closed (pay-once)
   store.db.close();

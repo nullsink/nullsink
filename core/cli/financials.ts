@@ -8,6 +8,7 @@
 // --since/--until bound the sales window [since, until) by UTC date (default: all of time). CSV prints the
 // journal to stdout (pipe to a file) and the summary to stderr, so `> sales.csv` yields a clean import file.
 import { openDb, DB_PATH } from "../src/ledger/db";
+import { openOrderStore, PENDING_DB_PATH } from "../src/ledger/orders";
 import { summarizeRevenue, formatCoin, formatUsd } from "../src/ledger/financials";
 import { optVal, parseFormat } from "./format";
 
@@ -27,7 +28,10 @@ export function runFinancials(args: string[]): void {
   const fromMs = parseBound(optVal(args, "--since"), 0, "--since");
   const toMs = parseBound(optVal(args, "--until"), Number.MAX_SAFE_INTEGER, "--until");
 
-  const { listRevenue, liabilityTotal } = openDb(DB_PATH); // opened inside run, post-guard (see cli/index.ts)
+  // Two DBs (opened inside run, post-guard): the sales book is payment-world state in pending.db now (D5),
+  // while the outstanding-credit liability is the balance ledger in balances.db.
+  const { listRevenue } = openOrderStore(PENDING_DB_PATH);
+  const { liabilityTotal } = openDb(DB_PATH);
   const rows = listRevenue(fromMs, toMs);
   const liability = liabilityTotal();
 
