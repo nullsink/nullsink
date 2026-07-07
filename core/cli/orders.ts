@@ -11,7 +11,7 @@
 // credit — what we'd credit if every open order paid in full; most self-clear at the reaper, so it's a
 // speculative ceiling well above settled liability. For one order's live confirmation depth, query
 // /order-status by token hash (the poller keeps that in memory).
-import { openOrders, type PendingOrder } from "../src/ledger/orders";
+import { openOrderStore, PENDING_DB_PATH, type PendingOrder } from "../src/ledger/orders";
 import { formatUsd, formatCoin } from "../src/ledger/financials";
 import { RAIL_META, RAIL_NAMES, type RailMeta } from "../src/rails/catalog";
 import { formatAge } from "./age";
@@ -50,7 +50,8 @@ export function runOrders(args: string[]): void {
   }
 
   // openOrders() returns rows in arbitrary rowid order; sort oldest-first so the listing is deterministic and
-  // the orders nearest expiry/reaping read off the top.
+  // the orders nearest expiry/reaping read off the top. Store opened inside run, post-guard (see cli/index.ts).
+  const { openOrders } = openOrderStore(PENDING_DB_PATH);
   const rows = openOrders(rail).sort((a, b) => a.created_at - b.created_at);
 
   // Footer/summary figures, shared by every format: open count, per-rail breakdown, and the QUOTED credit

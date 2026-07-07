@@ -1,7 +1,7 @@
 // The three read endpoints — /order-status, /rails, /balance — extracted from handler.ts. All cheap reads
 // behind the global, identity-free read throttle (no money gate), each `(req) => Promise<Response>`.
 import { deny, denyThrottled, readJsonBody } from "../http";
-import { hashToken } from "../ledger/db";
+import { hashToken } from "../ledger/hash";
 import { decimalsOf, type EndpointDeps } from "./types";
 import type { TokenBucket } from "../ratelimit";
 import * as metrics from "../metrics";

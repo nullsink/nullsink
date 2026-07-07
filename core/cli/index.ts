@@ -3,11 +3,10 @@
 // ledger, so run them as the service user (e.g. `sudo -u nullsink nsk balance <hash>`). The dev-only
 // sync-prices tool and the buyer-side gen-token tool are deliberately NOT bundled here.
 //
-// Subcommands are loaded with dynamic import(), NOT static imports, on purpose: src/ledger/db opens the WAL
-// ledger in a module-load singleton, so statically importing a subcommand here would open balances.db before
-// the root guard runs (and even for `version`). Lazy-loading keeps the DB closed until after the guard, and
-// leaves `version` DB-free. KEEP index.ts's own static imports DB-free (just version + guard) or the guard
-// is defeated.
+// Subcommands are loaded with dynamic import(), NOT static imports: each opens its on-disk ledger INSIDE its
+// run() (after the root guard below), and lazy-loading keeps `version`/usage from pulling the ledger modules
+// at all. The guard-before-open guarantee now rests on run() opening the DB — never at module top (see the
+// note in each subcommand). KEEP index.ts's own static imports light (version + guard).
 import { BUILD_VERSION } from "../src/version";
 import { refuseRootOrExit } from "./guard";
 

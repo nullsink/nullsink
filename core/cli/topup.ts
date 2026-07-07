@@ -2,7 +2,7 @@
 // balances` lists, what the buy flow uses); the raw token never touches this CLI. Run on the box
 // (`nsk topup <hash> <dollars>`), manually after a repeat payment. Refuses an unknown hash rather than
 // minting a phantom, unspendable balance (no one holds its preimage) — use `nsk issue` to create a token.
-import { credit, getBalance } from "../src/ledger/db";
+import { openDb, DB_PATH } from "../src/ledger/db";
 import { requireDollars, toDollars, toMicros } from "./money";
 
 export function runTopup(args: string[]): void {
@@ -18,6 +18,8 @@ export function runTopup(args: string[]): void {
   }
   const dollars = requireDollars(args[1], USAGE);
 
+  // Open the ledger inside run (post-guard, see cli/index.ts), after the arg checks above.
+  const { credit, getBalance } = openDb(DB_PATH);
   if (getBalance(hash) === null) {
     console.error("unknown token — mint one with `nsk issue`");
     process.exit(1);

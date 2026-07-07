@@ -2,7 +2,7 @@
 // manually after a payment lands. The dollars→token decision is where your margin lives (credit fewer
 // dollars than the payment was worth); the proxy never sees it. The raw token is shown only here — only its
 // hash is stored.
-import { credit, hashToken } from "../src/ledger/db";
+import { openDb, DB_PATH, hashToken } from "../src/ledger/db";
 import { requireDollars, toMicros } from "./money";
 import { mintToken } from "./mint";
 
@@ -11,6 +11,8 @@ export function runIssue(args: string[]): void {
 
   // Mint via the shared cli/mint: 0sink_ + base64url(32 random bytes) + a 4-char typo checksum.
   const token = mintToken();
+  // Open the ledger inside run (post-guard, see cli/index.ts) and credit the freshly minted token's hash.
+  const { credit } = openDb(DB_PATH);
   credit(hashToken(token), toMicros(dollars));
 
   console.log(`Issued $${dollars.toFixed(2)}. Give the user this token (shown once):\n`);
