@@ -35,6 +35,8 @@ BACKUP_MAX_AGE_H="${BACKUP_MAX_AGE_H:-28}"     # stale if newest backup older th
 STAMP="${STAMP:-/run/status-check.failed}"     # open-incident marker (tmpfs, clears on reboot) for the recovery page
 MEM_WARN_PCT="${MEM_WARN_PCT:-75}"             # early OOM warning: page when nullsink's cgroup memory crosses this % of MemoryMax
 NRESTARTS_WARN="${NRESTARTS_WARN:-5}"          # page when auto-restarts since last clean start reach this (crash-flap; ~StartLimitBurst)
+MAX_OPEN_ORDERS="${MAX_OPEN_ORDERS:-1000}"     # /buy order-slot cap (src/endpoints/buy.ts); default matches .env.example (picked up from /etc/nullsink.env when set there)
+OPEN_ORDERS_WARN_PCT="${OPEN_ORDERS_WARN_PCT:-70}"  # early order-slot-exhaustion warning: page when peak open orders reach this % of the cap
 
 fail=0
 ok()   { echo "OK   $*"; }
@@ -164,6 +166,24 @@ if systemctl is-active --quiet nullsink 2>/dev/null; then
   if grep -qiE 'POLL BLIND' <<<"$jlog"; then
     warn "POLL BLIND in the last ${LOG_WINDOW% ago} — a rail's deposit detection is DOWN (the APP can't reach its node/wallet); a confirmed deposit will NOT credit until it recovers. See the 'POLL BLIND' journal lines."
   else ok "poller healthy (no POLL BLIND, ${LOG_WINDOW% ago})"; fi
+  # Order-slot saturation: /buy is public + identity-free, bounded only by the buy bucket + MAX_OPEN_ORDERS
+  # (src/ratelimit.ts notes PoW is "held in reserve"). The app already emits peak:orders / reject:orders on
+  # its [metrics] line, but they were journal-only — so an order-slot-exhaustion flood (or organic saturation)
+  # would sit unseen. Surface both: an EARLY warning as the peak nears the cap, then the LOUD signal once the
+  # cap is hit and a buyer is turned away. peak:orders is a per-window high-water, so take the max seen.
+  peak_orders="$(grep -oE 'peak:orders=[0-9]+' <<<"$jlog" | grep -oE '[0-9]+' | sort -rn | head -1)"
+  if [ -z "$peak_orders" ]; then ok "no open-order peak reported (${LOG_WINDOW% ago})"
+  elif [ "$MAX_OPEN_ORDERS" -gt 0 ] 2>/dev/null; then
+    orders_pct=$(( peak_orders * 100 / MAX_OPEN_ORDERS ))
+    if [ "$orders_pct" -ge "$OPEN_ORDERS_WARN_PCT" ]; then
+      warn "open orders peaked ${peak_orders}/${MAX_OPEN_ORDERS} (${orders_pct}% of cap) in the last ${LOG_WINDOW% ago} — nearing MAX_OPEN_ORDERS; possible order-slot exhaustion, enable the PoW lever or raise the cap"
+    else ok "open-order peak ${peak_orders}/${MAX_OPEN_ORDERS} (${orders_pct}% of cap, ${LOG_WINDOW% ago})"; fi
+  else warn "MAX_OPEN_ORDERS='${MAX_OPEN_ORDERS}' is not a positive number — cannot evaluate order-slot saturation; fix the env"; fi
+  # Loud confirmation: reject:orders is emitted only when /buy actually hit MAX_OPEN_ORDERS and shed a buyer
+  # with 503 busy_try_later (metrics.ts) — always page-worthy, attack or genuine capacity.
+  if grep -qE 'reject:orders=' <<<"$jlog"; then
+    warn "reject:orders in the last ${LOG_WINDOW% ago} — /buy hit MAX_OPEN_ORDERS and turned buyers away (order-slot exhaustion or real capacity); enable PoW or raise MAX_OPEN_ORDERS"
+  else ok "no order-slot rejections (${LOG_WINDOW% ago})"; fi
 fi
 
 # --- 4. buy rail (only when enabled) ---
