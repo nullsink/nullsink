@@ -96,6 +96,14 @@ Anthropic (Claude):
 
 Pi ([docs](https://pi.dev/docs/latest/custom-provider)) — the same two providers in `~/.pi/agent/models.json`.
 
+Or install the community extension **[`pi-nullsink`](https://www.npmjs.com/package/pi-nullsink)** — an independent client that registers the providers for you, mints and tops up a key in the terminal, and shows a live balance readout:
+
+```sh
+pi install npm:pi-nullsink
+```
+
+To wire the providers by hand instead:
+
 OpenAI-compatible:
 
 ```json
