@@ -11,7 +11,7 @@ import { Database } from "bun:sqlite";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
-import { migrateRevenue } from "../src/ledger/migrate-revenue";
+import { migrateRevenue, reconcileOutbox } from "../src/ledger/migrate-revenue";
 
 const dir = process.argv[2];
 if (!dir) {
@@ -65,6 +65,7 @@ const orders = openOrderStore(`${work}/pending.db`);
 const balances = openDb(`${work}/balances.db`);
 const afterOrders = orders.openOrders();
 migrateRevenue(balances.db, orders); // move the sales book into the pending.db copy
+reconcileOutbox(balances.db, orders); // seed acked tombstones for already-applied keys (F3 defense)
 const afterRevenue = orders.listRevenue();
 orders.db.close();
 balances.db.close();

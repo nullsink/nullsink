@@ -9,7 +9,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
-import { migrateRevenue } from "../src/ledger/migrate-revenue";
+import { migrateRevenue, reconcileOutbox } from "../src/ledger/migrate-revenue";
 
 const balancesPath = process.argv[2];
 const pendingPath = process.argv[3];
@@ -28,6 +28,7 @@ const srcCount = balancesDb.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM 
 const srcGross = srcCount ? balancesDb.query<{ g: number }, []>("SELECT COALESCE(SUM(gross_micros), 0) AS g FROM revenue").get()!.g : 0;
 
 const { copied } = migrateRevenue(balancesDb, orders);
+const { seeded } = reconcileOutbox(balancesDb, orders); // F3 defense: acked tombstones for already-applied keys
 
 const dstRows = orders.listRevenue();
 const dstGross = dstRows.reduce((a, r) => a + r.gross_micros, 0);
@@ -41,6 +42,7 @@ console.log(`  source rows : ${srcCount}   gross = $${(srcGross / 1_000_000).toF
 console.log(`  copied      : ${copied}   ${ok(copied === srcCount)}`);
 console.log(`  dest rows   : ${dstRows.length}   ${ok(dstRows.length === srcCount)}`);
 console.log(`  dest gross  : $${(dstGross / 1_000_000).toFixed(2)}   ${ok(dstGross === srcGross)}`);
+console.log(`  outbox tombstones seeded : ${seeded}   (F3 defense — acked, never delivered)`);
 const pass = copied === srcCount && dstRows.length === srcCount && dstGross === srcGross;
 console.log(pass ? "RESULT: ✓ revenue moved, counts + gross reconcile." : "RESULT: ✗ INVESTIGATE — a figure diverged.");
 console.log("");

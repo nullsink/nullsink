@@ -248,6 +248,20 @@ test("unfunded fast-reap drops abandoned orders but spares ones with seen (even 
   expect(balances.getBalance("h2")).toBeNull(); // non-final → credited nothing yet
 });
 
+// The unfunded fast-reap uses STRICT `<` (o.created_at < now - unfundedReapMs). An order created EXACTLY at the
+// cutoff must be SPARED — a one-tick-early reap drops a payment that may still be confirming. The NOW±offset
+// cases above don't hit the boundary; pin `<` vs `<=` here (a settle.ts mutation survivor).
+test("unfunded fast-reap spares an order created EXACTLY at the cutoff (strict <, not <=)", () => {
+  const REAP = 60 * 60 * 1000;
+  const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", rail: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP };
+  const store = openOrderStore(":memory:");
+  store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP, rate_usd: 0 }, SEED_MAX); // == cutoff → spared
+  store.tryAddOrder({ rail: "monero", order_index: 1, address: "a1", hash: "h2", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX); // older → reaped
+  settle([], store, NOW, cfg); // no deposits → the unfunded reap runs
+  expect(store.openOrders().map((o) => o.order_index).sort()).toEqual([0]); // 0 spared (== cutoff), 1 reaped (< cutoff)
+  store.db.close();
+});
+
 test("cross-tick seen: an order spared by a sighting survives a later EMPTY tick, then credits", () => {
   // Bug-2 regression. A transient empty get_transfers (wallet rescan / node resync → rails/monero.ts
   // coerces a missing `in` to []) must NOT fast-reap an order a PRIOR tick already saw paying. The poller
