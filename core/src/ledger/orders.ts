@@ -93,6 +93,40 @@ export function openOrderStore(path: string) {
   // that reverse lookup. Cheap on a table bounded by MAX_OPEN_ORDERS.
   db.run(`CREATE INDEX IF NOT EXISTS idx_pending_hash ON pending_orders (hash)`);
 
+  // --- Stage-2 payment→prompt-world crossing (D3) + the sales book (D5) — both PAYMENT-world state, so they
+  //     live here in pending.db and never in the prompt world's balances.db. ---
+
+  // credit_outbox: the durable, exactly-once credit hand-off. settle() writes a row here in the SAME
+  // transaction that closes the order; a sender drains unacked rows into the balance ledger's creditOnce
+  // (in-process today; a peer-authed unix socket once the proxy splits out). Keyed by the rail's opaque
+  // idempotency_key — the very key creditOnce dedupes on — so a redelivery is a no-op at the receiver. acked_at
+  // stays NULL until the credit lands; the partial index keeps the sender's "what's unsent" scan O(unacked).
+  db.run(`CREATE TABLE IF NOT EXISTS credit_outbox (
+  idempotency_key TEXT PRIMARY KEY,
+  hash            TEXT NOT NULL,
+  micros          INTEGER NOT NULL,
+  created_at      INTEGER NOT NULL,
+  acked_at        INTEGER
+)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_outbox_unacked ON credit_outbox (created_at) WHERE acked_at IS NULL`);
+
+  // revenue: append-only sales book (cli/financials.ts data source). One row per credited payment: WHEN, the
+  // coin (`asset` + `scale` = atomic-units-per-whole) and how much of it landed (`asset_atomic`), and the USD
+  // credit issued. Holds NO token hash / address / identity — a "$X sale at time T", not a request log. D5
+  // moves it OFF balances.db to here so coin amounts, locked rates, and txid-derived keys stay out of the prompt
+  // world; settle() writes it in the outbox transaction (booked iff a credit is enqueued). Schema matches the
+  // pre-split balances.db revenue table byte-for-byte, so the one-time cross-DB copy at cutover is a plain move.
+  db.run(`CREATE TABLE IF NOT EXISTS revenue (
+  id           INTEGER PRIMARY KEY,
+  at           INTEGER NOT NULL,
+  asset        TEXT NOT NULL DEFAULT 'monero',
+  asset_atomic INTEGER NOT NULL,
+  scale        INTEGER NOT NULL DEFAULT 1000000000000,
+  usd_micros   INTEGER NOT NULL,
+  gross_micros INTEGER NOT NULL DEFAULT 0
+)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_revenue_at ON revenue (at)`);
+
   // Atomic slot-claiming insert: the row lands ONLY if the open-order count is still under `maxOpen`,
   // evaluated inside the same statement. WAL serializes writers, so two concurrent claims run one-at-a-
   // time and the second sees the first's committed row in its COUNT — closing the openCount()→addOrder
@@ -111,6 +145,19 @@ export function openOrderStore(path: string) {
   const deleteStmt = db.query("DELETE FROM pending_orders WHERE rail = ? AND order_index = ?");
   const purgeStmt = db.query("DELETE FROM pending_orders WHERE created_at < ?");
   const purgeByRailStmt = db.query("DELETE FROM pending_orders WHERE created_at < ? AND rail = ?");
+  const enqueueCreditStmt = db.query(
+    "INSERT OR IGNORE INTO credit_outbox (idempotency_key, hash, micros, created_at) VALUES (?, ?, ?, ?)",
+  );
+  const listUnackedCreditsStmt = db.query<{ idempotency_key: string; hash: string; micros: number }, []>(
+    "SELECT idempotency_key, hash, micros FROM credit_outbox WHERE acked_at IS NULL ORDER BY created_at ASC",
+  );
+  const ackCreditStmt = db.query("UPDATE credit_outbox SET acked_at = ? WHERE idempotency_key = ?");
+  const recordRevenueStmt = db.query(
+    "INSERT INTO revenue (at, asset, asset_atomic, scale, usd_micros, gross_micros) VALUES (?, ?, ?, ?, ?, ?)",
+  );
+  const listRevenueStmt = db.query<{ at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }, [number, number]>(
+    "SELECT at, asset, asset_atomic, scale, usd_micros, gross_micros FROM revenue WHERE at >= ? AND at < ? ORDER BY at ASC",
+  );
 
   // Atomically claim an open-order slot and record the order, ONLY if fewer than `maxOpen` are currently
   // open. Returns true if stored, false if the ceiling was already reached (caller rejects with
@@ -157,7 +204,40 @@ export function openOrderStore(path: string) {
     else purgeByRailStmt.run(beforeMs, rail);
   }
 
-  return { db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale };
+  // --- credit_outbox + revenue accessors (see the table definitions above). ---
+
+  // Enqueue a credit for delivery to the balance ledger. INSERT OR IGNORE keyed on idempotency_key: a repeat
+  // (a re-scan of the same deposit, or a settle re-run) is a no-op and — crucially — never THROWS, so it can't
+  // roll back the enclosing settle transaction and wedge the order open. Returns true iff a NEW row was
+  // enqueued, so the caller books revenue only then ("booked iff a credit is requested").
+  function enqueueCredit(key: string, hash: string, micros: number, atMs: number): boolean {
+    return enqueueCreditStmt.run(key, hash, micros, atMs).changes > 0;
+  }
+
+  // Unacked outbox rows, oldest first — the sender's work list (each drained into creditOnce, then ackCredit'd).
+  function listUnackedCredits(): { idempotency_key: string; hash: string; micros: number }[] {
+    return listUnackedCreditsStmt.all();
+  }
+
+  // Mark a credit delivered (the receiver returned applied / already_applied). Idempotent; a re-ack is harmless.
+  function ackCredit(key: string, atMs: number): void {
+    ackCreditStmt.run(atMs, key);
+  }
+
+  // Book a sale (see the revenue table). settle() calls this inside the same transaction as the outbox enqueue.
+  function recordRevenue(atMs: number, asset: string, assetAtomic: number, scale: number, usdMicros: number, grossMicros: number): void {
+    recordRevenueStmt.run(atMs, asset, assetAtomic, scale, usdMicros, grossMicros);
+  }
+
+  // Sales rows in [fromMs, toMs) (default: everything). For cli/financials.ts, now a pending.db reader (D5).
+  function listRevenue(fromMs = 0, toMs = Number.MAX_SAFE_INTEGER): { at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }[] {
+    return listRevenueStmt.all(fromMs, toMs);
+  }
+
+  return {
+    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale,
+    enqueueCredit, listUnackedCredits, ackCredit, recordRevenue, listRevenue,
+  };
 }
 
 export type OrdersStore = ReturnType<typeof openOrderStore>;
