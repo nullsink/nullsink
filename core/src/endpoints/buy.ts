@@ -4,9 +4,9 @@
 import { deny, readJsonBody } from "../http";
 import * as log from "../log";
 import * as metrics from "../metrics";
-import { decimalsOf, type EndpointDeps } from "./types";
+import { decimalsOf, type PaymentsEndpointDeps } from "./types";
 
-export function makeBuy(d: EndpointDeps) {
+export function makeBuy(d: PaymentsEndpointDeps) {
   const {
     rails: RAILS,
     defaultRail: DEFAULT_RAIL,

@@ -2,7 +2,7 @@
 // behind the global, identity-free read throttle (no money gate), each `(req) => Promise<Response>`.
 import { deny, denyThrottled, readJsonBody } from "../http";
 import { hashToken } from "../ledger/hash";
-import { decimalsOf, type EndpointDeps } from "./types";
+import { decimalsOf, type ProxyEndpointDeps, type PaymentsEndpointDeps } from "./types";
 import type { TokenBucket } from "../ratelimit";
 import * as metrics from "../metrics";
 
@@ -22,7 +22,7 @@ function readThrottled(bucket: TokenBucket | undefined): Response | null {
 // it reveals only how far along a payment is, never the balance. Once an order settles the row is dropped
 // (settle.ts), so a credited/reaped/never-existed order all read `closed` — the dropped-link privacy
 // property. The client confirms the actual credit via /balance.
-export function makeOrderStatus(d: EndpointDeps) {
+export function makeOrderStatus(d: PaymentsEndpointDeps) {
   const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, orderStatus, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
@@ -60,7 +60,7 @@ export function makeOrderStatus(d: EndpointDeps) {
 // GET /rails: the active pay rails (name + display unit + confirmations) and which one /buy defaults to.
 // Lets the client render a coin picker without hardcoding the set; privacy-neutral (reveals only which coins
 // we accept, already public). A cheap read — the shared read limit applies.
-export function makeRails(d: EndpointDeps) {
+export function makeRails(d: PaymentsEndpointDeps) {
   const { rails: RAILS, defaultRail: DEFAULT_RAIL, readRateLimit } = d;
   return async (_req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
@@ -79,7 +79,7 @@ export function makeRails(d: EndpointDeps) {
 // carries its USD-per-Mtok pricing (nullsink bills upstream rates) — the one thing an upstream /v1/models
 // can't give you, and the reason we build the list locally rather than proxy one. `created` is a constant 0
 // (we don't track model dates) — present only to satisfy the OpenAI Model schema.
-export function makeModels(d: EndpointDeps) {
+export function makeModels(d: ProxyEndpointDeps) {
   const { servedModels, readRateLimit } = d;
   return async (_req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
@@ -100,7 +100,7 @@ export function makeModels(d: EndpointDeps) {
 
 // GET /balance: a token holder checks their own remaining balance. Distinguishes a known token (200) from
 // unknown (401) — a token-validity oracle — fine because tokens are 256-bit unguessable.
-export function makeBalance(d: EndpointDeps) {
+export function makeBalance(d: ProxyEndpointDeps) {
   const { getBalance, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
