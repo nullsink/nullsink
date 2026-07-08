@@ -20,10 +20,11 @@ export function openDb(path: string) {
   balance INTEGER NOT NULL
 )`);
 
-  // Idempotency guard for payment crediting. Records already-credited deposits by the rail's opaque key, so
-  // a crash between credit() and clearing the pending order can't double-credit when the poller re-scans the
-  // same deposit. Holds ONLY that key + timestamp (no token hash, no amount), so a balances.db leak reveals
-  // no payment↔token linkage. Bounded by purgeApplied() at the order backstop horizon.
+  // Idempotency guard for payment crediting. Records already-applied credits by the rail's opaque key, so an
+  // outbox re-delivery (a sender retry after a crash before ack) or a poller re-scan can't double-credit. Holds
+  // ONLY that key + timestamp (no token hash, no amount), so a balances.db leak reveals no payment↔token
+  // linkage. NOT auto-purged in stage 2 (D4): dropping a marker while a retry is still in flight would
+  // double-credit; purgeApplied() stays for a future payments-side safe-point prune. ~50 bytes/marker.
   db.run(`CREATE TABLE IF NOT EXISTS applied_orders (
   order_id   TEXT PRIMARY KEY,
   applied_at INTEGER NOT NULL
@@ -42,37 +43,9 @@ export function openDb(path: string) {
   micros  INTEGER NOT NULL
 )`);
 
-  // Append-only sales book, for accounting / revenue recognition (cli/financials.ts reads it). One row per
-  // credited payment: WHEN, which coin (`asset`) and how much of it landed (`asset_atomic`, with `scale` =
-  // its atomic-units-per-whole, so the books render each coin exactly and stay self-contained), and how
-  // much USD credit we issued for it. Holds NO token hash, NO address, NO identity — same privacy class as
-  // the tokens table (a "$X sale at time T", not a request log). Written inside creditOnce's transaction so
-  // it can't drift from the credit. Never purged (books are kept); it grows one row per sale, negligible.
-  // Schema note: `asset`/`scale` (+ the `asset_atomic` rename) arrived with the rail seam. DO NOT delete +
-  // rebuild balances.db — it holds LIVE token balances and the sales journal; the in-place migration below
-  // ALTERs an older table instead. (tokens + applied_orders are schema-unchanged across the seam — they
-  // need no migration.)
-  db.run(`CREATE TABLE IF NOT EXISTS revenue (
-  id           INTEGER PRIMARY KEY,
-  at           INTEGER NOT NULL,
-  asset        TEXT NOT NULL DEFAULT 'monero',
-  asset_atomic INTEGER NOT NULL,
-  scale        INTEGER NOT NULL DEFAULT 1000000000000,
-  usd_micros   INTEGER NOT NULL,
-  gross_micros INTEGER NOT NULL DEFAULT 0
-)`);
-  db.run(`CREATE INDEX IF NOT EXISTS idx_revenue_at ON revenue (at)`);
-
-  // In-place migration from the pre-seam revenue schema (`xmr_atomic`, no `asset`/`scale`). Column-guarded →
-  // idempotent. Existing rows ARE Monero sales, so the rename + the column defaults ('monero', 1e12) leave
-  // the historical sales journal exactly correct. MUST run before the statements below (they reference the
-  // new columns), and with the service STOPPED so the ALTER doesn't race a settle writing a revenue row.
-  const rcols = db.query<{ name: string }, []>("PRAGMA table_info(revenue)").all();
-  const rhave = new Set(rcols.map((c) => c.name));
-  if (rhave.has("xmr_atomic") && !rhave.has("asset_atomic"))
-    db.run("ALTER TABLE revenue RENAME COLUMN xmr_atomic TO asset_atomic");
-  if (!rhave.has("asset")) db.run("ALTER TABLE revenue ADD COLUMN asset TEXT NOT NULL DEFAULT 'monero'");
-  if (!rhave.has("scale")) db.run("ALTER TABLE revenue ADD COLUMN scale INTEGER NOT NULL DEFAULT 1000000000000");
+  // The sales book (`revenue`) is PAYMENT-world state and lives in pending.db now (D5, see ledger/orders.ts),
+  // not here — so coin amounts, locked rates, and txid-derived keys never enter the prompt world. settle()
+  // books it in the outbox transaction; this store only credits balances.
 
   const getStmt = db.query<{ balance: number }, [string]>(
     "SELECT balance FROM tokens WHERE hash = ?",
@@ -91,12 +64,6 @@ export function openDb(path: string) {
     "INSERT OR IGNORE INTO applied_orders (order_id, applied_at) VALUES (?, ?)",
   );
   const purgeAppliedStmt = db.query("DELETE FROM applied_orders WHERE applied_at < ?");
-  const recordRevenueStmt = db.query(
-    "INSERT INTO revenue (at, asset, asset_atomic, scale, usd_micros, gross_micros) VALUES (?, ?, ?, ?, ?, ?)",
-  );
-  const listRevenueStmt = db.query<{ at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }, [number, number]>(
-    "SELECT at, asset, asset_atomic, scale, usd_micros, gross_micros FROM revenue WHERE at >= ? AND at < ? ORDER BY at ASC",
-  );
   // CAST the SUM to TEXT so it returns as an exact decimal string, not a JS number: a going concern's lifetime
   // outstanding total crosses Number.MAX_SAFE_INTEGER at ~$9B of credit-micros, past which a number SUM
   // silently drops low digits — unacceptable for a money figure (cli/financials.ts renders this exactly).
@@ -134,21 +101,14 @@ export function openDb(path: string) {
 
   // Credit `micros` to `hash` exactly once per idempotency key `orderId` (the rail's opaque key). The
   // applied-orders insert and balance credit run in ONE transaction (same DB, atomic even under WAL), making
-  // a repeated settle of the same deposit (poller re-scan) a no-op. Returns true if this call applied the
-  // credit. When `revenue` is given, a revenue row is recorded in the SAME transaction — so a sale is booked
-  // iff the credit lands, and a re-scan (blocked by the applied_orders guard) can't double-count revenue
-  // either. See the revenue table / settle.ts for the revenue field meanings.
-  function creditOnce(
-    hash: string,
-    micros: number,
-    orderId: string,
-    atMs: number,
-    revenue?: { asset: string; assetAtomic: number; scale: number; grossMicros: number },
-  ): boolean {
+  // a repeated apply of the same deposit (a poller re-scan, or an outbox re-delivery from the sender) a no-op.
+  // Returns true if this call applied the credit, false if `orderId` was already applied — BOTH mean the credit
+  // is durably in the ledger (the sender acks on either). Revenue books payment-side now (D5, ledger/orders.ts),
+  // in the outbox transaction, so this no longer touches the sales book.
+  function creditOnce(hash: string, micros: number, orderId: string, atMs: number): boolean {
     const apply = db.transaction(() => {
       if (insertAppliedStmt.run(orderId, atMs).changes === 0) return false; // already credited
       creditStmt.run(hash, micros);
-      if (revenue != null) recordRevenueStmt.run(atMs, revenue.asset, revenue.assetAtomic, revenue.scale, micros, revenue.grossMicros);
       return true;
     });
     return apply();
@@ -207,16 +167,6 @@ export function openDb(path: string) {
     purgeAppliedStmt.run(beforeMs);
   }
 
-  // Sales book rows in [fromMs, toMs) (default: everything). For cli/financials.ts. `usd_micros` is the
-  // credit issued (the deferred-revenue liability created); `gross_micros` is the USD paid, valued at the
-  // order's locked rate — exact and independent of any later MARGIN change.
-  function listRevenue(
-    fromMs = 0,
-    toMs = Number.MAX_SAFE_INTEGER,
-  ): { at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }[] {
-    return listRevenueStmt.all(fromMs, toMs);
-  }
-
   // Outstanding prepaid credit across all tokens = the deferred-revenue liability (money owed in service).
   // `micros` is exact BigInt (the SUM is CAST to TEXT to dodge the number ceiling; see liabilityStmt);
   // `tokens` is a plain count. COUNT always returns a row, so the ?? is just a total-safety floor.
@@ -234,7 +184,7 @@ export function openDb(path: string) {
     return listBalancesStmt.all();
   }
 
-  return { db, getBalance, hold, credit, creditOnce, openHold, settleHold, recoverHolds, purgeApplied, listRevenue, liabilityTotal, listBalances };
+  return { db, getBalance, hold, credit, creditOnce, openHold, settleHold, recoverHolds, purgeApplied, liabilityTotal, listBalances };
 }
 
 export type BalanceStore = ReturnType<typeof openDb>;
