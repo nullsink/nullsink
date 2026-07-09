@@ -1,4 +1,4 @@
-// Pay-rail registry + selection. The composition root (src/index.ts) picks the active rails by the PAY_RAILS
+// Pay-rail registry + selection. The composition root (src/payments.ts) picks the active rails by the PAY_RAILS
 // env (comma list; legacy PAY_RAIL = a single name) and injects their capabilities into the handler + poller.
 import { moneroRail } from "./monero";
 import { bitcoinRail } from "./bitcoin";
@@ -11,7 +11,7 @@ export const RAILS: Record<string, PayRail> = {
   bitcoin: bitcoinRail,
 };
 
-// Resolve a rail by name, or throw — the boot path in src/index.ts logs the message and exits on it.
+// Resolve a rail by name, or throw — the boot path in src/payments.ts logs the message and exits on it.
 export function selectRail(name: string): PayRail {
   const rail = RAILS[name];
   if (!rail) throw new Error(`unknown rail=${name} (known: ${Object.keys(RAILS).join(", ")})`);

@@ -1,12 +1,14 @@
 // The BOTH-WORLDS router: prompt-world routes (handler.ts) + payment-world routes (payments-handler.ts)
-// behind one handler. This is the pre-split monolith's shape, kept for src/index.ts (until the two
-// composition roots replace it) and for the handler tests that drive /v1/*, /balance AND /buy through a
-// single router.
+// behind one handler. NOTHING IN PRODUCTION RUNS THIS. It survives the split as a test fixture: the handler
+// tests and scripts/e2e-capture.ts drive /v1/*, /balance AND /buy through a single router, which is far
+// cheaper than standing up two servers per test. It also keeps one copy of the pre-split routing shape to
+// diff the two world routers against.
 //
 // LOAD-BEARING: neither composition root (proxy.ts / payments.ts) may import this module. It is the only
 // place the two worlds' code meets, so importing it from a root would drag the other world's code into that
-// binary — and the proxy binary is the unit stage 4 attests, which must stay minimal and payments-free. A
-// build-time check asserts the compiled proxy carries no payments symbols.
+// binary — and the proxy binary is the unit stage 4 attests, which must stay minimal and payments-free.
+// test/world-isolation.test.ts asserts no root reaches it, and scripts/assert-worlds.ts asserts the compiled
+// proxy carries no payments symbols.
 import { buildProxyRoutes, type ProxyHandlerDeps } from "./handler";
 import { buildPaymentsRoutes, type PaymentsHandlerDeps } from "./payments-handler";
 import { deny } from "./http";

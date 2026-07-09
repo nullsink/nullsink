@@ -1,7 +1,7 @@
 // Aggregate, identity-free operational counters — the "are we serving, and are we nearing a ceiling?"
 // signal. Like log.ts, this is a process-global, in-memory module (NO per-request record, no identity, reset
 // on restart, nothing persisted). It holds only aggregate COUNTS + high-water marks, flushed to one [metrics]
-// journald line on a coarse cadence and on shutdown (index.ts), then the window resets. Families:
+// journald line on a coarse cadence and on shutdown (each composition root), then the window resets. Families:
 //
 //   bill.*     — money-safety anomalies on the metered path (handler.ts). Each is ALSO logged per-event at
 //     ERROR there (and paged by deploy/status-check.sh); these are the trend behind that page.
@@ -137,7 +137,7 @@ export function observeOpenOrders(n: number): void {
   if (n > peakOpenOrders) peakOpenOrders = n;
 }
 
-// Boot-time: the count of stranded holds recoverHolds() refunded at startup (index.ts, once per start). Adds (not
+// Boot-time: the count of stranded holds recoverHolds() refunded at startup (proxy.ts, once per start). Adds (not
 // sets) so the boot event survives into whatever window is open; a clean restart records nothing.
 export function recordRecoveredHolds(n: number): void {
   recoveredHolds += n;
@@ -166,7 +166,7 @@ export function snapshot(): MetricsSnapshot {
 }
 
 // Format a snapshot into the single [metrics] journald line + its level, or null when nothing happened (so
-// the flush never spams). PURE — extracted from index.ts's flushMetrics so the WARN-vs-INFO precedence is
+// the flush never spams). PURE — extracted from the pre-split root's flushMetrics so the WARN-vs-INFO precedence is
 // unit-testable without a logger or timers. Problem signals (money anomalies + upstream errors + local
 // rejects) are notable → WARN, so `journalctl -p warning` stays problem-only; the served/req heartbeat +
 // peaks (and relayed user 4xx — a client error, not ours) are routine → INFO, and ride along on the WARN
@@ -218,7 +218,7 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   return null;
 }
 
-// Start a fresh window: zero every counter / peak and stamp the start. `nowMs` is injected (index.ts passes
+// Start a fresh window: zero every counter / peak and stamp the start. `nowMs` is injected (each composition root passes
 // Date.now()) so this module stays clock-free and unit-testable.
 export function reset(nowMs: number): void {
   upstream.throttle = upstream.server = upstream.auth = upstream.billing = upstream.timeout = upstream.unreachable = upstream.relayed4xx = upstream.notfound = upstream.other = 0;

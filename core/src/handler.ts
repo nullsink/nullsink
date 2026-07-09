@@ -5,8 +5,8 @@
 //
 // This module must NOT import anything payment-world (rails, the order store, /buy). The proxy binary is the
 // unit stage 4 attests, so it must never bundle payments code — that's a structural guarantee, not a
-// tree-shaking hope. The combined both-worlds router lives in handler-combined.ts, which only the pre-split
-// index.ts and the handler tests import; neither composition root does.
+// tree-shaking hope. The combined both-worlds router lives in handler-combined.ts, which only the tests
+// import; neither composition root does.
 import { hashToken } from "./ledger/hash";
 import { priceUsage, isReasoningModel, pricedModels } from "./cost";
 import { BUILD_VERSION } from "./version";
@@ -253,7 +253,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     const representative = candidates[0]!;
     // Bound the body before buffering (DoS): the content-length header check rejects bodies that DECLARE
     // an oversized length before the balance check. Chunked uploads (no content-length) bypass this and
-    // are bounded instead by Bun's maxRequestBodySize backstop (index.ts). Cap matches the upstream ceiling.
+    // are bounded instead by Bun's maxRequestBodySize backstop (proxy.ts). Cap matches the upstream ceiling.
     if (Number(req.headers.get("content-length") ?? 0) > MAX_MESSAGES_BODY_BYTES) {
       metrics.recordGate("request");
       return denyApi(representative, 413, "payload_too_large");
@@ -447,7 +447,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
             billActual(0);
           }
         };
-        // Track this live stream so a SIGTERM can finalize its billing before force-close (index.ts shutdown).
+        // Track this live stream so a SIGTERM can finalize its billing before force-close (proxy.ts shutdown).
         inflight.add(settle);
         metrics.observeStreams(inflight.size); // high-water concurrent live streams
 
@@ -457,7 +457,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // (balance debited, never reconciled, provider already paid for what generated) until the process
         // restarts. This timer closes that: stop upstream spend, bill the metered partial (treated as a
         // disconnect → a no-usage-yet stream pays the input floor, not a full refund), and end the client
-        // stream. Set strictly ABOVE upstreamTimeoutMs (index.ts), so a legit stream always reaches
+        // stream. Set strictly ABOVE upstreamTimeoutMs (proxy.ts), so a legit stream always reaches
         // done/error first and this never fires for it; settle() clears it on every natural exit.
         cancelDeadline = scheduleStreamDeadline(() => {
           clientDisconnected = true; // a force-cut is a disconnect for billing: partial / input floor, not full refund

@@ -79,7 +79,7 @@ export function makeBuy(d: PaymentsEndpointDeps) {
     // vs. this expectation, so no rate is re-fetched at payment time.
     const expectedAtomic = Math.ceil(((creditUsd * MARGIN) / rate) * r.scale);
     // One timestamp for stored created_at and quoted expires_at = created_at + ORDER_TTL_MS. The reaper
-    // waits LONGER internally (see index.ts) so a deadline payment still gains its first confirmation.
+    // waits LONGER internally (see payments.ts) so a deadline payment still gains its first confirmation.
     const createdAt = Date.now();
 
     // Reserve a create slot BEFORE the irreversible createAddress, gating on committed orders + creates
