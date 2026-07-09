@@ -77,10 +77,11 @@ test("the endpoints barrel is imported by NO world module (it joins both worlds)
 });
 
 test("no composition root imports the combined router", () => {
-  // index.ts is the pre-split monolith and legitimately uses it. proxy.ts / payments.ts (once they exist, with
-  // the two-roots step) must not — importing it would drag the other world into that binary.
+  // Importing it would drag the other world into that binary. Assert the roots EXIST before asserting what
+  // they don't import: a `continue`-on-missing would turn a renamed/deleted root into a silent pass, which is
+  // exactly the failure this guard is supposed to be incapable of.
   for (const root of ["proxy.ts", "payments.ts"]) {
-    if (!existsSync(resolve(SRC, root))) continue; // not created yet
+    expect(existsSync(resolve(SRC, root))).toBe(true);
     expect(valueClosure(root).has("handler-combined.ts")).toBe(false);
   }
 });

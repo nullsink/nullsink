@@ -11,9 +11,12 @@ source "$(dirname "$0")/lib.sh"   # provides install_nsk()
 
 TAG="${1:-}"
 if [ -z "$TAG" ]; then
-  # Default to the live server's tag so nsk matches the running schema (current -> nullsink-<tag>).
-  cur="$(readlink /usr/local/lib/nullsink/current 2>/dev/null || true)"
-  TAG="${cur#nullsink-}"
+  # Default to the live server's tag so nsk matches the running schema. Read the PROXY symlink
+  # (current-proxy -> nullsink-proxy-<tag>): install_binary moves both service symlinks in lockstep, so
+  # either one names the deployed tag. The pre-split `current` symlink is gone — retire_legacy_unit removes
+  # it on the first post-split deploy.
+  cur="$(readlink /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"
+  TAG="${cur#nullsink-proxy-}"
   if [ -z "$TAG" ] || [ "$TAG" = "$cur" ]; then
     echo "no server binary found to match; pass a release tag, e.g. deploy/install-nsk.sh v0.3.0" >&2
     exit 1
