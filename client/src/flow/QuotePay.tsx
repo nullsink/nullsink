@@ -106,7 +106,7 @@ export function QuotePay({
     inFlight.current = true;
     setChecking(true);
     try {
-      const st = await fetchOrderStatus(await hashToken(token));
+      const st = await fetchOrderStatus(await hashToken(token), quote?.pay_to);
       setStatus(st);
       // Only spend the raw token on /balance when the payment is plausibly done. `closed` means the
       // order row is gone (credited / reaped / never existed) — /balance is the authoritative tiebreak.

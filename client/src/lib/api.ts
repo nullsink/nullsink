@@ -2,7 +2,7 @@
 // authoritative contract lives in core's request handler.
 //
 //   POST /buy           { hash, credit_usd }            -> a one-time quote (pay_to + amount + unit + pay_uri)
-//   POST /order-status  { hash }                         -> live payment progress (no balance)
+//   POST /order-status  { hash, address? }               -> live payment progress (no balance)
 //   GET  /balance       header x-api-key: <raw token>    -> { balance_usd }
 //
 // The raw token is sent over the wire exactly once, to /balance, on our own origin.
@@ -211,11 +211,14 @@ export interface OrderStatus {
   expires_at?: number; // epoch ms
 }
 
-export async function fetchOrderStatus(hash: string): Promise<OrderStatus> {
+// `address` is the /buy pay_to the caller is tracking. Sent when known so the server scopes the status to
+// THIS order — a hash can have several open at once, and the newest empty one must not shadow a paid older
+// one. Omitted callers (an older cached bundle) still get the server's seen-preferring fallback.
+export async function fetchOrderStatus(hash: string, address?: string): Promise<OrderStatus> {
   const res = await fetch("/order-status", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ hash }),
+    body: JSON.stringify(address ? { hash, address } : { hash }),
   });
   if (!res.ok) throw new Error(`order_status_${res.status}`);
   return (await res.json()) as OrderStatus;

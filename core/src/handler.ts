@@ -229,7 +229,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     },
   } = d;
   const { getBalance, openHold, settleHold } = balances;
-  const { tryAddOrder, openCount, latestOpenOrderByHash } = orders;
+  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress } = orders;
   const defaultMaxOutput = d.defaultMaxOutputTokens ?? 0; // 0 = require an explicit output cap (strict)
   // Rail registry (required deps): every active rail keyed by name + which one /buy defaults to. /buy selects
   // by the request's rail (default DEFAULT_RAIL); /order-status by the looked-up order's rail.
@@ -274,6 +274,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     tryAddOrder,
     openCount,
     latestOpenOrderByHash,
+    openOrderByHashAddress,
     buyRateLimit: d.buyRateLimit,
     readRateLimit: d.readRateLimit,
     orderStatus,
