@@ -28,12 +28,23 @@ trap 'rm -rf "$work"' EXIT
 # Consistent snapshots via .backup (NOT cp). The CLI opens its OWN connection, so set a busy_timeout (the
 # app's PRAGMA doesn't apply here) — else a concurrent settler write lock returns SQLITE_BUSY and aborts the
 # run. pending.db may be absent (Anthropic-only / rail off) — skip it.
-sqlite3 -cmd '.timeout 10000' "$DB_DIR/balances.db" ".backup '$work/balances.db'"
-files=(balances.db)
+#
+# ORDER IS LOAD-BEARING: pending.db FIRST, then balances.db. The two hold opposite halves of a credit —
+# pending.db's credit_outbox records that a credit was DELIVERED (acked_at), balances.db's applied_orders that
+# it was RECEIVED — and the snapshots are seconds apart, so one is always slightly stale. Snapshot pending
+# first and the staleness only ever runs the safe way: every ack in the artifact's outbox is backed by a
+# marker in the artifact's (later) ledger. Reverse the order and a settle+ack landing between the two writes
+# an artifact whose outbox claims a delivery the ledger never saw, and restoring it silently destroys a
+# customer's PAID credit. The opposite skew is harmless: a credit applied after pending's snapshot is simply
+# redelivered on the next poll and lands as already_applied (creditOnce is idempotent).
+# restore.sh re-arms the outbox regardless, which also covers restoring one DB without the other.
+files=()
 if [ -f "$DB_DIR/pending.db" ]; then
   sqlite3 -cmd '.timeout 10000' "$DB_DIR/pending.db" ".backup '$work/pending.db'"
   files+=(pending.db)
 fi
+sqlite3 -cmd '.timeout 10000' "$DB_DIR/balances.db" ".backup '$work/balances.db'"
+files+=(balances.db)
 
 # Bitcoin watch-only wallet LABELS (address→order-index map). These are wallet-local metadata — NOT on-chain
 # and NOT re-derivable from the descriptor/seed — so a bitcoind datadir loss would orphan the deposit→order
