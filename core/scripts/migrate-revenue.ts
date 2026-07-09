@@ -1,8 +1,12 @@
-// One-time cutover migration (D5): copy the revenue sales book from balances.db to pending.db. Run with the
-// service STOPPED and AFTER draining zombie orders through the OLD binary (see src/ledger/migrate-revenue.ts
-// and the cutover runbook). balances.db is only READ here; pending.db is written in place. Verifies the row
-// count + gross sum reconcile before/after, and exits non-zero on any mismatch. Rehearse first on copies with
-// scripts/rehearse-migration.ts.
+// One-time cutover migration (D5): copy the revenue sales book from balances.db to pending.db.
+//
+// OFF-BOX ONLY. The production box is source-free (no Bun, no src/; the release tarball ships only deploy/),
+// so this script cannot run there — on a box, use `nsk migrate-revenue --apply`, which is this same code
+// compiled into the operator CLI. Keep this entrypoint for rehearsals on copies of real databases, where you
+// have the repo checked out. The procedure is deploy/cutover-runbook.md.
+//
+// balances.db is only READ here; pending.db is written in place. Verifies the row count + gross sum reconcile
+// before/after, and exits non-zero on any mismatch. Rehearse with scripts/rehearse-migration.ts.
 //
 //   bun run scripts/migrate-revenue.ts <balances.db> <pending.db>
 //
