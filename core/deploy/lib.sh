@@ -10,8 +10,23 @@ REPO="${REPO:-nullsink/nullsink}"
 
 # Fetch one PUBLIC Release asset $2 for tag $1 into dir $3. The repo is public, so a plain unauthenticated
 # curl works — no gh, no auth on the box. -L follows GitHub's 302 to the asset CDN; -f fails the pipeline
-# on a 404/5xx. Callers still `test -f` + `sha256sum -c` what lands here.
+# on a 404/5xx. Callers still `test -f` + `verify_sums` what lands here.
 fetch_asset() { curl -fsSL "https://github.com/$REPO/releases/download/$1/$2" -o "$3/$2"; }
+
+# Verify downloaded assets against a SHA256SUMS in $1, running from that dir. The checksum is the ONLY thing
+# standing between a corrupted or tampered download and an installed+activated binary, so it must fail LOUD and
+# HARD — an explicit `|| return 1`, never a bare command that leans on `set -e`. Several callers run as
+# `if install_binary ...; then` (setup.sh) or `if install_client_ui ...; then` (deploy.sh); inside a function
+# invoked in a condition, bash SUSPENDS `set -e` for the whole body, so a bare `sha256sum -c` failure would NOT
+# abort — it would fall through to install + `ln -sfn`, activating an unverified artifact while the function
+# still returns success. Routing every verify through this helper makes the gate independent of the caller's
+# context. --ignore-missing: SHA256SUMS lists every release asset, but a given call pulled only some.
+verify_sums() {  # $1=dir containing SHA256SUMS + the fetched asset(s)
+  ( cd "$1" && sha256sum -c --ignore-missing SHA256SUMS ) || {
+    echo "    !! CHECKSUM MISMATCH in $1 — refusing to install (corrupt download or tampered asset)" >&2
+    return 1
+  }
+}
 
 # --- Pinned external toolchain + verified-install primitives, shared by setup.sh (app box) and
 # setup-nodes.sh (node box) so the pin + fetch/verify logic is ONE source of truth and can't drift. ---
@@ -20,9 +35,12 @@ fetch_asset() { curl -fsSL "https://github.com/$REPO/releases/download/$1/$2" -o
 BITCOIN_VERSION="31.0"
 BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074"
 
-fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; aborts (set -e) on mismatch
-  curl -fsSL "$1" -o "$3"
-  echo "$2  $3" | sha256sum -c -
+fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; refuses on mismatch
+  # Explicit `|| return 1` on the checksum, not a bare `set -e` gate: install_verified_tinfoil_proxy is called
+  # as `if install_verified_tinfoil_proxy ...` in setup.sh, which suspends set -e for the whole call chain (see
+  # verify_sums), so a bare pipe failure here would fall through to install an unverified binary.
+  curl -fsSL "$1" -o "$3" || return 1
+  echo "$2  $3" | sha256sum -c - || { echo "    !! CHECKSUM MISMATCH for $3 — refusing to install" >&2; return 1; }
 }
 require_x86_64() {  # $1=label — these pins are x86_64-only; fail loud rather than install a dud
   if [ "$(uname -m)" != "x86_64" ]; then
@@ -99,7 +117,7 @@ install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app b
   for svc in proxy payments; do fetch_asset "$tag" "nullsink-$svc-linux-x64" "$tmp"; done
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   for svc in proxy payments; do test -f "$tmp/nullsink-$svc-linux-x64"; done   # assert both assets downloaded
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )   # SHA256SUMS lists every asset; verify the ones we pulled
+  verify_sums "$tmp" || return 1   # the checksum gate — fires even when a caller invokes us in an `if` (see verify_sums). Verify BOTH assets before flipping EITHER symlink.
   for svc in proxy payments; do
     install -m755 "$tmp/nullsink-$svc-linux-x64" "/usr/local/lib/nullsink/nullsink-$svc-$tag"
   done
@@ -118,7 +136,7 @@ install_nsk() {  # $1=tag — fetch+verify+install the operator CLI binary (nsk)
   fetch_asset "$tag" 'nsk-linux-x64' "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/nsk-linux-x64"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   install -m755 "$tmp/nsk-linux-x64" /usr/local/bin/nsk
   rm -rf "$tmp"
   echo "    operator CLI nsk $tag installed (/usr/local/bin/nsk)"
@@ -132,7 +150,7 @@ install_deploy_tree() {  # $1=tag $2=dest — fetch+verify+extract deploy-<tag>.
   fetch_asset "$tag" "deploy-${tag}.tar.gz" "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/deploy-${tag}.tar.gz"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   mkdir -p "$dest"
   tar -xzf "$tmp/deploy-${tag}.tar.gz" -C "$dest"   # release.yml `tar -czf … -C core deploy` -> $dest/deploy/*
   rm -rf "$tmp"
@@ -150,19 +168,22 @@ install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client U
   fetch_asset "$tag" "nullsink-ui-${tag}.tar.gz" "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/nullsink-ui-${tag}.tar.gz"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   # Stage the extract in web-$tag.new and swap it into place only once it's verified-good, so a
-  # fetch-ok-then-extract-fail on a SAME-tag redeploy can't destroy the currently-serving web-$tag
-  # (set -e aborts before the swap). The activate stays an atomic ln -sfn.
+  # fetch-ok-then-extract-fail on a SAME-tag redeploy can't destroy the currently-serving web-$tag. Each step
+  # that must hold before the destructive `rm -rf web-$tag` gets an explicit `|| return 1`: deploy.sh calls us
+  # as `if install_client_ui ...`, which SUSPENDS set -e for this whole body (see verify_sums), so a bare
+  # `test -f`/`tar` failure would otherwise fall straight through to the rm+mv and swap an EMPTY dir into place
+  # while returning success — silently breaking the buy UI. The activate stays an atomic ln -sfn.
   local staging="$webbase/web-$tag.new"
   rm -rf "${staging:?}"
   mkdir -p "$staging"
-  tar -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1   # dist/* -> web-$tag.new/*
-  test -f "$staging/index.html"               # assert the extract landed (guards a malformed/empty UI tarball)
+  tar -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1 || return 1   # dist/* -> web-$tag.new/*
+  test -f "$staging/index.html" || { echo "    !! UI tarball for $tag has no index.html — refusing to swap" >&2; return 1; }
   chmod -R a+rX "$staging"                     # Caddy runs as its own user — ensure it can read files + traverse dirs
   rm -rf "${webbase:?}/web-$tag"               # drop the old copy only now — the new one is staged + validated
-  mv "$staging" "$webbase/web-$tag"            # swap into place
-  ln -sfn "web-$tag" "$webbase/current-web"   # atomic activate (relative target)
+  mv "$staging" "$webbase/web-$tag" || return 1   # swap into place
+  ln -sfn "web-$tag" "$webbase/current-web" || return 1   # atomic activate (relative target)
   rm -rf "$tmp"
   echo "    client UI $tag activated ($webbase/current-web -> web-$tag)"
 }

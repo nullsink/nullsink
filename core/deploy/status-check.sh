@@ -110,9 +110,14 @@ fi
 # --- 2. host: disk + WAL-sidecar ownership (a full disk or root-owned sidecars silently break billing) ---
 disk_pct="$(df --output=pcent "$DB_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
 inode_pct="$(df --output=ipcent "$DB_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
-if [ -n "$disk_pct" ] && [ "$disk_pct" -ge "$DISK_WARN_PCT" ]; then warn "disk ${disk_pct}% full on $DB_DIR — billing writes at risk"
-else ok "disk ${disk_pct:-?}% on $DB_DIR"; fi
-[ -n "$inode_pct" ] && [ "$inode_pct" -ge "$DISK_WARN_PCT" ] && warn "inodes ${inode_pct}% used on $DB_DIR"
+# An EMPTY reading means df couldn't stat the mount — the filesystem is in trouble, which is exactly when the
+# headroom warning matters most. Treat unreadable as a WARN, not a silent OK: reporting "disk ?%" and passing
+# the run is a monitor that goes green because it never looked.
+if [ -z "$disk_pct" ]; then warn "could not read disk usage for $DB_DIR (df failed) — filesystem may be unhealthy"
+elif [ "$disk_pct" -ge "$DISK_WARN_PCT" ]; then warn "disk ${disk_pct}% full on $DB_DIR — billing writes at risk"
+else ok "disk ${disk_pct}% on $DB_DIR"; fi
+if [ -z "$inode_pct" ]; then warn "could not read inode usage for $DB_DIR (df failed)"
+elif [ "$inode_pct" -ge "$DISK_WARN_PCT" ]; then warn "inodes ${inode_pct}% used on $DB_DIR"; fi
 sidecar_bad=0
 for sc in "$DB_DIR"/*.db-wal "$DB_DIR"/*.db-shm; do
   [ -e "$sc" ] || continue
