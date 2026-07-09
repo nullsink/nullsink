@@ -35,8 +35,9 @@ trap 'rm -rf "$work"' EXIT
 # first and the staleness only ever runs the safe way: every ack in the artifact's outbox is backed by a
 # marker in the artifact's (later) ledger. Reverse the order and a settle+ack landing between the two writes
 # an artifact whose outbox claims a delivery the ledger never saw, and restoring it silently destroys a
-# customer's PAID credit. The opposite skew is harmless: a credit applied after pending's snapshot is simply
-# redelivered on the next poll and lands as already_applied (creditOnce is idempotent).
+# customer's PAID credit — the sender skips acked rows, and nothing else remembers the debt. The opposite
+# skew is harmless: a credit applied after pending's snapshot is simply redelivered on the next poll and lands
+# as already_applied (creditOnce is idempotent).
 # restore.sh re-arms the outbox regardless, which also covers restoring one DB without the other.
 files=()
 if [ -f "$DB_DIR/pending.db" ]; then

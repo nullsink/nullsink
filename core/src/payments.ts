@@ -116,11 +116,6 @@ log.info("boot", `nullsink-payments ${BUILD_VERSION} listening on ${HOST}:${serv
 // settle() (which ENQUEUES credits into the durable outbox), then deliver the outbox over the credit socket. ---
 const sendCredit = makeSocketSender(CREDIT_SOCK, CREDIT_TIMEOUT_MS);
 
-// One persistent seen-set PER RAIL, kept here (not the DB) so a sighting survives across ticks and a transiently
-// blind tick can't fast-reap a paying order. A restart resets them; the startup poll re-marks from the chain.
-const seenByRail = new Map<string, Set<number>>();
-for (const name of rails.keys()) seenByRail.set(name, new Set<number>());
-
 // Per-rail CONSECUTIVE poll-failure streak — the only signal that catches "the app itself can't reach its node".
 // Past POLL_FAIL_ALERT the tick emits a greppable ERROR marker so the monitor pages.
 const pollFailsByRail = new Map<string, number>();
@@ -153,9 +148,10 @@ async function pollRail(rail: PayRail): Promise<void> {
     rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
     backstopMs: ORDER_BACKSTOP_MS,
     unfundedReapMs: ORDER_TTL_MS + REAP_GRACE_MS,
-    seen: seenByRail.get(rail.name),
   });
   // Refresh the live /order-status view AFTER settle has removed credited/reaped orders, so closed ones drop out.
+  // Unlike settle's reap guard (durable pending_orders.seen_at), this map is process-local and empty after a
+  // restart — /order-status reports `detected` from seen_at until the wallet repopulates it.
   orderStatus.update(transfers, orders.openOrders(rail.name).map((o) => o.order_index), rail.name);
 }
 

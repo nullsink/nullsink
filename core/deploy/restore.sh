@@ -84,39 +84,30 @@ done
 
 # --- Re-arm the credit outbox. Any restore rewinds ONE database relative to the other, and the two carry
 # opposite halves of a credit: pending.db's credit_outbox says "this credit was delivered" (acked_at set),
-# balances.db's applied_orders says "this credit was received". backup.sh snapshots balances.db BEFORE
-# pending.db, so a settle+ack landing between the two writes an artifact whose outbox claims a delivery the
-# ledger never saw. Restore it verbatim and that customer's PAID credit is silently gone forever — the sender
-# skips acked rows.
+# balances.db's applied_orders says "this credit was received". Restore a pair where the outbox claims a
+# delivery the ledger never saw and that customer's PAID credit is silently gone forever — the sender skips
+# acked rows, and nothing else remembers the debt. backup.sh now orders its snapshots so a single artifact
+# can't be skewed that way, but a partial restore (one DB, not the other) or an artifact written by an older
+# backup.sh still can be.
 #
 # So un-ack exactly the rows the RESTORED ledger has not applied, and the poller redelivers them on its next
-# tick. Safe by construction: applied_orders is never purged, and creditOnce is idempotent on the same
-# idempotency_key — a redelivery of an already-applied credit is a no-op that reports already_applied. We
-# scope it with a cross-DB ATTACH rather than un-acking everything, so a box with a long history redelivers
-# only what is genuinely missing instead of its entire lifetime of credits.
+# tick. Safe by construction: applied_orders is never purged in the outbox era, and creditOnce is idempotent
+# on the same idempotency_key — a redelivery of an already-applied credit is a no-op. We scope it with a
+# cross-DB ATTACH rather than un-acking everything, so a box with a long history redelivers only what is
+# genuinely missing instead of its entire lifetime of credits.
+#
+# NEVER un-ack a TOMBSTONE. reconcileOutbox (the revenue cutover) seeds one acked row per already-applied key
+# with hash='' and micros=0, purely to stop a pre-cutover zombie double-booking its sale; the real credit
+# landed before the cutover and its values were never recorded here. Un-acking one hands the sender a row
+# whose empty hash can never be delivered, wedging every genuine credit queued behind it. `hash <> ''` selects
+# real credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
 #
 # Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
 # break the services' billing writes (the same trap cli/guard.ts exists to prevent).
 if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
-  has_outbox="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" \
-    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';" 2>/dev/null || echo 0)"
-  has_applied=0
-  if [ -f "$DB_DIR/balances.db" ]; then
-    has_applied="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/balances.db" \
-      "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';" 2>/dev/null || echo 0)"
-  fi
-  # NEVER un-ack a TOMBSTONE. reconcileOutbox (the D5 cutover) seeds one acked row per already-applied key with
-  # hash='' and micros=0, purely to stop a pre-cutover zombie double-booking its sale; the real credit landed
-  # before the cutover and its values were never recorded here. Un-acking one hands the sender a row whose empty
-  # hash fails parseCreditRequest's 64-hex check, so the proxy 400s it, the sender treats that as ambiguous and
-  # stops at the head -- wedging every genuine credit queued behind it until an operator intervenes. Restoring a
-  # balances.db OLDER than the tombstones (a partial restore, or mixed artifacts) is exactly when their keys go
-  # missing from applied_orders, which is exactly when the re-arm would grab them. `hash <> ''` selects real
-  # credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
-  # The re-arm is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it
-  # must never fail quietly. The services are already stopped and the databases already swapped at this point:
-  # abort LOUDLY and leave them stopped rather than starting a box whose outbox still claims undelivered credits
-  # were delivered. (Discarding stderr here would turn a lock/ATTACH/disk error into a bare non-zero exit.)
+  # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
+  # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it
+  # stopped rather than starting a box whose outbox still claims undelivered credits were delivered.
   rearm_or_abort() {  # $1=sql — run as the service user; echo the last output line; abort with the error on failure
     local out
     if ! out="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "$1" 2>&1)"; then
@@ -129,6 +120,14 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
     fi
     printf '%s\n' "$out" | tail -1
   }
+
+  has_outbox="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" \
+    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';" 2>/dev/null || echo 0)"
+  has_applied=0
+  if [ -f "$DB_DIR/balances.db" ]; then
+    has_applied="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/balances.db" \
+      "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';" 2>/dev/null || echo 0)"
+  fi
 
   if [ "$has_outbox" = 1 ] && [ "$has_applied" = 1 ]; then
     rearmed="$(rearm_or_abort \
@@ -144,6 +143,8 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
     # each redelivery is idempotent, so the cost is a slow first tick, never a double credit.
     rearm_or_abort "UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';" >/dev/null
     echo "credit outbox re-armed: ALL real credits (restored balances.db has no applied_orders table to reconcile against)"
+  else
+    echo "skip credit-outbox re-arm (this pending.db predates the outbox)"
   fi
 else
   echo "skip credit-outbox re-arm (no pending.db, or sqlite3 not installed — apt-get install sqlite3)"

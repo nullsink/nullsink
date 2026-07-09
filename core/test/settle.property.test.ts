@@ -6,6 +6,7 @@
 // under-confirmed/locked/double-spend logic is pinned in monero.property.test.ts).
 import { test, expect } from "bun:test";
 import fc from "fast-check";
+import { unlinkSync } from "node:fs";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { settle, type SettleConfig } from "../src/ledger/settle";
@@ -234,7 +235,7 @@ test("unfunded fast-reap drops abandoned orders but spares ones with seen (even 
   const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP };
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
-  const mk = (sub: number, hash: string, createdAt: number): PendingOrder => ({
+  const mk = (sub: number, hash: string, createdAt: number): Omit<PendingOrder, "seen_at"> => ({
     rail: "monero", order_index: sub, address: `addr${sub}`, hash, expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: createdAt, rate_usd: 0,
   });
   store.tryAddOrder(mk(0, "h1", NOW - REAP - 1), SEED_MAX); // old + NO activity → reaped
@@ -262,31 +263,85 @@ test("unfunded fast-reap spares an order created EXACTLY at the cutoff (strict <
   store.db.close();
 });
 
-test("cross-tick seen: an order spared by a sighting survives a later EMPTY tick, then credits", () => {
+test("cross-tick: an order spared by a sighting survives a later EMPTY tick, then credits", () => {
   // Bug-2 regression. A transient empty get_transfers (wallet rescan / node resync → rails/monero.ts
-  // coerces a missing `in` to []) must NOT fast-reap an order a PRIOR tick already saw paying. The poller
-  // passes a persistent `seen` set across ticks; settle spares on that, not just this tick's inbounds.
+  // coerces a missing `in` to []) must NOT fast-reap an order a PRIOR tick already saw paying.
   const REAP = 60 * 60 * 1000;
-  const seen = new Set<number>();
-  const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP, seen };
+  const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP };
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
   // Paid near the deadline: the order is ALREADY past the unfunded cutoff.
   store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX);
   const pay = (confirmations: number): Incoming => ({ orderIndex: 0, idempotencyKey: "txP:0", amount: 1_000_000, confirmations, final: confirmations >= CONF });
-  // Tick A: a non-final sighting → marks the order seen + spares it, credits nothing yet.
+  // Tick A: a non-final sighting → persists seen_at + spares it, credits nothing yet.
   settleAndDrain([pay(3)], store, balances, NOW, cfg);
   expect(store.openOrders().length).toBe(1);
-  expect(seen.has(0)).toBe(true);
-  // Tick B: the wallet goes transiently blind (empty list). The pre-fix per-tick reaper would drop the
-  // order here; cross-tick `seen` must keep sparing it.
+  expect(store.openOrders()[0]!.seen_at).toBe(NOW);
+  // Tick B: the wallet goes transiently blind (empty list). The pre-fix per-tick reaper would drop the order.
   settleAndDrain([], store, balances, NOW, cfg);
   expect(store.openOrders().length).toBe(1);
-  // Tick C: the payment goes final → credited + closed (pay-once), and `seen` is pruned.
+  // Tick C: the payment goes final → credited + closed (pay-once).
   settleAndDrain([pay(CONF)], store, balances, NOW, cfg);
   expect(balances.getBalance("h1")).toBe(1_000_000);
   expect(store.openOrders().length).toBe(0);
-  expect(seen.has(0)).toBe(false);
+});
+
+test("durable seen_at: a RESTART cannot fast-reap an order the wallet already saw being paid", () => {
+  // The restart form of the regression above, and a real money-loss path. The sighting used to live in the
+  // poller's in-process Set, rebuilt EMPTY on every start — and the first tick fires immediately, precisely
+  // when the local wallet/node is most likely still resyncing. A resyncing wallet reports an empty inbound
+  // list as a SUCCESS (rails/monero.ts coerces a missing `in` to []), which pollRail cannot distinguish from
+  // "nobody paid", so it flows straight into settle(). Unseen + past the cutoff → reaped → the irreplaceable
+  // index→hash link is gone → the customer's confirmed deposit can never be credited. Our OWN deploy and
+  // restore procedures restart this process, so this is not a rare event.
+  //
+  // settle() now holds NO cross-call state, so we cannot fake a restart by discarding a Set. Do it honestly:
+  // CLOSE the store and reopen it from the same file. Only a real on-disk column survives that.
+  const REAP = 60 * 60 * 1000;
+  const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP };
+  const path = `/tmp/nullsink-seenat-${process.pid}.db`;
+  for (const s of ["", "-wal", "-shm"]) try { unlinkSync(path + s); } catch { /* absent */ }
+  const balances = openDb(":memory:");
+  const pay = (confirmations: number): Incoming => ({ orderIndex: 0, idempotencyKey: "txP:0", amount: 1_000_000, confirmations, final: confirmations >= CONF });
+
+  // --- process 1: one non-final sighting, then it dies (crash / deploy / restore) ---
+  const p1 = openOrderStore(path);
+  p1.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX);
+  settleAndDrain([pay(3)], p1, balances, NOW, cfg);
+  expect(p1.openOrders()[0]!.seen_at).toBe(NOW);
+  p1.db.close(); // the process dies
+
+  // --- process 2: reopened from disk, blind first poll (wallet still resyncing) ---
+  const p2 = openOrderStore(path);
+  expect(p2.openOrders()[0]!.seen_at).toBe(NOW); // the sighting survived the restart, on disk
+  settleAndDrain([], p2, balances, NOW + 1000, cfg);
+  expect(p2.openOrders().length).toBe(1); // spared — nothing in memory could have known
+
+  // ...and once the wallet catches up, the deposit still credits.
+  settleAndDrain([pay(CONF)], p2, balances, NOW + 2000, cfg);
+  expect(balances.getBalance("h1")).toBe(1_000_000);
+  expect(p2.openOrders().length).toBe(0);
+  p2.db.close();
+  for (const s of ["", "-wal", "-shm"]) try { unlinkSync(path + s); } catch { /* absent */ }
+});
+
+test("durable seen_at is write-once and does not spare a never-seen order", () => {
+  const REAP = 60 * 60 * 1000;
+  const cfg: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", rail: "monero", backstopMs: 24 * REAP, unfundedReapMs: REAP };
+  const balances = openDb(":memory:");
+  const store = openOrderStore(":memory:");
+  store.tryAddOrder({ rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX);
+  store.tryAddOrder({ rail: "monero", order_index: 1, address: "a1", hash: "h2", expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 }, SEED_MAX);
+  // Order 1 is sighted twice; the FIRST timestamp must stick (no per-tick rewrite of a slow confirmation).
+  const pay = (i: number): Incoming => ({ orderIndex: i, idempotencyKey: `txP:${i}`, amount: 1, confirmations: 1, final: false });
+  expect(store.markSeen(1, "monero", NOW)).toBe(true);
+  expect(store.markSeen(1, "monero", NOW + 5000)).toBe(false); // write-once
+  settleAndDrain([pay(1)], store, balances, NOW + 9000, cfg);
+  const open = store.openOrders();
+  expect(open.map((o) => o.order_index)).toEqual([1]); // 0 was NEVER seen → reaped; 1 sighted → spared
+  expect(open[0]!.seen_at).toBe(NOW); // first sighting, not the later ones
+  expect(store.markSeen(99, "monero", NOW)).toBe(false); // no such order → no-op
+  store.db.close();
 });
 
 test("a final payment to an order PAST the reap cutoff is credited, not reaped", () => {
@@ -401,7 +456,7 @@ test("settle is rail-scoped: a monero tick reaps only monero orders, never the o
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
   const REAP = 60 * 60 * 1000; // 1h unfunded horizon
-  const mk = (rail: string, idx: number): PendingOrder => ({ rail, order_index: idx, address: `${rail}${idx}`, hash: `h-${rail}`, expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 });
+  const mk = (rail: string, idx: number): Omit<PendingOrder, "seen_at"> => ({ rail, order_index: idx, address: `${rail}${idx}`, hash: `h-${rail}`, expected_atomic: 1_000_000, credit_micros: 1_000_000, received_atomic: 0, created_at: NOW - REAP - 1, rate_usd: 0 });
   store.tryAddOrder(mk("monero", 5), SEED_MAX); // same index 5 on both rails, both stale + unfunded
   store.tryAddOrder(mk("bitcoin", 5), SEED_MAX);
 

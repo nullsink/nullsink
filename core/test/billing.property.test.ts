@@ -1214,6 +1214,45 @@ test("/order-status reflects an open order's live progress: waiting → confirmi
   expect(body.state).toBe("finalizing");
 });
 
+test("/order-status reports `detected`, never `waiting`, for a payment seen before a RESTART", async () => {
+  // The live progress map is process-local: a deploy, restore or crash rebuilds it EMPTY, and the poller's
+  // first tick is exactly when the wallet is most likely still resyncing (it then reports an empty inbound
+  // list as a SUCCESS). Without a durable sighting this order reports "waiting" and the client renders "not
+  // seen yet" over a payment we HAVE seen. A buyer who believes that may pay again — and pay-once already
+  // closed the order on the first deposit, so settle() drops the second one and it can never be credited.
+  const hash = "a".repeat(64);
+  let progress: { received_atomic: number; confirmations: number } | undefined;
+  const { handler, orders } = makeHandler(ok("x", {}), { orderStatus: () => progress });
+  expect((await handler(buyReq({ hash, credit_usd: 10 }))).status).toBe(200);
+  const order = orders.openOrders()[0]!;
+
+  // The poller sights a still-confirming deposit: it persists seen_at and populates live progress.
+  orders.markSeen(order.order_index, order.rail, 1_700_000_000_000);
+  progress = { received_atomic: 500, confirmations: 3 };
+  let body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.state).toBe("confirming");
+
+  // --- RESTART: the progress map is gone; the wallet is still resyncing, so nothing repopulates it. ---
+  progress = undefined;
+  body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.state).toBe("detected"); // NOT "waiting" — seen_at survived on disk
+  expect(body.required).toBe(10); // static fields still reported
+
+  // Once the wallet catches up, live progress resumes exactly as before.
+  progress = { received_atomic: 500, confirmations: 4 };
+  body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.state).toBe("confirming");
+  expect(body.confirmations).toBe(4);
+});
+
+test("/order-status still reports `waiting` for an order never sighted (detected is not a free pass)", async () => {
+  const hash = "b".repeat(64);
+  const { handler } = makeHandler(ok("x", {}), { orderStatus: () => undefined });
+  expect((await handler(buyReq({ hash, credit_usd: 10 }))).status).toBe(200);
+  const body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.state).toBe("waiting"); // seen_at is NULL — nobody has paid
+});
+
 test("/order-status rejects malformed JSON, non-64-hex hashes, and oversized bodies", async () => {
   const { handler } = makeHandler(ok("x", {}));
   expect(((await (await handler(orderStatusReq("not json"))).json()) as { error: string }).error).toBe("invalid_json");

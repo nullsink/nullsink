@@ -16,7 +16,7 @@
 #     there is no shared router behind these ports any more, so a misrouted path is a hard 404, not a
 #     silent cross-world call.
 #   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions (OpenAI, when enabled)
-#     + GET /balance + POST /buy + POST /order-status + GET /rails.
+#     + GET /v1/models + GET /balance + POST /buy + POST /order-status + GET /rails.
 #   - /buy IS routed: a browser-side UI can only call a reachable endpoint, and we run no server-side BFF,
 #     so /buy is publicly reachable. That's fine: /buy hands out a payment address, not free value, and is
 #     bounded by the app's resource caps. No CAPTCHA/PoW gate (decided). We simply don't advertise it.
@@ -90,6 +90,14 @@
 		}
 		reverse_proxy 127.0.0.1:8080 {
 			flush_interval -1
+			header_up -X-Forwarded-For
+		}
+	}
+
+	# --- Model catalog (GET, unauthenticated free read — the one /v1 path that isn't a metered forward; the
+	#     app applies the shared read throttle, same as /rails). No body, so no request_body cap. ---
+	handle /v1/models {
+		reverse_proxy 127.0.0.1:8080 {
 			header_up -X-Forwarded-For
 		}
 	}

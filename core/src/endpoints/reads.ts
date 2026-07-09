@@ -41,10 +41,26 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
     const progress = orderStatus?.(order.order_index, order.rail);
     const received = progress?.received_atomic ?? 0;
     const confirmations = progress?.confirmations ?? 0;
-    // waiting: order open, nothing seen yet. confirming: seen, still gaining confirmations. finalizing:
-    // confirmations met but the poller hasn't credited+closed it yet (e.g. the output is still locked) —
-    // the client should now check /balance for the authoritative credit.
-    const state = received <= 0 ? "waiting" : confirmations < r.confirmations ? "confirming" : "finalizing";
+    // waiting:    order open, no inbound EVER observed.
+    // detected:   an inbound WAS observed — durably, via pending_orders.seen_at — but we have no live
+    //             progress for it right now. That means the process restarted (deploy, restore, crash) and
+    //             the wallet has not caught up yet. `orderStatus` is process-local and comes back empty, so
+    //             without seen_at this order would report "waiting" and the client would render "not seen
+    //             yet" OVER a payment we have already seen. A buyer who reads that may pay a SECOND time —
+    //             and pay-once has already closed the order on the first deposit, so settle() drops the
+    //             second one (no open order for that index) and it can never be credited. seen_at outlives
+    //             the process, so this state can never regress back to "waiting".
+    // confirming: seen, still gaining confirmations.
+    // finalizing: confirmations met but the poller hasn't credited+closed it yet (e.g. the output is still
+    //             locked) — the client should now check /balance for the authoritative credit.
+    const state =
+      received > 0
+        ? confirmations < r.confirmations
+          ? "confirming"
+          : "finalizing"
+        : order.seen_at != null
+          ? "detected"
+          : "waiting";
     return Response.json({
       state,
       confirmations,

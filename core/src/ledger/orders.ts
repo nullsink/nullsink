@@ -23,6 +23,9 @@ export type PendingOrder = {
   created_at: number; // unix ms
   rate_usd: number; // coin/USD rate LOCKED at quote time — so settle can book gross (USD paid) from the
   // rate in force then, making the revenue book's gross figure independent of any later MARGIN change.
+  seen_at: number | null; // unix ms the rail FIRST reported any inbound for this order (final or not), else
+  // NULL. Durable "someone is paying this" memory: it is what spares the order from the unfunded fast-reap,
+  // across process restarts. See settle.ts.
 };
 
 // Build a pending-orders store bound to one SQLite path. The composition root calls openOrderStore(path);
@@ -88,6 +91,14 @@ export function openOrderStore(path: string) {
     })();
   }
 
+  // Durable "someone is paying this order" memory (see settle.ts's fast-reap). Added last, AFTER the rebuild
+  // above, so it lands on the final table whichever migration path a DB arrived by. Column-guarded →
+  // idempotent. Back-fills to NULL, which is the safe direction: an in-flight order that was already being
+  // paid when this version deploys is simply re-marked by the next poll tick that sees its deposit, long
+  // before the 4.5h fast-reap horizon.
+  if (!db.query<{ name: string }, []>("PRAGMA table_info(pending_orders)").all().some((c) => c.name === "seen_at"))
+    db.run("ALTER TABLE pending_orders ADD COLUMN seen_at INTEGER");
+
   // A token's hash can have an open order (the /order-status + balance-page-resume lookup path). One
   // hash → at most a few in-flight orders, but the table is keyed by order_index, so index the hash for
   // that reverse lookup. Cheap on a table bounded by MAX_OPEN_ORDERS.
@@ -142,6 +153,9 @@ export function openOrderStore(path: string) {
     "SELECT * FROM pending_orders WHERE hash = ? ORDER BY created_at DESC LIMIT 1",
   );
   const countStmt = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM pending_orders");
+  const markSeenStmt = db.query<never, [number, string, number]>(
+    "UPDATE pending_orders SET seen_at = ? WHERE rail = ? AND order_index = ? AND seen_at IS NULL",
+  );
   const deleteStmt = db.query("DELETE FROM pending_orders WHERE rail = ? AND order_index = ?");
   const purgeStmt = db.query("DELETE FROM pending_orders WHERE created_at < ?");
   const purgeByRailStmt = db.query("DELETE FROM pending_orders WHERE created_at < ? AND rail = ?");
@@ -167,7 +181,9 @@ export function openOrderStore(path: string) {
   // open. Returns true if stored, false if the ceiling was already reached (caller rejects with
   // busy_try_later). The authoritative, race-free cap gate; the handler's cheap openCount() pre-check
   // only sheds the bulk before the wallet round-trip.
-  function tryAddOrder(o: PendingOrder, maxOpen: number): boolean {
+  // `seen_at` is absent from the input by construction: a brand-new order has never been seen paying. It
+  // back-fills NULL and only settle()'s markSeen ever sets it.
+  function tryAddOrder(o: Omit<PendingOrder, "seen_at">, maxOpen: number): boolean {
     return (
       tryInsertStmt.run(o.rail, o.order_index, o.address, o.hash, o.expected_atomic, o.credit_micros, o.received_atomic, o.created_at, o.rate_usd, maxOpen)
         .changes > 0
@@ -198,6 +214,14 @@ export function openOrderStore(path: string) {
   // passing it; settle passes the real rail explicitly. Returns whether a row was deleted.
   function removeOrder(orderIndex: number, rail: string = "monero"): boolean {
     return deleteStmt.run(rail, orderIndex).changes > 0;
+  }
+
+  // Record the FIRST sighting of any inbound for this order — the durable half of settle()'s reap guard.
+  // `seen_at IS NULL` in the WHERE makes it write-once: later ticks re-observing the same deposit are no-ops,
+  // so a slowly-confirming payment doesn't rewrite the row every 30s. A missing/closed order matches nothing.
+  // Returns true iff this call was the sighting that stuck.
+  function markSeen(orderIndex: number, rail: string, atMs: number): boolean {
+    return markSeenStmt.run(atMs, rail, orderIndex).changes > 0;
   }
 
   // Bulk-reap orders created before `beforeMs`, optionally scoped to one rail (so a rail's backstop tick
@@ -269,7 +293,7 @@ export function openOrderStore(path: string) {
   }
 
   return {
-    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale,
+    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale, markSeen,
     enqueueCredit, listUnackedCredits, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
   };
 }
