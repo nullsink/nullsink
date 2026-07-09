@@ -43,12 +43,16 @@ esac
 tar -C "$work" -xf "$tarball"
 [ -f "$work/balances.db" ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
 
-# Verify each extracted DB before trusting it (a backup that won't open is no backup).
+# Verify each extracted DB before trusting it (a backup that won't open is no backup). The `|| true` is
+# load-bearing: on a not-a-database / truncated / bad-header file, sqlite3 EXITS non-zero (SQLITE_NOTADB=26),
+# and under `set -euo pipefail` that exit propagates through the pipe and kills the script AT the assignment —
+# before the diagnostic below can print. The operator would see a bare `exit 26` on exactly the corrupt
+# artifact this check exists to catch. Swallow sqlite3's exit; judge the artifact by its OUTPUT instead.
 for db in "$work/balances.db" "$work/pending.db"; do
   [ -f "$db" ] || continue
-  res="$(sqlite3 "$db" 'PRAGMA integrity_check;' 2>&1 | head -1)"
+  res="$(sqlite3 "$db" 'PRAGMA integrity_check;' 2>&1 | head -1 || true)"
   if [ "$res" = "ok" ]; then echo "integrity OK: $(basename "$db")"
-  else echo "integrity FAILED: $(basename "$db"): $res" >&2; exit 1; fi
+  else echo "integrity FAILED: $(basename "$db"): ${res:-sqlite3 could not open it (not a database?)}" >&2; exit 1; fi
 done
 
 if [ "$apply" -eq 0 ]; then
@@ -73,7 +77,11 @@ done
 echo "STOPPING $SVC_UNIT to swap in the restored ledger…"
 systemctl stop "$SVC_UNIT"
 for db in "${staged[@]}"; do
-  [ -e "$DB_DIR/$db" ] && mv -f "$DB_DIR/$db" "$DB_DIR/$db.prerestore"   # keep the old copy, recoverable
+  # Keep the pre-restore ledger, recoverable — but NEVER clobber an existing .prerestore. A failed re-arm tells
+  # the operator to re-run this script; on that second --apply the live DB is already the RESTORED one, so a
+  # plain `mv -f` would overwrite the ORIGINAL pre-restore copy with restored data and lose the real ledger.
+  # `-n` (no-clobber) preserves the first, true pre-restore snapshot across re-runs.
+  [ -e "$DB_DIR/$db" ] && mv -n "$DB_DIR/$db" "$DB_DIR/$db.prerestore" && rm -f "$DB_DIR/$db"
   mv -f "$DB_DIR/.$db.restoring" "$DB_DIR/$db"
   rm -f "$DB_DIR/$db-wal" "$DB_DIR/$db-shm"
   echo "restored $db (previous kept as $db.prerestore)"
