@@ -42,9 +42,34 @@ install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop cal
   echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
 }
 
+# The two app units (stage-2 split: one prompt-world process, one payment-world process). Every caller that
+# means "the app" now means both, in this order — the proxy binds the credit socket the payments service
+# connects to, so it goes up first and comes down last.
+PROXY_UNIT="nullsink-proxy"
+PAYMENTS_UNIT="nullsink-payments"
+
 install_units() {  # refresh ALL units + timers from the repo so on-box config can't drift, then reload
   cp "$APP_DIR"/deploy/*.service "$APP_DIR"/deploy/*.timer /etc/systemd/system/
   systemctl daemon-reload
+}
+
+retire_legacy_unit() {  # drop the pre-split nullsink.service; idempotent, a no-op on a fresh box
+  # install_units only ever COPIES the repo's units, so deleting nullsink.service from the repo leaves a
+  # stale (and still-enabled) copy on an existing box — which would fight nullsink-proxy for :8080. Retire it
+  # explicitly, BEFORE the new units start. The old single-binary symlink goes too; its versioned binary is
+  # left on disk, since rolling back across the split boundary needs it (see deploy/README.md).
+  [ -f /etc/systemd/system/nullsink.service ] || return 0
+  echo "    retiring the pre-split nullsink.service (superseded by $PROXY_UNIT + $PAYMENTS_UNIT)"
+  systemctl disable --now nullsink.service 2>/dev/null || true
+  rm -f /etc/systemd/system/nullsink.service /usr/local/lib/nullsink/current
+  systemctl daemon-reload
+}
+
+enable_app_units() { systemctl enable "$PROXY_UNIT" "$PAYMENTS_UNIT"; }   # idempotent; also arms them for reboot
+
+restart_app() {  # proxy first: it binds the credit socket payments connects to (payments retries regardless)
+  systemctl restart "$PROXY_UNIT"
+  systemctl restart "$PAYMENTS_UNIT"
 }
 
 enable_timers() {  # reconcile the box's timers from the repo — shared by setup.sh + deploy.sh, idempotent.
@@ -56,23 +81,33 @@ enable_timers() {  # reconcile the box's timers from the repo — shared by setu
   systemctl disable --now monero-wallet-rpc-watchdog.timer 2>/dev/null || true
 }
 
-install_binary() {  # $1=tag — fetch+verify+activate the self-contained app binary for a release tag
-  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-<tag> + a `current` symlink -> the active
-  # version (a RELATIVE target, so the dir is self-contained/relocatable). The unit's ExecStart runs the
-  # symlink; activation is an atomic `ln -sfn` swap, rollback is repointing it at the previous target.
-  # The binary is the self-contained `bun build --compile` artifact (bundles prices.json etc.) — it runs
-  # with only /etc/nullsink.env + /var/lib/nullsink, no source/Bun needed.
-  local tag="$1" tmp
+install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app binaries for a release tag
+  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-{proxy,payments}-<tag> + a `current-proxy` /
+  # `current-payments` symlink per service -> the active version (RELATIVE targets, so the dir is
+  # self-contained/relocatable). Each unit's ExecStart runs its symlink; activation is an atomic `ln -sfn`
+  # swap, rollback is repointing it at the previous target. Each binary is a self-contained
+  # `bun build --compile` artifact (bundles prices.json etc.) — it runs with only /etc/nullsink.env +
+  # /var/lib/nullsink, no source/Bun needed.
+  #
+  # The two are ONE release, deployed in lockstep: they speak a versioned credit wire and a mismatched pair
+  # fails closed (the proxy 400s an unknown wire version, credits wait in the durable outbox). So fetch and
+  # verify BOTH before flipping EITHER symlink — a half-applied activation is the one state we can always
+  # avoid here.
+  local tag="$1" tmp svc
   mkdir -p /usr/local/lib/nullsink
   tmp="$(mktemp -d)"
-  fetch_asset "$tag" 'nullsink-linux-x64' "$tmp"
+  for svc in proxy payments; do fetch_asset "$tag" "nullsink-$svc-linux-x64" "$tmp"; done
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
-  test -f "$tmp/nullsink-linux-x64"   # assert the asset downloaded
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )   # SHA256SUMS lists all 4 assets; verify the one we pulled
-  install -m755 "$tmp/nullsink-linux-x64" "/usr/local/lib/nullsink/nullsink-$tag"
-  ln -sfn "nullsink-$tag" /usr/local/lib/nullsink/current   # atomic activate (relative target)
+  for svc in proxy payments; do test -f "$tmp/nullsink-$svc-linux-x64"; done   # assert both assets downloaded
+  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )   # SHA256SUMS lists every asset; verify the ones we pulled
+  for svc in proxy payments; do
+    install -m755 "$tmp/nullsink-$svc-linux-x64" "/usr/local/lib/nullsink/nullsink-$svc-$tag"
+  done
+  for svc in proxy payments; do
+    ln -sfn "nullsink-$svc-$tag" "/usr/local/lib/nullsink/current-$svc"   # atomic activate (relative target)
+  done
   rm -rf "$tmp"
-  echo "    app binary $tag activated (/usr/local/lib/nullsink/current -> nullsink-$tag)"
+  echo "    app binaries $tag activated (current-proxy + current-payments -> nullsink-{proxy,payments}-$tag)"
 }
 
 install_nsk() {  # $1=tag — fetch+verify+install the operator CLI binary (nsk) to /usr/local/bin/nsk
@@ -132,14 +167,20 @@ install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client U
   echo "    client UI $tag activated ($webbase/current-web -> web-$tag)"
 }
 
-health_ok() {  # poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) seconds; return 0/1
-  # /healthz is localhost-only (Caddy never routes it). Port from the env file (default 8080).
-  local port health_url waited=0
-  port="$(grep -E '^PORT=' "${ENV_FILE:-/etc/nullsink.env}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
-  health_url="http://127.0.0.1:${port:-8080}/healthz"
+env_val() { grep -E "^$1=" "${ENV_FILE:-/etc/nullsink.env}" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+proxy_port()    { local p; p="$(env_val PORT)";          echo "${p:-8080}"; }
+payments_port() { local p; p="$(env_val PAYMENTS_PORT)"; echo "${p:-8081}"; }
+
+health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) s; return 0/1
+  # /healthz is localhost-only (Caddy never routes it). Both services serve it on their own port.
+  local port="$1" waited=0
   while [ "$waited" -lt "${HEALTH_TIMEOUT:-60}" ]; do
-    if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then return 0; fi
+    if curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then return 0; fi
     sleep 2; waited=$((waited + 2))
   done
   return 1
+}
+
+health_ok_app() {  # BOTH services must serve. Proxy first (it's the one that comes up first).
+  health_ok "$(proxy_port)" && health_ok "$(payments_port)"
 }

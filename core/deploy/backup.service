@@ -13,13 +13,14 @@ Group=nullsink
 WorkingDirectory=/opt/nullsink
 # BACKUP_AGE_RECIPIENT / BACKUP_PUSH_CMD / BACKUP_KEEP live here; `-` so a missing file is fine.
 EnvironmentFile=-/etc/nullsink.env
-# Same StateDirectory as the app, so /var/lib/nullsink (and backups/ under it) is writable under
-# ProtectSystem=strict. DB_PATH/PENDING_DB_PATH default to this dir.
+# Same StateDirectory as both app services, so /var/lib/nullsink (and backups/ under it) is writable under
+# ProtectSystem=strict. balances.db belongs to nullsink-proxy and pending.db to nullsink-payments, but they
+# share one uid and one directory, so a single backup run still snapshots both consistently.
 StateDirectory=nullsink
 Environment=DB_DIR=/var/lib/nullsink
 ExecStart=/opt/nullsink/deploy/backup.sh
 
-# Hardening (mirrors nullsink.service). NB: ProtectHome=read-only still lets the push step read an
+# Hardening (mirrors the app units). NB: ProtectHome=read-only still lets the push step read an
 # ssh/rclone credential under the service user's home; the push needs network, so no IPAddress* deny here.
 NoNewPrivileges=true
 ProtectSystem=strict
