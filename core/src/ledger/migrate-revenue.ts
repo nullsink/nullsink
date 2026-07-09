@@ -50,6 +50,29 @@ export function migrateRevenue(balancesDb: Database, orders: OrdersStore): { cop
 // (hash/micros empty — never delivered, since acked, and never re-credited: the credit already landed pre-cutover).
 // Then commitSettlement's fresh-guard sees the key → not fresh → no second sale, and removeOrder still closes the
 // zombie. Idempotent (enqueueCredit is INSERT OR IGNORE). Bounded by the applied_orders count (~one per sale).
+// The cutover, as ONE atomic, idempotent operation. Call this — never the two halves separately.
+//
+// Splitting them is a trap. `migrateRevenue` and `reconcileOutbox` each commit their own transaction, so a
+// kill (or a throw) in the gap leaves `revenue` copied and ZERO tombstones — the exact state the tombstones
+// exist to prevent. Worse, the natural recovery ("just run it again") used to refuse, because pending.db now
+// held revenue rows, and told the operator there was nothing to do. They would then deploy, a pre-cutover
+// zombie would re-settle, find its key absent from the outbox, and DOUBLE-BOOK its sale.
+//
+// So: one enclosing transaction (bun:sqlite nests these as SAVEPOINTs, and an outer throw rolls the inner
+// work back), and the copy is SKIPPED rather than fatal when the sales book is already present, so a re-run
+// repairs a partial state instead of refusing. reconcileOutbox is idempotent (enqueueCredit is INSERT OR
+// IGNORE), so running it again on a healthy DB seeds nothing.
+export function runCutover(balancesDb: Database, orders: OrdersStore): { copied: number; seeded: number; alreadyCopied: boolean } {
+  const alreadyCopied = orders.listRevenue().length > 0;
+  let copied = 0;
+  let seeded = 0;
+  orders.db.transaction(() => {
+    if (!alreadyCopied) copied = migrateRevenue(balancesDb, orders).copied;
+    seeded = reconcileOutbox(balancesDb, orders).seeded;
+  })();
+  return { copied, seeded, alreadyCopied };
+}
+
 export function reconcileOutbox(balancesDb: Database, orders: OrdersStore): { seeded: number } {
   const hasApplied = balancesDb.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='applied_orders'").get()!.n > 0;
   if (!hasApplied) return { seeded: 0 };

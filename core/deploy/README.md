@@ -22,6 +22,7 @@ alerts, troubleshooting). This file is just the map.
 | `install-nsk.sh` | Installs the optional `nsk` operator CLI on demand (not shipped by default). |
 | `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
 | `node-box-runbook.md` | The ordered cutover runbook for moving bitcoind to that node box — sync first, then a minutes-long drain window. |
+| `cutover-runbook.md` | The one-time revenue cutover: stop the service, `nsk migrate-revenue --apply`, then deploy. Run once per box. |
 
 ### Operator & break-glass scripts (run by units or by hand)
 | File | Role |
