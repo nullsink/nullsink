@@ -6,7 +6,7 @@
 // streamAborted / bill.refundedInFull), so `req` reconciles for streams too. These tests pin both.
 import { test, expect, spyOn } from "bun:test";
 import * as metrics from "../src/metrics";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler";
+import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";

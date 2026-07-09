@@ -1,24 +1,23 @@
-// Request handler factory over an injected dependency bag, so tests supply in-memory stores, a stubbed
-// upstream fetch, and fake rate/wallet calls — no port, no network. index.ts wires production deps; pure
-// helpers (pricing, usage, hashing) are imported directly.
+// PROMPT-world request handler: the metered money path (POST /v1/*) plus the two free reads it owns
+// (GET /balance, GET /v1/models). A factory over an injected dependency bag, so tests supply in-memory stores
+// and a stubbed upstream fetch — no port, no network. proxy.ts wires production deps; pure helpers (pricing,
+// usage, hashing) are imported directly.
+//
+// This module must NOT import anything payment-world (rails, the order store, /buy). The proxy binary is the
+// unit stage 4 attests, so it must never bundle payments code — that's a structural guarantee, not a
+// tree-shaking hope. The combined both-worlds router lives in handler-combined.ts, which only the pre-split
+// index.ts and the handler tests import; neither composition root does.
 import { hashToken } from "./ledger/hash";
 import { priceUsage, isReasoningModel, pricedModels } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";
 import * as metrics from "./metrics";
 import { selectProviders, resolveProvider, type Provider } from "./providers";
-import { makeEndpoints } from "./endpoints";
+import { makeProxyEndpoints } from "./endpoints/proxy";
 import { deny, denyApi, apiErrorBody, NO_API_KEY, scrubRespHeaders, buildUpstreamHeaders } from "./http";
 import type { HoldEstimator } from "./hold";
-import type { RailView } from "./rails/types";
 import type { BalanceStore } from "./ledger/db";
-import type { OrdersStore } from "./ledger/orders";
-import type { OrderProgress } from "./ledger/orderstatus";
 import type { TokenBucket } from "./ratelimit";
-
-// RailView moved to rails/types.ts (shared by handler + endpoints/ without a cycle); re-export for
-// back-compat — index.ts and the tests still import it from here.
-export type { RailView } from "./rails/types";
 
 // Does an upstream error body indicate a billing/credit/quota failure (OUR account, not the user's
 // request)? Match the provider's STRUCTURED error fields (type/code, and a tight message phrase), not the
@@ -143,68 +142,50 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
   return new Response(apiErrorBody(provider.id, status, status === 429 ? "rate_limited" : "service_unavailable"), { status, headers });
 }
 
-export type HandlerDeps = {
-  // Provider configs — each present iff its key is set (index.ts). At least one is required: selectProviders
-  // throws on an all-absent set and index.ts fails fast at boot. Absent → that provider's endpoints 404, so
+export type ProxyHandlerDeps = {
+  // Provider configs — each present iff its key is set (proxy.ts). At least one is required: selectProviders
+  // throws on an all-absent set and the root fails fast at boot. Absent → that provider's endpoints 404, so
   // the proxy runs either-or (Anthropic-only, OpenAI-only, or both).
   anthropic?: {
     apiKey: string;
     baseUrl: string;
     version: string;
-    estimateHold: HoldEstimator; // sizes the pre-flight hold; prod default is count_tokens (index.ts), byte bound as fallback
+    estimateHold: HoldEstimator; // sizes the pre-flight hold; prod default is count_tokens, byte bound as fallback
   };
   openai?: {
     apiKey: string;
     baseUrl: string;
     estimateHold: HoldEstimator; // OpenAI's own hold estimator (count via /v1/responses/input_tokens, byte fallback)
   };
-  // Tinfoil config — present iff TINFOIL_API_KEY is set (index.ts). OpenAI-compatible; shares
-  // /v1/chat/completions with OpenAI (the handler routes by model). No count_tokens endpoint → byte-bound hold.
+  // Tinfoil config — present iff TINFOIL_API_KEY is set. OpenAI-compatible; shares /v1/chat/completions with
+  // OpenAI (the handler routes by model). No count_tokens endpoint → byte-bound hold.
   tinfoil?: {
     apiKey: string;
     baseUrl: string;
     estimateHold: HoldEstimator;
   };
   upstreamTimeoutMs: number;
-  margin: number;
-  buyMinUsd: number;
-  buyMaxUsd: number;
-  orderTtlMs: number; // quoted expires_at window: how long the buyer is told the address stays valid
-  maxOpenOrders: number;
-  maxBuyBodyBytes: number;
   maxMessagesBodyBytes: number;
   balances: BalanceStore;
-  orders: OrdersStore;
   // Output cap applied (and injected into the forwarded body) when a request OMITS one. 0/undefined =
-  // require an explicit cap (max_tokens_required). Set it (index.ts, DEFAULT_MAX_OUTPUT_TOKENS) so stock
-  // OpenAI clients that don't send a cap work. Provider-agnostic.
+  // require an explicit cap (max_tokens_required). Set it (DEFAULT_MAX_OUTPUT_TOKENS) so stock OpenAI clients
+  // that don't send a cap work. Provider-agnostic.
   defaultMaxOutputTokens?: number;
   upstreamFetch: typeof fetch; // injectable so tests stub the upstream without a network
-  // Pay-rail registry: every active rail keyed by name (PayRail satisfies RailView structurally, so the
-  // composition root passes the live rails directly), plus which one /buy defaults to when a request omits
-  // `rail`. /buy resolves by the request's rail; /order-status by the looked-up order's rail. Tests build a
-  // one-entry map; index.ts passes the multi-rail set.
-  rails: Map<string, RailView>;
-  defaultRail: string;
-  buyRateLimit?: TokenBucket; // global, identity-free /buy rate limit; omitted = no limit (e.g. tests)
-  // Global, identity-free throttle for the unauthenticated READ endpoints (/balance, /order-status): they
-  // have no money gate and do a parse+DB read per call, so a flood is pure free work — cap the aggregate
-  // rate. Fail-safe, no IP/token key (privacy thesis). Omitted = no limit (e.g. tests). The metered
-  // endpoints deliberately get NO such bucket: the atomic hold already makes unfunded requests cost nothing,
-  // and a blunt global limit would throttle legitimate high-throughput agent clients.
+  // Global, identity-free throttle for this world's unauthenticated READ endpoints (/balance, /v1/models):
+  // no money gate + a DB read per call, so a flood is pure free work — cap the aggregate rate. Fail-safe, no
+  // IP/token key (privacy thesis). Omitted = no limit (e.g. tests). Each process gets its OWN bucket, so the
+  // two together must be retuned or aggregate read capacity doubles. The metered endpoints deliberately get
+  // NO such bucket: the atomic hold already makes unfunded requests cost nothing.
   readRateLimit?: TokenBucket;
-  // Live per-order payment progress for /order-status (the poller's last-seen sighting). Omitted in
-  // tests that don't exercise /order-status; absent → every open order reads as "waiting".
-  orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined;
   // Registry of live streaming settle() callbacks — each stream adds itself for its lifetime and removes
-  // itself the moment its billing finalizes (done/error/cancel). The shutdown handler (index.ts) drains
-  // this on SIGTERM so a request still streaming at restart is reconciled instead of force-closed with its
-  // hold un-reconciled (see settle() for the partial-billed / rest-refunded outcome). Idempotent, so a
-  // drain racing a natural settle is safe. Omitted in tests → a throwaway local set.
+  // itself the moment its billing finalizes (done/error/cancel). The root's shutdown handler drains this on
+  // SIGTERM so a request still streaming at restart is reconciled instead of force-closed with its hold
+  // un-reconciled. Idempotent, so a drain racing a natural settle is safe. Omitted in tests → throwaway set.
   inflight?: Set<(reason?: "drain") => void>;
   // Force-settle deadline (ms) for a streaming request whose client opens it but then neither reads nor
   // disconnects — none of done/error/cancel fire, so settle() would never run and the hold would leak until
-  // restart. MUST be > upstreamTimeoutMs so a legit stream always finishes naturally first (index.ts enforces
+  // restart. MUST be > upstreamTimeoutMs so a legit stream always finishes naturally first (the root enforces
   // this). Omitted in tests → defaults to upstreamTimeoutMs + 60s.
   streamSettleDeadlineMs?: number;
   // Injectable timer for the deadline above (so tests fire it deterministically, like shutdown.ts's clock).
@@ -212,14 +193,15 @@ export type HandlerDeps = {
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
 
-export function createHandler(d: HandlerDeps): (req: Request) => Promise<Response> {
+// Prompt-world route dispatch. Returns undefined when the path isn't ours, so the combined router
+// (handler-combined.ts) can fall through to the payment-world routes. createProxyHandler wraps this with
+// /healthz + the fail-closed 404.
+export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
   const {
     upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,
     maxMessagesBodyBytes: MAX_MESSAGES_BODY_BYTES,
     balances,
-    orders,
     upstreamFetch,
-    orderStatus,
     inflight = new Set<(reason?: "drain") => void>(),
     streamSettleDeadlineMs = UPSTREAM_TIMEOUT_MS + 60_000, // default sits above the upstream timeout
     scheduleStreamDeadline = (onDeadline, ms) => {
@@ -229,12 +211,7 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     },
   } = d;
   const { getBalance, openHold, settleHold } = balances;
-  const { tryAddOrder, openCount, latestOpenOrderByHash } = orders;
   const defaultMaxOutput = d.defaultMaxOutputTokens ?? 0; // 0 = require an explicit output cap (strict)
-  // Rail registry (required deps): every active rail keyed by name + which one /buy defaults to. /buy selects
-  // by the request's rail (default DEFAULT_RAIL); /order-status by the looked-up order's rail.
-  const DEFAULT_RAIL = d.defaultRail;
-  const RAILS = d.rails;
 
   // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
   // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
@@ -256,27 +233,13 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
   // one provider (OpenAI + Tinfoil on /v1/chat/completions); handleMetered resolves the one a request means.
   const providersForPath = (pathname: string): Provider[] | undefined => PROVIDERS.get(pathname);
 
-  // nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance, /v1/models — built over
-  // the rail registry + the order/balance store methods + the served-model catalog + the limits (endpoints/).
-  // Each is `(req) => Promise<Response>`; the router below dispatches to them. The metered money path
-  // (handleMetered) stays here in the handler.
-  const endpoints = makeEndpoints({
-    rails: RAILS,
+  // This world's own (non-metered) endpoints — /balance + /v1/models — built over the balance store + the
+  // served-model catalog. Each is `(req) => Promise<Response>`; the dispatcher below routes to them. The
+  // metered money path (handleMetered) stays here in the handler.
+  const endpoints = makeProxyEndpoints({
     servedModels: SERVED_MODELS,
-    defaultRail: DEFAULT_RAIL,
-    margin: d.margin,
-    buyMinUsd: d.buyMinUsd,
-    buyMaxUsd: d.buyMaxUsd,
-    orderTtlMs: d.orderTtlMs,
-    maxOpenOrders: d.maxOpenOrders,
-    maxBuyBodyBytes: d.maxBuyBodyBytes,
     getBalance,
-    tryAddOrder,
-    openCount,
-    latestOpenOrderByHash,
-    buyRateLimit: d.buyRateLimit,
     readRateLimit: d.readRateLimit,
-    orderStatus,
   });
 
   // --- Shared money skeleton. Gate (reject before any spend) → size + atomically debit the hold →
@@ -587,19 +550,10 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     }
   }
 
-  return async function handle(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-
-    // Local-only liveness check; never forwarded upstream. Unauthenticated.
-    if (url.pathname === "/healthz") return new Response(`ok ${BUILD_VERSION}`);
-
-    // nullsink's own endpoints (non-metered) — quote a payment, poll an order, list rails, check a balance.
-    // The logic lives in endpoints/ (built in createHandler above); the router just dispatches by method +
-    // path. Each returns a Response; none spends upstream. Anything unmatched falls through to the metered
-    // routing (and then the fail-closed 404) below.
-    if (req.method === "POST" && url.pathname === "/buy") return endpoints.buy(req);
-    if (req.method === "POST" && url.pathname === "/order-status") return endpoints.orderStatus(req);
-    if (req.method === "GET" && url.pathname === "/rails") return endpoints.rails(req);
+  // Dispatch only the PROMPT-world paths. undefined = "not mine" (the combined router then tries the
+  // payment-world routes; createProxyHandler turns it into the fail-closed 404).
+  return function proxyRoutes(req: Request, url: URL): Promise<Response> | undefined {
+    // This world's free read: a token holder checks their own balance.
     if (req.method === "GET" && url.pathname === "/balance") return endpoints.balance(req);
     // The one /v1 path that's a free read, not a metered forward: the served-model catalog. Matched here (a
     // GET) before the POST-only metered routing below, so it never reaches handleMetered.
@@ -608,10 +562,22 @@ export function createHandler(d: HandlerDeps): (req: Request) => Promise<Respons
     // Metered endpoints: route by EXACT path to the provider that owns that API shape (Anthropic Messages
     // today; OpenAI added behind the same seam). Only these paths spend upstream — the up-front hold makes
     // each yield no free usage. Anything unmatched (other methods, batches/files, any endpoint Anthropic or
-    // OpenAI add later) falls through to the fail-closed 404 below; a prefix match would readmit subpaths.
+    // OpenAI add later) falls through to the fail-closed 404; a prefix match would readmit subpaths.
     const candidates = req.method === "POST" ? providersForPath(url.pathname) : undefined;
     if (candidates) return handleMetered(candidates, req, url);
 
-    return deny(404, "unsupported_endpoint");
+    return undefined;
+  };
+}
+
+// The proxy service's HTTP handler: prompt-world routes + /healthz, fail-closed 404 on anything else.
+// proxy.ts wires this to Bun.serve.
+export function createProxyHandler(d: ProxyHandlerDeps): (req: Request) => Promise<Response> {
+  const routes = buildProxyRoutes(d);
+  return async function handle(req: Request): Promise<Response> {
+    const url = new URL(req.url);
+    // Local-only liveness check; never forwarded upstream. Unauthenticated.
+    if (url.pathname === "/healthz") return new Response(`ok ${BUILD_VERSION}`);
+    return (await routes(req, url)) ?? deny(404, "unsupported_endpoint");
   };
 }

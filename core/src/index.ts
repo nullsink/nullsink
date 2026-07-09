@@ -4,7 +4,7 @@
 // testable and reusable.
 import { openDb, DB_PATH } from "./ledger/db";
 import { openOrderStore, PENDING_DB_PATH } from "./ledger/orders";
-import { createHandler, type RailView } from "./handler";
+import { createHandler, type RailView } from "./handler-combined";
 import { makeOrderStatus } from "./ledger/orderstatus";
 import { byteBoundHold, makeCountTokensHold, ANTHROPIC_COUNT_OMIT, OPENAI_COUNT_OMIT } from "./hold";
 import { settle } from "./ledger/settle";
