@@ -1,8 +1,9 @@
 // Stage-4 attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world
 // code (rails clients, the order store, settle, /buy); symmetrically the payments binary must not carry the
-// metered path or the balance store. Today that's a STRUCTURAL property, not a tree-shaking hope: handler.ts
-// and payments-handler.ts each import only their own world, and the single place the two meet
-// (handler-combined.ts) is imported by no composition root.
+// metered path or the balance store. Today that's a STRUCTURAL property, not a tree-shaking hope: we root the
+// closures at the COMPOSITION ROOTS (proxy.ts / payments.ts — the actual compiled binaries), not just their
+// handlers, so a root's non-handler imports (shutdown, ratelimit, the poller, settle) are covered too. The one
+// place the two worlds meet (handler-combined.ts) is imported by no root.
 //
 // We walk the transitive closure of VALUE imports (`import type` / `export type` are erased at compile time and
 // contribute no bundled code, so they're excluded). A stray cross-world import fails here loudly rather than
@@ -42,18 +43,21 @@ function valueClosure(entry: string): Set<string> {
 
 const PAYMENT_WORLD = [
   "rails/index.ts", "rails/monero.ts", "rails/bitcoin.ts", "rails/rate.ts",
-  "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/drain.ts",
-  "endpoints/buy.ts", "endpoints/payments.ts", "payments-handler.ts", "credit-sender.ts",
+  "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/drain.ts", "ledger/poll.ts",
+  "endpoints/buy.ts", "endpoints/payments.ts", "endpoints/payment-reads.ts", "payments-handler.ts", "credit-sender.ts",
 ];
-const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "handler.ts", "credit-server.ts"];
+const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "endpoints/reads.ts", "handler.ts", "credit-server.ts"];
 
-test("the proxy handler's import closure contains NO payment-world module", () => {
-  const reachable = valueClosure("handler.ts");
+// Root at the COMPOSITION ROOTS, not the handlers: the proxy binary is `bun build proxy.ts`, and it imports
+// modules the handler doesn't (shutdown, ratelimit, env, metrics, the credit server). Rooting at handler.ts
+// left those as a blind spot; rooting here covers the whole attested surface and subsumes the handler check.
+test("the proxy binary's closure (rooted at proxy.ts) contains NO payment-world module", () => {
+  const reachable = valueClosure("proxy.ts");
   expect(PAYMENT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
 });
 
-test("the payments handler's import closure contains NO prompt-world module", () => {
-  const reachable = valueClosure("payments-handler.ts");
+test("the payments binary's closure (rooted at payments.ts) contains NO prompt-world module", () => {
+  const reachable = valueClosure("payments.ts");
   expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
 });
 
