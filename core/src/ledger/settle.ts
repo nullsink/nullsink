@@ -16,9 +16,11 @@ export type SettleConfig = {
   // "monero" (and is normally == asset). The poller passes one settle() call per active rail, each its own.
   backstopMs: number; // absolute safety horizon — reap ANY order older than this (paid-but-stuck included)
   unfundedReapMs?: number; // optional shorter horizon — reap an order NEVER seen with incoming (across
-  // ticks, via `seen`); = quoted expires_at + a confirmation grace. Unset → only backstopMs applies.
+  // ticks, via `seen` AND the durable seen_at); = quoted expires_at + a confirmation grace. Unset → only
+  // backstopMs applies.
   seen?: Set<number>; // cross-tick memory of order indices ever seen paying; the poller keeps it persistent
-  // so a transient blind tick can't fast-reap an order a prior tick spared. See below.
+  // so a transient blind tick can't fast-reap an order a prior tick spared. PROCESS-LOCAL — it does not
+  // survive a restart; pending_orders.seen_at is the durable half of the same fact. See below.
 };
 
 // Match the rail's confirmed inbounds to open orders and enqueue each credit exactly once. `now` is injected
@@ -55,6 +57,10 @@ export function settle(
   const groups = new Map<string, { orderIndex: number; amount: number }>();
   for (const t of inbounds) {
     seen.add(t.orderIndex);
+    // Persist the sighting BEFORE anything can reap. cfg.seen is process memory and dies with the process;
+    // seen_at is the same fact on disk, so a restart can't forget that this order is being paid. Write-once,
+    // so re-observing the same deposit every tick costs nothing.
+    orders.markSeen(t.orderIndex, rail, now);
     if (!t.final) continue;
     if (!open.has(t.orderIndex)) continue; // no open order for this index (settled/unknown)
     const g = groups.get(t.idempotencyKey);
@@ -82,14 +88,23 @@ export function settle(
   // Absolute safety backstop: drop everything past the long horizon, including a paid-but-never-confirmed
   // order (a dropped pool tx) the fast-reaper would otherwise keep sparing.
   orders.purgeStale(now - cfg.backstopMs, rail);
-  // Fast-reap UNFUNDED orders: NEVER seen with incoming (across ticks, via `seen`) AND older than
-  // unfundedReapMs → abandoned. unfundedReapMs = quoted expires_at + a confirmation grace, so a buyer
-  // paying at the very end of their window still has time for a first sighting (which spares the order).
-  // Orders ever seen are spared until they reach finality and close (pay-once) or hit the backstop.
+  // Fast-reap UNFUNDED orders: NEVER seen with incoming AND older than unfundedReapMs → abandoned.
+  // unfundedReapMs = quoted expires_at + a confirmation grace, so a buyer paying at the very end of their
+  // window still has time for a first sighting (which spares the order). Orders ever seen are spared until
+  // they reach finality and close (pay-once) or hit the backstop.
+  //
+  // "Ever seen" is read from BOTH memories and an order is reaped only if neither has heard of it — the
+  // conservative direction, since a wrong reap destroys the irreplaceable index→hash link of a PAID order.
+  // The durable `seen_at` is what makes this correct across a restart: cfg.seen is rebuilt empty on every
+  // process start, and the poller's first tick fires immediately, exactly when the local wallet/node is most
+  // likely still resyncing — and a resyncing wallet reports an empty inbound list as a SUCCESS, not an error
+  // (rails/monero.ts), so that first tick is indistinguishable from "nobody paid". Without seen_at, a
+  // restart during a slow confirmation would fast-reap an order the customer had already paid.
+  // openOrders is re-read here, so it sees the seen_at this very tick just wrote.
   if (cfg.unfundedReapMs != null) {
     const cutoff = now - cfg.unfundedReapMs;
     for (const o of orders.openOrders(rail))
-      if (!seen.has(o.order_index) && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
+      if (!seen.has(o.order_index) && o.seen_at == null && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
   }
   // Forget order indices whose order has since closed (credited or reaped) so an injected `seen` stays
   // bounded by the live open-order count, not the lifetime total. (No-op for the per-tick fallback.)
