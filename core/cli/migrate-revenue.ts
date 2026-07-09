@@ -4,12 +4,13 @@
 //   nsk migrate-revenue --apply            # perform the migration
 //   nsk migrate-revenue --apply <balances.db> <pending.db>   # explicit paths (rehearsal on copies)
 //
-// Two steps, both from src/ledger/migrate-revenue.ts:
+// Two steps, run as ONE transaction by src/ledger/migrate-revenue.ts's runCutover:
 //   migrateRevenue   — copy the `revenue` sales book from balances.db (prompt world) into pending.db
 //                      (payment world). balances.db is only READ; its old table is left in place, which is
 //                      what keeps a rollback to a pre-cutover binary readable.
 //   reconcileOutbox  — seed credit_outbox with an acked tombstone per already-applied key, so a pre-cutover
 //                      zombie order can't re-settle post-cutover and DOUBLE-BOOK its sale.
+// They are atomic together, and re-running repairs a partial state rather than refusing — see runCutover.
 //
 // RUN WITH THE APP STOPPED. The migration takes pending.db's write lock, and reconcileOutbox must land before
 // the settlement poller's first tick can settle anything. Dry-run first, and rehearse on copies of the real
@@ -23,7 +24,7 @@ import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { DB_PATH } from "../src/ledger/db";
 import { openOrderStore, PENDING_DB_PATH } from "../src/ledger/orders";
-import { migrateRevenue, reconcileOutbox } from "../src/ledger/migrate-revenue";
+import { runCutover } from "../src/ledger/migrate-revenue";
 
 const usd = (micros: number): string => `$${(micros / 1_000_000).toFixed(2)}`;
 
@@ -58,12 +59,11 @@ export function runMigrateRevenue(args: string[]): void {
     }
   }
 
-  const survey = surveyReadOnly(balancesPath, pendingPath);
-
-  // Already migrated? Say so and stop. Re-running would throw inside migrateRevenue anyway, but a clear
-  // message beats a stack trace on a box at 2am — and an operator re-running this is the common case.
-  if (survey.dstRows > 0) {
-    console.error(`nsk migrate-revenue: pending.db already holds ${survey.dstRows} revenue row(s) — already migrated. Nothing to do.`);
+  let survey: ReturnType<typeof surveyReadOnly>;
+  try {
+    survey = surveyReadOnly(balancesPath, pendingPath);
+  } catch (e) {
+    console.error(`nsk migrate-revenue: cannot read the databases (is one of them not a SQLite file?): ${e instanceof Error ? e.message : String(e)}`);
     process.exit(1);
   }
 
@@ -71,8 +71,13 @@ export function runMigrateRevenue(args: string[]): void {
   console.log("════════ REVENUE MIGRATION (balances.db → pending.db) ════════");
   console.log(`  balances : ${balancesPath}`);
   console.log(`  pending  : ${pendingPath}`);
-  console.log(`  sales rows to copy       : ${survey.srcRows}   gross = ${usd(survey.srcGross)}`);
-  console.log(`  outbox tombstones to seed: ${survey.applied}   (acked, never delivered — the double-book defense)`);
+  // A pending.db that already holds revenue is either a completed migration or one interrupted between its
+  // two halves. Skip the copy, re-ensure the tombstones, and say so — never refuse. Refusing is precisely how
+  // a half-migrated box gets deployed with its double-book defense missing.
+  if (survey.dstRows > 0)
+    console.log(`  NOTE: pending.db already holds ${survey.dstRows} revenue row(s) — copy SKIPPED; tombstones re-ensured (idempotent).`);
+  console.log(`  sales rows to copy       : ${survey.dstRows > 0 ? 0 : survey.srcRows}   gross = ${usd(survey.srcGross)}`);
+  console.log(`  outbox tombstones to seed: up to ${survey.applied}   (acked, never delivered — the double-book defense)`);
 
   if (!apply) {
     console.log("");
@@ -82,10 +87,11 @@ export function runMigrateRevenue(args: string[]): void {
     return;
   }
 
-  const balancesDb = new Database(balancesPath); // read-only use — migrateRevenue only SELECTs from it
+  // readonly: this side is only ever SELECTed from, and its `revenue` table is the rollback copy.
+  const balancesDb = new Database(balancesPath, { readonly: true });
   const orders = openOrderStore(pendingPath);
-  const { copied } = migrateRevenue(balancesDb, orders);
-  const { seeded } = reconcileOutbox(balancesDb, orders);
+  // ONE transaction over copy + tombstones — a kill in the middle rolls both back. See runCutover.
+  const { copied, seeded, alreadyCopied } = runCutover(balancesDb, orders);
   const dstRows = orders.listRevenue();
   const dstGross = dstRows.reduce((a, r) => a + r.gross_micros, 0);
   balancesDb.close();
@@ -95,11 +101,11 @@ export function runMigrateRevenue(args: string[]): void {
   // understate the books forever, and the source table is left in place precisely so this can be checked.
   const ok = (b: boolean) => (b ? "✓" : "✗ MISMATCH");
   console.log("");
-  console.log(`  copied     : ${copied}   ${ok(copied === survey.srcRows)}`);
+  console.log(`  copied     : ${copied}${alreadyCopied ? "   (skipped — already present)" : `   ${ok(copied === survey.srcRows)}`}`);
   console.log(`  dest rows  : ${dstRows.length}   ${ok(dstRows.length === survey.srcRows)}`);
   console.log(`  dest gross : ${usd(dstGross)}   ${ok(dstGross === survey.srcGross)}`);
-  console.log(`  tombstones : ${seeded}`);
-  const pass = copied === survey.srcRows && dstRows.length === survey.srcRows && dstGross === survey.srcGross;
+  console.log(`  tombstones : ${seeded} newly seeded`);
+  const pass = dstRows.length === survey.srcRows && dstGross === survey.srcGross;
   console.log(pass ? "RESULT: ✓ revenue moved, counts + gross reconcile." : "RESULT: ✗ INVESTIGATE — a figure diverged.");
   console.log("");
   if (!pass) process.exit(1);

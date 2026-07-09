@@ -8,6 +8,7 @@ import { Database } from "bun:sqlite";
 import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { openOrderStore } from "../src/ledger/orders";
+import { migrateRevenue } from "../src/ledger/migrate-revenue";
 import { openDb } from "../src/ledger/db";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
@@ -83,7 +84,7 @@ test("dry run reports what would move, and does not even CREATE pending.db's sch
   const out = r.stdout.toString();
   expect(out).toContain("sales rows to copy       : 2");
   expect(out).toContain("$24.20"); // 16.50 + 7.70 gross
-  expect(out).toContain("outbox tombstones to seed: 2");
+  expect(out).toContain("outbox tombstones to seed: up to 2");
   expect(out).toContain("DRY RUN");
   expect(hasTable(P, "revenue")).toBe(false);
   expect(hasTable(P, "credit_outbox")).toBe(false);
@@ -116,13 +117,60 @@ test("--apply moves the sales book, reconciles, and seeds acked tombstones", () 
   expect(countRows(B, "revenue")).toBe(2);
 });
 
-test("re-running after a successful migration refuses instead of double-copying", () => {
+test("re-running after a successful migration is a safe no-op, not a double-copy", () => {
   seedPreCutover();
   expect(run("--apply").exitCode).toBe(0);
   const again = run("--apply");
-  expect(again.exitCode).toBe(1);
-  expect(again.stderr.toString()).toContain("already migrated");
-  expect(openOrderStore(P).listRevenue().length).toBe(2); // still 2, not 4
+  expect(again.exitCode).toBe(0);
+  expect(again.stdout.toString()).toContain("copy SKIPPED");
+  const orders = openOrderStore(P);
+  expect(orders.listRevenue().length).toBe(2); // still 2, not 4
+  expect(orders.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox").get()!.n).toBe(2); // tombstones unchanged
+  orders.db.close();
+});
+
+test("an interrupted migration is REPAIRED by re-running, not declared complete", () => {
+  // The trap this closes: migrateRevenue and reconcileOutbox used to commit separately, so a kill in the gap
+  // left `revenue` copied with ZERO tombstones. The old recovery path then saw revenue rows, printed
+  // "already migrated. Nothing to do.", and exited 1 -- steering the operator into a deploy where a
+  // pre-cutover zombie order re-settles, finds its key absent from the outbox, and DOUBLE-BOOKS its sale.
+  seedPreCutover();
+  // Simulate exactly that partial state: copy the sales book, seed no tombstones.
+  const orders = openOrderStore(P);
+  migrateRevenue(new Database(B, { readonly: true }), orders);
+  expect(orders.listRevenue().length).toBe(2);
+  expect(orders.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox").get()!.n).toBe(0); // the hole
+  orders.db.close();
+
+  const r = run("--apply");
+  expect(r.exitCode).toBe(0);
+  expect(r.stdout.toString()).toContain("copy SKIPPED");
+  expect(r.stdout.toString()).toContain("RESULT: ✓");
+
+  const after = openOrderStore(P);
+  expect(after.listRevenue().length).toBe(2); // not double-copied
+  const tombstones = after.db.query<{ k: string }, []>("SELECT idempotency_key AS k FROM credit_outbox WHERE acked_at IS NOT NULL").all();
+  expect(tombstones.map((t) => t.k).sort()).toEqual(["order-a", "order-b"]); // the hole is repaired
+  after.db.close();
+});
+
+test("runCutover is atomic: a failure after the copy leaves NEITHER the copy nor the tombstones", () => {
+  seedPreCutover();
+  const orders = openOrderStore(P);
+  const bal = new Database(B, { readonly: true });
+  // Force the second half to throw by removing the table reconcileOutbox reads, mid-flight is impossible to
+  // schedule -- so instead drive runCutover's own transaction and throw from inside it, which is exactly the
+  // rollback path a SIGKILL-free error takes.
+  expect(() =>
+    orders.db.transaction(() => {
+      migrateRevenue(bal, orders);
+      throw new Error("simulated crash between the two halves");
+    })(),
+  ).toThrow("simulated crash");
+  expect(orders.listRevenue().length).toBe(0); // the copy rolled back with the outer transaction
+  expect(orders.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox").get()!.n).toBe(0);
+  orders.db.close();
+  bal.close();
 });
 
 test("a missing database is a clean error, not a crash", () => {

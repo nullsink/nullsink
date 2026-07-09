@@ -13,7 +13,7 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
-import { migrateRevenue, reconcileOutbox } from "../src/ledger/migrate-revenue";
+import { runCutover } from "../src/ledger/migrate-revenue";
 
 const balancesPath = process.argv[2];
 const pendingPath = process.argv[3];
@@ -31,8 +31,7 @@ const srcCount = balancesDb.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM 
   : 0;
 const srcGross = srcCount ? balancesDb.query<{ g: number }, []>("SELECT COALESCE(SUM(gross_micros), 0) AS g FROM revenue").get()!.g : 0;
 
-const { copied } = migrateRevenue(balancesDb, orders);
-const { seeded } = reconcileOutbox(balancesDb, orders); // F3 defense: acked tombstones for already-applied keys
+const { copied, seeded } = runCutover(balancesDb, orders); // atomic: copy + F3 acked tombstones, or neither
 
 const dstRows = orders.listRevenue();
 const dstGross = dstRows.reduce((a, r) => a + r.gross_micros, 0);
