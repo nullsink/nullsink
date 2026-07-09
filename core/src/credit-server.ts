@@ -43,8 +43,10 @@ export function createCreditHandler(balances: BalanceStore, now: () => number = 
 //     gate, hence no authentication — anyone on the box could send credits.
 //  2. umask 0077 around the bind, so the socket is owner-only from the instant it exists. Bun creates it at the
 //     process umask (commonly 0755 → world-readable, owner-writable); narrowing it afterwards would leave a
-//     TOCTOU window. The deploy then grants the payments uid write via a POSIX ACL (that write bit is what
-//     connect(2) checks).
+//     TOCTOU window. Today BOTH services run as the same uid, so payments IS the socket's owner and connect(2)
+//     finds the write bit it needs; owner-only is therefore the whole gate, and it is sufficient — a same-uid
+//     attacker could write balances.db directly. When the two services get separate uids, the deploy must
+//     grant the payments uid that write bit (a group or a POSIX ACL); nothing does so today.
 //  3. A stale socket file survives an ungraceful death (Bun unlinks only on clean close, and otherwise throws
 //     EADDRINUSE). Unlinking it before bind is safe ONLY because systemd guarantees a single instance
 //     (stop-old-before-start-new); we additionally refuse to unlink anything that isn't a socket.

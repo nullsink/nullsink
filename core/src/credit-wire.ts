@@ -6,7 +6,7 @@
 // socket FILE's permissions: on Linux, connect(2) requires WRITE permission on the socket path — a
 // kernel-enforced, unspoofable uid gate. (Bun exposes neither peer credentials nor the socket fd, so
 // SO_PEERCRED is unreachable; the filesystem gate is the same trust root, enforced at connect time instead of
-// read after accept.) The deploy owns the socket's ownership/ACL; see credit-server.ts for the bind-time rules.
+// read after accept.) The proxy owns the socket's mode; see credit-server.ts for the bind-time rules.
 
 // Bump on ANY change to the request/response shape. The server refuses a mismatch (fail closed + loud) so a
 // partial rollback that pairs new payments with an old proxy wedges the durable outbox instead of crediting

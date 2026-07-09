@@ -113,19 +113,36 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
   # balances.db OLDER than the tombstones (a partial restore, or mixed artifacts) is exactly when their keys go
   # missing from applied_orders, which is exactly when the re-arm would grab them. `hash <> ''` selects real
   # credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
+  # The re-arm is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it
+  # must never fail quietly. The services are already stopped and the databases already swapped at this point:
+  # abort LOUDLY and leave them stopped rather than starting a box whose outbox still claims undelivered credits
+  # were delivered. (Discarding stderr here would turn a lock/ATTACH/disk error into a bare non-zero exit.)
+  rearm_or_abort() {  # $1=sql — run as the service user; echo the last output line; abort with the error on failure
+    local out
+    if ! out="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "$1" 2>&1)"; then
+      echo "!! credit-outbox re-arm FAILED — sqlite3 said:" >&2
+      printf '%s\n' "$out" >&2
+      echo "!! The databases ARE restored but the outbox was NOT re-armed, so a paid credit may be marked" >&2
+      echo "!! delivered while the restored ledger never received it. $PROXY_UNIT + $PAYMENTS_UNIT are left" >&2
+      echo "!! STOPPED on purpose. Fix the cause, re-run this script, and only then start them." >&2
+      exit 1
+    fi
+    printf '%s\n' "$out" | tail -1
+  }
+
   if [ "$has_outbox" = 1 ] && [ "$has_applied" = 1 ]; then
-    rearmed="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" \
+    rearmed="$(rearm_or_abort \
       "ATTACH '$DB_DIR/balances.db' AS bal;
        UPDATE credit_outbox SET acked_at = NULL
         WHERE acked_at IS NOT NULL
           AND hash <> ''
           AND idempotency_key NOT IN (SELECT order_id FROM bal.applied_orders);
-       SELECT changes();" 2>/dev/null | tail -1)"
+       SELECT changes();")"
     echo "credit outbox re-armed: ${rearmed:-0} credit(s) acked in pending.db but absent from the restored ledger — the poller will redeliver them"
   elif [ "$has_outbox" = 1 ]; then
     # An old balances.db with no applied_orders can't tell us what it already has. Un-ack every REAL credit:
     # each redelivery is idempotent, so the cost is a slow first tick, never a double credit.
-    sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';" 2>/dev/null || true
+    rearm_or_abort "UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';" >/dev/null
     echo "credit outbox re-armed: ALL real credits (restored balances.db has no applied_orders table to reconcile against)"
   fi
 else

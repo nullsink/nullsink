@@ -95,11 +95,13 @@ test("round-trip over a real unix socket: applied, then already_applied; balance
   expect(balances.getBalance(HASH)).toBe(5_000_000);
 });
 
-test("the socket is bound owner-only (umask 0077): no group/other bits, so the deploy ACL is the only grant", () => {
+test("the socket is bound owner-only (umask 0077): no group/other bits, so only the owning uid may connect", () => {
   rmSock();
   running = serveCreditSocket({ path: SOCK, balances: openDb(":memory:") });
   expect(statSync(SOCK).isSocket()).toBe(true);
-  // connect(2) needs the WRITE bit; leaving group/other unset means only the owner (+ an explicit ACL) may connect.
+  // connect(2) needs the WRITE bit; leaving group/other unset means only the owning uid may connect. Both
+  // services share that uid today, so this mode IS the authentication. A uid split must grant payments the
+  // write bit (group or POSIX ACL) and relax this assertion accordingly.
   expect(statSync(SOCK).mode & 0o077).toBe(0);
 });
 
