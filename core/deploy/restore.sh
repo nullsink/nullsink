@@ -105,19 +105,28 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
     has_applied="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/balances.db" \
       "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';" 2>/dev/null || echo 0)"
   fi
+  # NEVER un-ack a TOMBSTONE. reconcileOutbox (the D5 cutover) seeds one acked row per already-applied key with
+  # hash='' and micros=0, purely to stop a pre-cutover zombie double-booking its sale; the real credit landed
+  # before the cutover and its values were never recorded here. Un-acking one hands the sender a row whose empty
+  # hash fails parseCreditRequest's 64-hex check, so the proxy 400s it, the sender treats that as ambiguous and
+  # stops at the head -- wedging every genuine credit queued behind it until an operator intervenes. Restoring a
+  # balances.db OLDER than the tombstones (a partial restore, or mixed artifacts) is exactly when their keys go
+  # missing from applied_orders, which is exactly when the re-arm would grab them. `hash <> ''` selects real
+  # credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
   if [ "$has_outbox" = 1 ] && [ "$has_applied" = 1 ]; then
     rearmed="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" \
       "ATTACH '$DB_DIR/balances.db' AS bal;
        UPDATE credit_outbox SET acked_at = NULL
         WHERE acked_at IS NOT NULL
+          AND hash <> ''
           AND idempotency_key NOT IN (SELECT order_id FROM bal.applied_orders);
        SELECT changes();" 2>/dev/null | tail -1)"
     echo "credit outbox re-armed: ${rearmed:-0} credit(s) acked in pending.db but absent from the restored ledger — the poller will redeliver them"
   elif [ "$has_outbox" = 1 ]; then
-    # An old balances.db with no applied_orders can't tell us what it already has. Un-ack everything: every
-    # redelivery is idempotent, so the cost is a slow first tick, never a double credit.
-    sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "UPDATE credit_outbox SET acked_at = NULL;" 2>/dev/null || true
-    echo "credit outbox re-armed: ALL rows (restored balances.db has no applied_orders table to reconcile against)"
+    # An old balances.db with no applied_orders can't tell us what it already has. Un-ack every REAL credit:
+    # each redelivery is idempotent, so the cost is a slow first tick, never a double credit.
+    sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';" 2>/dev/null || true
+    echo "credit outbox re-armed: ALL real credits (restored balances.db has no applied_orders table to reconcile against)"
   fi
 else
   echo "skip credit-outbox re-arm (no pending.db, or sqlite3 not installed — apt-get install sqlite3)"
