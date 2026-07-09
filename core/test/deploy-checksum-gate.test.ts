@@ -74,9 +74,12 @@ test("the gate holds when called under `if` with set -e suspended — the #79 by
 
 test("every install_* site routes its checksum through verify_sums (no bare `sha256sum -c` at an install site)", () => {
   const lib = readFileSync(LIB, "utf8");
-  // All four asset installers must gate via verify_sums with an explicit `|| return 1`.
-  const gates = lib.match(/verify_sums "\$tmp" \|\| return 1/g) ?? [];
+  // All four asset installers must gate via verify_sums with an explicit `|| return 1`. Tolerant of the temp-var
+  // name and spacing so a benign rename doesn't trip it — only the SHAPE (verify_sums <dir> || return 1) matters.
+  const gates = lib.match(/verify_sums "\$\w+"\s*\|\|\s*return 1/g) ?? [];
   expect(gates.length).toBe(4); // install_binary, install_nsk, install_deploy_tree, install_client_ui
-  // And none may fall back to the bare form that #79 removed (that's the shape set -e suspension bypasses).
-  expect(lib).not.toMatch(/cd "\$tmp" && sha256sum -c/);
+  // And none may fall back to the bare form that #79 removed (the shape set -e suspension bypasses). Target the
+  // install-site temp var ("$tmp") specifically: verify_sums's OWN body legitimately runs `cd "$1" && sha256sum
+  // -c`, so a looser pattern would false-match the very helper this gate routes through.
+  expect(lib).not.toMatch(/cd "\$tmp"\s*&&\s*sha256sum -c/);
 });

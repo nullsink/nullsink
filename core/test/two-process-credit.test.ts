@@ -19,14 +19,19 @@ import type { Subprocess } from "bun";
 const PROXY = fileURLToPath(new URL("../src/proxy.ts", import.meta.url));
 const PAYMENTS = fileURLToPath(new URL("../src/payments.ts", import.meta.url));
 
-// A free localhost TCP port (bind :0, read the assignment, release). Small TOCTOU window, standard practice —
-// far safer here than hardcoded ports that would collide when bun runs test files in parallel.
-function freePort(): number {
-  const s = Bun.serve({ port: 0, fetch: () => new Response("") });
-  const p = s.port;
-  s.stop(true);
-  if (p == null) throw new Error("no port assigned");
-  return p;
+// Two DISTINCT free localhost ports. Each :0 bind is held open until BOTH are captured, then both released, so
+// the two can never resolve to the same number (a plain "bind/read/release" twice can hand back one port twice,
+// and proxy + payments would then collide on bind). Small TOCTOU window remains — standard practice, and far
+// safer than hardcoded ports that would collide when bun runs test files in parallel.
+function freePortPair(): [number, number] {
+  const a = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const b = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const pa = a.port;
+  const pb = b.port;
+  a.stop(true);
+  b.stop(true);
+  if (pa == null || pb == null || pa === pb) throw new Error(`bad port pair: ${pa}, ${pb}`);
+  return [pa, pb];
 }
 
 const procs: Subprocess[] = [];
@@ -64,8 +69,7 @@ test("a seeded credit crosses the socket from payments to proxy and reads back t
   expect(seed.enqueueCredit("smoke-tx-1", hashToken(token), 5_000_000, Date.now())).toBe(true);
   seed.db.close();
 
-  const proxyPort = freePort();
-  const paymentsPort = freePort();
+  const [proxyPort, paymentsPort] = freePortPair();
 
   // proxy: owns balances.db, binds the credit socket, serves /balance. Needs ≥1 provider to boot (dummy key —
   // it is never called; the test only hits /balance).
@@ -94,9 +98,16 @@ test("a seeded credit crosses the socket from payments to proxy and reads back t
   }
   expect(crossed).toBe(true); // the credit crossed the socket and is visible through the metered read path
 
-  // Exactly once: the outbox row is now acked (drained), so no redelivery can double-credit. The balance being
-  // exactly 5 across the several poll ticks that ran also proves creditOnce's idempotency held.
-  const check = openOrderStore(pendingDb);
-  expect(check.listUnackedCredits()).toEqual([]);
-  check.db.close();
-}, 30_000);
+  // Exactly once + no loss: the outbox row acks (drains) right after the credit lands. The ack is a WRITE in the
+  // PAYMENTS process, so across our separate reader connection it can lag the /balance visibility by a WAL tick
+  // (more so under load) — poll briefly for the drained state instead of reading once and racing it. The balance
+  // being exactly 5 (not 10) across the poll ticks that ran already proves creditOnce's idempotency held.
+  let drained = false;
+  for (let i = 0; i < 25 && !drained; i++) {
+    const check = openOrderStore(pendingDb);
+    drained = check.listUnackedCredits().length === 0;
+    check.db.close();
+    if (!drained) await Bun.sleep(200);
+  }
+  expect(drained).toBe(true); // no credit stuck unacked — delivery completed exactly once
+}, 45_000);
