@@ -12,7 +12,7 @@ const NOW = 1_000_000_000_000;
 const CONF = 10;
 const SEED_MAX = Number.MAX_SAFE_INTEGER;
 const CFG: SettleConfig = { scale: ATOMIC_PER_XMR, asset: "monero", backstopMs: NOW };
-const mk = (o: Partial<PendingOrder>): PendingOrder => ({
+const mk = (o: Partial<PendingOrder>): Omit<PendingOrder, "seen_at"> => ({
   rail: "monero", order_index: 0, address: "a0", hash: "h1", expected_atomic: 1_000_000,
   credit_micros: 1_000_000, received_atomic: 0, created_at: NOW, rate_usd: 0, ...o,
 });

@@ -198,7 +198,11 @@ export async function checkBalance(rawToken: string): Promise<number | null> {
 // existed — the server can't tell (the link is dropped at settle), so the caller falls back to /balance
 // for the authoritative outcome.
 export interface OrderStatus {
-  state: "waiting" | "confirming" | "finalizing" | "closed";
+  // `detected` = the server has durably seen an inbound for this order (pending_orders.seen_at) but has no
+  // live confirmation count right now — its progress map is process-local and empty after a restart, and the
+  // wallet may still be resyncing. It exists so a payer is never told "not seen yet" about a payment we HAVE
+  // seen: believing that, they may pay twice, and the second deposit lands on a closed order and is lost.
+  state: "waiting" | "detected" | "confirming" | "finalizing" | "closed";
   confirmations?: number;
   required?: number;
   received?: string; // verbatim coin amount string

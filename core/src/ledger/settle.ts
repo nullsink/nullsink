@@ -15,10 +15,8 @@ export type SettleConfig = {
   // so a concurrent rail's same-index orders are never read or reaped on this rail's tick. Defaults to
   // "monero" (and is normally == asset). The poller passes one settle() call per active rail, each its own.
   backstopMs: number; // absolute safety horizon — reap ANY order older than this (paid-but-stuck included)
-  unfundedReapMs?: number; // optional shorter horizon — reap an order NEVER seen with incoming (across
-  // ticks, via `seen`); = quoted expires_at + a confirmation grace. Unset → only backstopMs applies.
-  seen?: Set<number>; // cross-tick memory of order indices ever seen paying; the poller keeps it persistent
-  // so a transient blind tick can't fast-reap an order a prior tick spared. See below.
+  unfundedReapMs?: number; // optional shorter horizon — reap an order never seen with incoming (durably,
+  // via pending_orders.seen_at); = quoted expires_at + a confirmation grace. Unset → only backstopMs applies.
 };
 
 // Match the rail's confirmed inbounds to open orders and enqueue each credit exactly once. `now` is injected
@@ -38,23 +36,17 @@ export function settle(
   const rail = cfg.rail ?? "monero"; // rail-scope all reads/reaps below (see SettleConfig.rail)
   const open = new Map(orders.openOrders(rail).map((o) => [o.order_index, o]));
 
-  // Order indices ever seen with incoming activity. cfg.seen is a PERSISTENT set so a sighting on one tick
-  // still spares the order on LATER ticks — crucially a tick where the wallet transiently reports NOTHING
-  // (mid-rescan / node resync), which the rail can't distinguish from "nobody has paid yet". Without this
-  // cross-tick memory, one blind tick past the unfunded horizon would fast-reap a PAYING order and drop
-  // its irreplaceable index→hash link. Gates REAPING only — crediting still requires `final` — so `seen`
-  // can't be abused into a credit; worst a dust send buys is one order lingering to the backstop.
-  // Populated below from EVERY inbound regardless of finality (a still-confirming output still counts as
-  // "someone is paying"). Falls back to per-tick scope when no set is injected.
-  const seen = cfg.seen ?? new Set<number>();
-
   // Aggregate creditable inbounds by the rail's idempotency key. The rail returns one entry per output,
   // and several can share a key (Monero: outputs of one tx to the same subaddress), so we sum per key and
   // use THAT for crediting — one tx paying two of our addresses keeps two distinct keys (the money-loss
   // guard). Only `final` inbounds for an open order are credited; the rest still count as activity above.
   const groups = new Map<string, { orderIndex: number; amount: number }>();
   for (const t of inbounds) {
-    seen.add(t.orderIndex);
+    // Record the sighting durably, BEFORE anything can reap. Every inbound counts, final or not: a
+    // still-confirming output still means "someone is paying this". Write-once, so re-observing the same
+    // deposit on every tick costs nothing. Gates REAPING only — crediting still requires `final` — so a
+    // sighting can't be abused into a credit; worst a dust send buys is one order lingering to the backstop.
+    orders.markSeen(t.orderIndex, rail, now);
     if (!t.final) continue;
     if (!open.has(t.orderIndex)) continue; // no open order for this index (settled/unknown)
     const g = groups.get(t.idempotencyKey);
@@ -82,20 +74,23 @@ export function settle(
   // Absolute safety backstop: drop everything past the long horizon, including a paid-but-never-confirmed
   // order (a dropped pool tx) the fast-reaper would otherwise keep sparing.
   orders.purgeStale(now - cfg.backstopMs, rail);
-  // Fast-reap UNFUNDED orders: NEVER seen with incoming (across ticks, via `seen`) AND older than
-  // unfundedReapMs → abandoned. unfundedReapMs = quoted expires_at + a confirmation grace, so a buyer
-  // paying at the very end of their window still has time for a first sighting (which spares the order).
-  // Orders ever seen are spared until they reach finality and close (pay-once) or hit the backstop.
+  // Fast-reap UNFUNDED orders: NEVER seen with incoming AND older than unfundedReapMs → abandoned.
+  // unfundedReapMs = quoted expires_at + a confirmation grace, so a buyer paying at the very end of their
+  // window still has time for a first sighting (which spares the order). Orders ever seen are spared until
+  // they reach finality and close (pay-once) or hit the backstop.
+  //
+  // "Ever seen" lives ONLY on disk, in seen_at. It used to also live in a process-local Set the poller threaded
+  // through here, but that Set is rebuilt empty on every process start — and the poller's first tick fires
+  // immediately, exactly when the local wallet/node is most likely still resyncing. A resyncing wallet reports
+  // an empty inbound list as a SUCCESS, not an error (rails/monero.ts), so that first tick is indistinguishable
+  // from "nobody paid" and would fast-reap an order the customer had already paid for. A durable column is the
+  // whole fix; the in-memory Set was redundant with it (every path that added to the Set also wrote seen_at on
+  // the same open row), so it is gone rather than kept as a second source of truth.
+  // openOrders is re-read here, so it sees the seen_at this very tick just wrote.
   if (cfg.unfundedReapMs != null) {
     const cutoff = now - cfg.unfundedReapMs;
     for (const o of orders.openOrders(rail))
-      if (!seen.has(o.order_index) && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
-  }
-  // Forget order indices whose order has since closed (credited or reaped) so an injected `seen` stays
-  // bounded by the live open-order count, not the lifetime total. (No-op for the per-tick fallback.)
-  if (cfg.seen) {
-    const stillOpen = new Set(orders.openOrders(rail).map((o) => o.order_index));
-    for (const idx of cfg.seen) if (!stillOpen.has(idx)) cfg.seen.delete(idx);
+      if (o.seen_at == null && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
   }
   // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is NOT purged
   // in stage 2 (D4): purging on the payments-side clock could drop a marker while an outbox retry is still in

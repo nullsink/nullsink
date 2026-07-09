@@ -261,12 +261,6 @@ log.info("boot", `nullsink ${BUILD_VERSION} → ${providerSummary} listening on 
 
 // --- Settlement poller. Pure outbound: fetches confirmed deposits via each rail's watch-only wallet and
 // hands them to settle(), which credits the matching token once a deposit has CONFIRMATIONS. ---
-// One persistent seen-set PER RAIL (the integer index is unambiguous within a rail; see settle.ts), kept
-// here (not the DB) so a sighting survives across ticks and a transiently-blind tick can't fast-reap a
-// paying order. A restart resets them; the startup poll re-marks from the still-on-chain deposits.
-const seenByRail = new Map<string, Set<number>>();
-for (const name of rails.keys()) seenByRail.set(name, new Set<number>());
-
 // Per-rail CONSECUTIVE poll-failure streak. UNLIKE the health-check's direct node/wallet probes
 // (deploy/status-check.sh §4/§4b), which open a FRESH connection and so cannot see a CLIENT-SIDE fault like a
 // stale keep-alive socket, this counts the app's OWN poll outcomes — the only signal that catches "the app
@@ -311,11 +305,11 @@ async function pollRail(rail: PayRail): Promise<void> {
     rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
     backstopMs: ORDER_BACKSTOP_MS,
     unfundedReapMs: ORDER_TTL_MS + REAP_GRACE_MS,
-    seen: seenByRail.get(rail.name),
   });
   // Refresh the live /order-status view from this tick's sightings (scoped to this rail), AFTER settle has
   // removed credited/reaped orders so closed ones drop out. Merge semantics (orderstatus.ts) keep a
-  // mid-confirming order from flickering on a transient-empty tick — the same guard `seen` gives settle.
+  // mid-confirming order from flickering on a transient-empty tick — the display-side echo of the durable
+  // seen_at guard settle uses. NOTE: unlike seen_at, this map is process-local and empty after a restart.
   orderStatus.update(transfers, orders.openOrders(rail.name).map((o) => o.order_index), rail.name);
 }
 

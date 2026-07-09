@@ -179,10 +179,14 @@ export function QuotePay({
       ? `payment seen, confirming ${status.confirmations}/${status.required}`
       : status.state === "finalizing"
         ? "confirmed, verifying credit…"
-        : // waiting, or closed with no credit landed yet
-          baseline > 0
-          ? "no top-up landed yet"
-          : "not seen yet";
+        : status.state === "detected"
+          ? // Seen, but the server has no live confirmation count (it restarted; its wallet may still be
+            // resyncing). Say we have it — NEVER fall through to "not seen yet", which reads as "send again".
+            "payment seen, re-checking…"
+          : // waiting, or closed with no credit landed yet
+            baseline > 0
+            ? "no top-up landed yet"
+            : "not seen yet";
   // Visible text adds the transient "checking…" pulse — sighted feedback that a poll is in flight.
   const statusText = checking ? "checking…" : settledStatus;
 

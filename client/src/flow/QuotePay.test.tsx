@@ -89,3 +89,24 @@ test("not-yet-funded check re-enables the button without calling /balance", asyn
   expect(funded).toBe(false);
   expect(checkBalance).not.toHaveBeenCalled();
 });
+
+// `detected` = the server durably saw an inbound (seen_at) but has no live confirmation count, because it
+// restarted and its wallet is still resyncing. Telling a payer "not seen yet" here is how you get paid twice:
+// pay-once already closed the order on the first deposit, so the second lands on no open order and is lost
+// forever. This must never fall through to the "not seen yet" copy.
+test("`detected` tells the payer we have their payment, and does not spend the token on /balance", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "detected" }));
+
+  let funded = false;
+  renderPay(() => { funded = true; });
+
+  const button = screen.getByRole("button", { name: "check" });
+  fireEvent.click(button);
+
+  await waitFor(() => expect(button).not.toBeDisabled());
+  // Rendered twice on purpose: the visible line and the sr-only live region announce the same settled status.
+  expect(screen.getAllByText("payment seen, re-checking…")).toHaveLength(2);
+  expect(screen.queryByText("not seen yet")).not.toBeInTheDocument();
+  expect(funded).toBe(false);
+  expect(checkBalance).not.toHaveBeenCalled(); // `detected` is not `finalizing` — no premature token spend
+});
