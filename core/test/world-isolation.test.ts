@@ -43,9 +43,9 @@ function valueClosure(entry: string): Set<string> {
 const PAYMENT_WORLD = [
   "rails/index.ts", "rails/monero.ts", "rails/bitcoin.ts", "rails/rate.ts",
   "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/drain.ts",
-  "endpoints/buy.ts", "endpoints/payments.ts", "payments-handler.ts",
+  "endpoints/buy.ts", "endpoints/payments.ts", "payments-handler.ts", "credit-sender.ts",
 ];
-const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "handler.ts"];
+const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "handler.ts", "credit-server.ts"];
 
 test("the proxy handler's import closure contains NO payment-world module", () => {
   const reachable = valueClosure("handler.ts");
@@ -54,6 +54,18 @@ test("the proxy handler's import closure contains NO payment-world module", () =
 
 test("the payments handler's import closure contains NO prompt-world module", () => {
   const reachable = valueClosure("payments-handler.ts");
+  expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
+});
+
+// The two halves of the credit crossing are world-owned too: the proxy runs the server, payments runs the sender,
+// and they share only credit-wire.ts (a pure contract with no store and no I/O).
+test("credit-server (prompt world) imports NO payment-world module", () => {
+  const reachable = valueClosure("credit-server.ts");
+  expect(PAYMENT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
+});
+
+test("credit-sender (payment world) imports NO prompt-world module", () => {
+  const reachable = valueClosure("credit-sender.ts");
   expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
 });
 
