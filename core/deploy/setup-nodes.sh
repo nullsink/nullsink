@@ -110,7 +110,7 @@ else
   note "bitcoind NOT started yet — finish the runbook, then: systemctl enable --now bitcoind"
 fi
 
-step "Done — continue with the migration runbook"
+step "Done — continue with the node-box runbook"
 note "NEXT: deploy/node-box-runbook.md — the ordered runbook (7 steps: WG -> conf -> SYNC -> drain+migrate -> rpcauth -> verify -> decommission)."
 note "Two absolutes: let IBD FINISH before draining the rail (the drain window must be minutes, not the sync),"
 note "and MIGRATE the wallet (backupwallet -> restorewallet) — never re-import from the xpub."

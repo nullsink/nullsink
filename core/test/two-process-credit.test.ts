@@ -64,7 +64,7 @@ test("a seeded credit crosses the socket from payments to proxy and reads back t
   const token = "smoke-token-two-process";
 
   // Seed one $5 credit into the outbox (5_000_000 micro-USD), then release the handle so the payments process
-  // opens the DB cleanly. openOrderStore runs the migrations, so this also initialises pending.db.
+  // opens the DB cleanly. openOrderStore creates the schema, so this also initialises pending.db.
   const seed = openOrderStore(pendingDb);
   expect(seed.enqueueCredit("smoke-tx-1", hashToken(token), 5_000_000, Date.now())).toBe(true);
   seed.db.close();

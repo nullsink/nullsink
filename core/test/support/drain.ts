@@ -1,5 +1,5 @@
 // TEST-ONLY in-process outbox drain: credit_outbox -> the balance ledger via a direct creditOnce call.
-// The money-property tests (settle.property, outbox, revenue, migration) drive outbox -> balance crediting
+// The money-property tests (settle.property, outbox, revenue) drive outbox -> balance crediting
 // synchronously and deterministically, without standing up the unix socket. The production path is
 // drainCreditOutboxOverSocket in src/credit-sender.ts: genuinely different code (async, ambiguity-aware,
 // fail-closed), NOT a copy of this loop.

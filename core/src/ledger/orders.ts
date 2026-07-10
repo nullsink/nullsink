@@ -45,59 +45,9 @@ export function openOrderStore(path: string) {
   received_atomic INTEGER NOT NULL DEFAULT 0,
   created_at      INTEGER NOT NULL,
   rate_usd        REAL NOT NULL DEFAULT 0,
+  seen_at         INTEGER,
   PRIMARY KEY (rail, order_index)
 )`);
-
-  // In-place migration from the pre-seam schema (integer `subaddr_index` PK, no `address`). DO NOT delete +
-  // rebuild pending.db — it holds LIVE, irreplaceable payment↔token links for paid-but-unconfirmed orders
-  // (a dropped row = a paid user we can never credit). The CREATE above is a no-op when an old table exists,
-  // so detect its columns and ALTER. Column-guarded → idempotent (a no-op on an already-migrated DB).
-  // `address` back-fills to '' for migrated Monero orders, which is correct: settlement matches on
-  // order_index, never the address (the Monero rail's incomingTransfers takes the index). Run with the
-  // service STOPPED so the ALTER takes the write lock without racing the poller.
-  const cols = db.query<{ name: string }, []>("PRAGMA table_info(pending_orders)").all();
-  const have = new Set(cols.map((c) => c.name));
-  if (have.has("subaddr_index") && !have.has("order_index"))
-    db.run("ALTER TABLE pending_orders RENAME COLUMN subaddr_index TO order_index");
-  if (!have.has("address")) db.run("ALTER TABLE pending_orders ADD COLUMN address TEXT NOT NULL DEFAULT ''");
-
-  // Composite-PK migration for multi-rail. The pre-multi-rail table keyed on `order_index` ALONE, but two
-  // rails allocate that integer independently (Monero subaddress minor vs Bitcoin HD index), so concurrently
-  // they collide on the PK. Re-key to PRIMARY KEY (rail, order_index). SQLite can't ALTER a PK, so rebuild —
-  // existing rows are all Monero, so they back-fill rail='monero' and keep their index (and keep settling).
-  // Runs AFTER the seam migration above (it needs order_index/address to exist) and BEFORE the statements
-  // below (they bind to the final table); guarded on the absence of `rail` → idempotent; wrapped in ONE
-  // transaction so a crash mid-rebuild rolls back rather than losing the table.
-  if (!db.query<{ name: string }, []>("PRAGMA table_info(pending_orders)").all().some((c) => c.name === "rail")) {
-    db.transaction(() => {
-      db.run(`CREATE TABLE pending_orders_new (
-  rail            TEXT NOT NULL DEFAULT 'monero',
-  order_index     INTEGER NOT NULL,
-  address         TEXT NOT NULL,
-  hash            TEXT NOT NULL,
-  expected_atomic INTEGER NOT NULL,
-  credit_micros   INTEGER NOT NULL,
-  received_atomic INTEGER NOT NULL DEFAULT 0,
-  created_at      INTEGER NOT NULL,
-  rate_usd        REAL NOT NULL DEFAULT 0,
-  PRIMARY KEY (rail, order_index)
-)`);
-      db.run(
-        "INSERT INTO pending_orders_new (rail, order_index, address, hash, expected_atomic, credit_micros, received_atomic, created_at, rate_usd) " +
-          "SELECT 'monero', order_index, address, hash, expected_atomic, credit_micros, received_atomic, created_at, rate_usd FROM pending_orders",
-      );
-      db.run("DROP TABLE pending_orders");
-      db.run("ALTER TABLE pending_orders_new RENAME TO pending_orders");
-    })();
-  }
-
-  // Durable "someone is paying this order" memory (see settle.ts's fast-reap). Added last, AFTER the rebuild
-  // above, so it lands on the final table whichever migration path a DB arrived by. Column-guarded →
-  // idempotent. Back-fills to NULL, which is the safe direction: an in-flight order that was already being
-  // paid when this version deploys is simply re-marked by the next poll tick that sees its deposit, long
-  // before the 4.5h fast-reap horizon.
-  if (!db.query<{ name: string }, []>("PRAGMA table_info(pending_orders)").all().some((c) => c.name === "seen_at"))
-    db.run("ALTER TABLE pending_orders ADD COLUMN seen_at INTEGER");
 
   // A token's hash can have an open order (the /order-status + balance-page-resume lookup path). One
   // hash → at most a few in-flight orders, but the table is keyed by order_index, so index the hash for
@@ -227,7 +177,7 @@ export function openOrderStore(path: string) {
 
   // Drop an order's row — on its first confirmed payment (pay-once) or a reap. Also drops the index→hash
   // link. Composite-keyed: deletes ONLY (rail, orderIndex), never the other rail's row at the same index.
-  // `rail` defaults to 'monero' so legacy single-rail callers (and the migration test) stay correct without
+  // `rail` defaults to 'monero' so legacy single-rail callers stay correct without
   // passing it; settle passes the real rail explicitly. Returns whether a row was deleted.
   function removeOrder(orderIndex: number, rail: string = "monero"): boolean {
     return deleteStmt.run(rail, orderIndex).changes > 0;
