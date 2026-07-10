@@ -10,8 +10,15 @@ node_modules
 *.db-shm
 *.bak.db
 
-# Compiled single-binary build artifacts (package.json `build`/`build:nsk` / the release workflow produce them).
+# The credit socket a locally-run `dev:proxy` binds (CREDIT_SOCK; /run/nullsink/credit.sock in prod).
+*.sock
+
+# Compiled binary build artifacts (package.json `build`/`build:nsk` / the release workflow produce them).
+# The stage-2 split builds two service binaries from one core; the old single-binary name is kept so a stale
+# artifact from before the split is still ignored.
 /nullsink-linux-x64
+/nullsink-proxy-linux-x64
+/nullsink-payments-linux-x64
 /nsk-linux-x64
 /SHA256SUMS
 

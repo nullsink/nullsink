@@ -66,7 +66,7 @@ export function makeTinfoilProvider(cfg: TinfoilConfig): Provider {
     id: "tinfoil",
     baseUrl: cfg.baseUrl,
     upstreamPath: "/v1/chat/completions",
-    estimateHold: cfg.estimateHold, // always the byte bound — Tinfoil has no count_tokens endpoint (index.ts)
+    estimateHold: cfg.estimateHold, // always the byte bound — Tinfoil has no count_tokens endpoint (proxy.ts)
     readToken: bearerToken,
     premiumReject: tinfoilPremiumReject,
     outputCap: tinfoilOutputCap,

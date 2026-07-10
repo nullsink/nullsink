@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore the billing DBs from a backup.sh artifact. DEFAULT is a SAFE DRY-RUN: decrypt + extract to a temp
 # dir and run PRAGMA integrity_check on each DB, touching NOTHING live. Pass --apply to actually replace the
-# live DBs (stops the service, installs the files service-owned, re-arms the credit outbox, restarts). A
+# live DBs (stops both services, installs the files service-owned, re-arms the credit outbox, restarts). A
 # dry-run is also how you TEST a backup is restorable without risking production.
 #
 # Decryption (.tar.age artifacts) needs your age IDENTITY (private key), which is kept OFFLINE, NOT on the
@@ -10,8 +10,8 @@
 #
 # Usage:
 #   restore.sh <artifact>            # dry-run: verify integrity, report, change nothing
-#   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts the service)
-# Env: DB_DIR, SVC_USER, SVC_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
+#   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts both services)
+# Env: DB_DIR, SVC_USER, PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
 set -euo pipefail
 
 apply=0
@@ -24,7 +24,8 @@ fi
 
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 SVC_USER="${SVC_USER:-nullsink}"
-SVC_UNIT="${SVC_UNIT:-nullsink}"
+PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
+PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -43,12 +44,16 @@ esac
 tar -C "$work" -xf "$tarball"
 [ -f "$work/balances.db" ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
 
-# Verify each extracted DB before trusting it (a backup that won't open is no backup).
+# Verify each extracted DB before trusting it (a backup that won't open is no backup). The `|| true` is
+# load-bearing: on a not-a-database / truncated / bad-header file, sqlite3 EXITS non-zero (SQLITE_NOTADB=26),
+# and under `set -euo pipefail` that exit propagates through the pipe and kills the script AT the assignment —
+# before the diagnostic below can print. The operator would see a bare `exit 26` on exactly the corrupt
+# artifact this check exists to catch. Swallow sqlite3's exit; judge the artifact by its OUTPUT instead.
 for db in "$work/balances.db" "$work/pending.db"; do
   [ -f "$db" ] || continue
-  res="$(sqlite3 "$db" 'PRAGMA integrity_check;' 2>&1 | head -1)"
+  res="$(sqlite3 "$db" 'PRAGMA integrity_check;' 2>&1 | head -1 || true)"
   if [ "$res" = "ok" ]; then echo "integrity OK: $(basename "$db")"
-  else echo "integrity FAILED: $(basename "$db"): $res" >&2; exit 1; fi
+  else echo "integrity FAILED: $(basename "$db"): ${res:-sqlite3 could not open it (not a database?)}" >&2; exit 1; fi
 done
 
 if [ "$apply" -eq 0 ]; then
@@ -61,7 +66,7 @@ fi
 # DBs (so a live copy is never deleted before its replacement is in hand); then, service stopped, swap them
 # in, keeping the previous live DB as <db>.prerestore for recovery. The snapshots are already checkpointed,
 # so the stale -wal/-shm are dropped.
-[ "$(id -u)" -eq 0 ] || { echo "--apply must run as root (it installs files + (re)starts the service)" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "--apply must run as root (it installs files + (re)starts the services)" >&2; exit 1; }
 
 staged=()
 for db in balances.db pending.db; do
@@ -70,10 +75,16 @@ for db in balances.db pending.db; do
   staged+=("$db")
 done
 
-echo "STOPPING $SVC_UNIT to swap in the restored ledger…"
-systemctl stop "$SVC_UNIT"
+# Payments first, proxy second: payments is the only writer of pending.db, and the proxy owns the credit
+# socket it delivers over. Stopping the sender before its receiver avoids a burst of doomed connects.
+echo "STOPPING $PAYMENTS_UNIT + $PROXY_UNIT to swap in the restored ledger…"
+systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT"
 for db in "${staged[@]}"; do
-  [ -e "$DB_DIR/$db" ] && mv -f "$DB_DIR/$db" "$DB_DIR/$db.prerestore"   # keep the old copy, recoverable
+  # Keep the pre-restore ledger, recoverable — but NEVER clobber an existing .prerestore. A failed re-arm tells
+  # the operator to re-run this script; on that second --apply the live DB is already the RESTORED one, so a
+  # plain `mv -f` would overwrite the ORIGINAL pre-restore copy with restored data and lose the real ledger.
+  # `-n` (no-clobber) preserves the first, true pre-restore snapshot across re-runs.
+  [ -e "$DB_DIR/$db" ] && mv -n "$DB_DIR/$db" "$DB_DIR/$db.prerestore" && rm -f "$DB_DIR/$db"
   mv -f "$DB_DIR/.$db.restoring" "$DB_DIR/$db"
   rm -f "$DB_DIR/$db-wal" "$DB_DIR/$db-shm"
   echo "restored $db (previous kept as $db.prerestore)"
@@ -100,7 +111,7 @@ done
 # real credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
 #
 # Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
-# break the service's billing writes (the same trap cli/guard.ts exists to prevent).
+# break the services' billing writes (the same trap cli/guard.ts exists to prevent).
 if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
   # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it
@@ -111,8 +122,8 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
       echo "!! credit-outbox re-arm FAILED — sqlite3 said:" >&2
       printf '%s\n' "$out" >&2
       echo "!! The databases ARE restored but the outbox was NOT re-armed, so a paid credit may be marked" >&2
-      echo "!! delivered while the restored ledger never received it. $SVC_UNIT is left STOPPED on purpose." >&2
-      echo "!! Fix the cause, re-run this script, and only then start it." >&2
+      echo "!! delivered while the restored ledger never received it. $PROXY_UNIT + $PAYMENTS_UNIT are left" >&2
+      echo "!! STOPPED on purpose. Fix the cause, re-run this script, and only then start them." >&2
       exit 1
     fi
     printf '%s\n' "$out" | tail -1
@@ -147,8 +158,9 @@ else
   echo "skip credit-outbox re-arm (no pending.db, or sqlite3 not installed — apt-get install sqlite3)"
 fi
 
-systemctl start "$SVC_UNIT"
-echo "--- restored + $SVC_UNIT restarted. Verify with the financials CLI + curl localhost:8080/healthz,"
-echo "    and watch for '[credit] delivered N credit(s)' in: journalctl -u $SVC_UNIT -f"
+systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
+echo "--- restored + both services restarted. Verify with the financials CLI + curl localhost:8080/healthz"
+echo "    and localhost:8081/healthz; watch for '[credit] delivered N credit(s)' in:"
+echo "      journalctl -u $PAYMENTS_UNIT -f"
 echo "    then remove the $DB_DIR/*.prerestore safety copies once you're happy. ---"
 exit 0

@@ -11,12 +11,12 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 # gh, no auth, no source tree, no Bun.
 APP_DIR="/opt/nullsink"
 SVC_USER="nullsink"
-SVC_NAME="nullsink"
 ENV_FILE="/etc/nullsink.env"
 WEB_BASE="/var/www/nullsink"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web symlink)
 
-# Shared "apply repo config" library (install_units + health_ok), also sourced by deploy.sh so the
-# unit-install glob is one source of truth across bootstrap + redeploy. Needs APP_DIR/ENV_FILE (set above).
+# Shared "apply repo config" library (install_units + health_ok + the PROXY_UNIT/PAYMENTS_UNIT names), also
+# sourced by deploy.sh so the unit-install glob is one source of truth across bootstrap + redeploy. The app
+# is TWO units since the stage-2 split; both run as $SVC_USER. Needs APP_DIR/ENV_FILE (set above).
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -37,7 +37,7 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # release WITHOUT editing this file (and without downgrading a box already past the default):
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
-RELEASE_TAG="${RELEASE_TAG:-v1.6.1}" # x-release-please-version
+RELEASE_TAG="${RELEASE_TAG:-v1.8.0}" # x-release-please-version
 # Bitcoin Core pin + install helper live in lib.sh now (shared with setup-nodes.sh, so the pin can't drift).
 # Monero + tinfoil-proxy pins stay here — they're app-box-only (the node box installs only bitcoind).
 # Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
@@ -158,7 +158,11 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<EOF
 ANTHROPIC_API_KEY=replace-me
 HOST=127.0.0.1
+# Loopback ports, one per service. PORT is nullsink-proxy (the metered /v1 paths + /balance); PAYMENTS_PORT
+# is nullsink-payments (/buy, /order-status, /rails). Caddy routes each path to exactly one of them; change
+# either here and the Caddyfile's matching reverse_proxy line together.
 PORT=8080
+PAYMENTS_PORT=8081
 # Public edge (Caddy): the domain this box serves on. setup.sh feeds it to Caddy via a systemd drop-in, so
 # the committed Caddyfile hardcodes no host. EMPTY = setup.sh skips the public edge (the app still runs on
 # 127.0.0.1); re-run after setting it. Keep bare (no inline # comment).
@@ -227,16 +231,20 @@ step "Installing systemd units"
 # One glob-based install of every deploy/*.service + *.timer (via lib.sh's install_units, shared with
 # deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
 # per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
+# retire_legacy_unit then stops + removes the pre-split nullsink.service on a box being upgraded across the
+# split (a no-op on a fresh one); it must run before nullsink-proxy tries to bind :8080.
 install_units
+retire_legacy_unit
 
-step "Installing the app binary (pinned release)"
-# Fetch+verify+activate the pinned binary for nullsink.service. Guarded: a failure here (network down, or
-# the release missing) must NOT abort the rest of the bootstrap — the box still gets units/edge/firewall; finish
-# the binary install after. The unit won't start until the binary is in place (next step warns/continues).
+step "Installing the app binaries (pinned release)"
+# Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in
+# lockstep). Guarded: a failure here (network down, or the release missing) must NOT abort the rest of the
+# bootstrap — the box still gets units/edge/firewall; finish the binary install after. The units won't start
+# until the binaries are in place (next step warns/continues).
 if install_binary "$RELEASE_TAG"; then
   :
 else
-  todo "app binary not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — nullsink.service won't start until the binary is in place"
+  todo "app binaries not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — $PROXY_UNIT/$PAYMENTS_UNIT won't start until they're in place"
 fi
 
 step "Installing the client UI (pinned release)"
@@ -266,21 +274,23 @@ else
   echo "    skip tinfoil-proxy (TINFOIL_API_KEY not set — Tinfoil rail inactive)"
 fi
 
-step "Installing systemd service"
-# The unit's ExecStart points at the binary (/usr/local/lib/nullsink/current), installed in the step above.
-systemctl enable "$SVC_NAME"
+step "Installing systemd services"
+# Each unit's ExecStart points at its binary (/usr/local/lib/nullsink/current-{proxy,payments}), installed in
+# the step above.
+enable_app_units
 # The env file EXISTING isn't the same as it being CONFIGURED. On a re-run (env present) we (re)start so the
 # buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the box boots and the rails
 # work, yet /v1/messages will 401 until a real Anthropic key is set (or run OpenAI-only via OPENAI_API_KEY —
-# at least one provider key is required to boot). A freshly templated env is left for the operator to fill.
+# at least one provider key is required for nullsink-proxy to boot). A freshly templated env is left for the
+# operator to fill; nullsink-payments would start fine, but there's no reason to run half the app.
 if [ "$FRESH_ENV" -eq 0 ]; then
-  systemctl restart "$SVC_NAME"
+  restart_app
   _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_akey" ] || [ "$_akey" = replace-me ]; then
-    todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $SVC_NAME"
+    todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $PROXY_UNIT"
   fi
 else
-  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $SVC_NAME"
+  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $PROXY_UNIT $PAYMENTS_UNIT"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"
@@ -406,13 +416,16 @@ systemctl enable --now nftables
 nft -f /etc/nftables.conf   # apply now (idempotent — the file starts with `flush ruleset`)
 
 step "Done"
-_state="$(systemctl is-active "$SVC_NAME" 2>/dev/null || true)"
-if [ "$_state" = active ]; then _sc="$_g"; else _sc="$_y"; fi
-printf '    nullsink.service: %s%s%s   (detail: systemctl status %s)\n' "$_sc" "${_state:-unknown}" "$_z" "$SVC_NAME"
-# Extra, non-fatal confirmation that the app actually answers /healthz (the unit being "active" isn't the
+for _unit in "$PROXY_UNIT" "$PAYMENTS_UNIT"; do
+  _state="$(systemctl is-active "$_unit" 2>/dev/null || true)"
+  if [ "$_state" = active ]; then _sc="$_g"; else _sc="$_y"; fi
+  printf '    %s.service: %s%s%s   (detail: systemctl status %s)\n' "$_unit" "$_sc" "${_state:-unknown}" "$_z" "$_unit"
+done
+# Extra, non-fatal confirmation that both services actually answer /healthz (a unit being "active" isn't the
 # same as it serving). A fresh env (app not started yet) or a still-warming app simply prints "no" here.
-if health_ok; then note "/healthz responded 200"; else note "/healthz not answering yet (fine if the app isn't started / still warming)"; fi
-printf '\n%sAccess%s — the app is PRIVATE on %s127.0.0.1:8080%s; Caddy is the only public edge:\n' "$_c" "$_z" "$_b" "$_z"
+if health_ok_app; then note "both /healthz responded 200"; else note "/healthz not answering yet on one or both services (fine if the app isn't started / still warming)"; fi
+printf '\n%sAccess%s — the app is PRIVATE on %s127.0.0.1:%s (proxy) + :%s (payments)%s; Caddy is the only public edge:\n' \
+  "$_c" "$_z" "$_b" "$(proxy_port)" "$(payments_port)" "$_z"
 echo "  • Direct (SSH tunnel):  ssh -L 8080:localhost:8080 root@<box>   then  curl http://localhost:8080/healthz"
 echo "  • Go public:            point DNS at this box + open 80/443, then: systemctl restart caddy"
 echo "  • Operator CLI (opt):   sudo deploy/install-nsk.sh   then  sudo -u nullsink nsk financials"

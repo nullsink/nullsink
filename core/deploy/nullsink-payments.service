@@ -1,0 +1,66 @@
+[Unit]
+Description=nullsink payments — buy rails + settlement poller (payment world)
+After=network-online.target
+Wants=network-online.target
+# Ordering ONLY, never Requires=/BindsTo=: /buy must keep quoting and the poller must keep detecting
+# deposits while the proxy is down. Credits simply queue in the durable outbox and cross when it returns.
+# After= just avoids a guaranteed-failing first delivery attempt on a cold boot.
+After=nullsink-proxy.service
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+# Same uid as nullsink-proxy.service — see the note there. Both open /var/lib/nullsink, but each opens only
+# its OWN database: this service never links the balance store (enforced at the module level by
+# test/world-isolation.test.ts and on the compiled binary by scripts/assert-worlds.ts).
+User=nullsink
+Group=nullsink
+WorkingDirectory=/opt/nullsink
+# See nullsink-proxy.service: EnvironmentFile= OVERRIDES Environment=, so the settings below hold only because
+# setup.sh's templated env file omits them. PAYMENTS_PORT is deliberately NOT one of them — the env file owns
+# the port (the code defaults to 8081 too), so an operator retunes it in one place and edits the Caddyfile's
+# reverse_proxy line to match.
+EnvironmentFile=/etc/nullsink.env
+ExecStart=/usr/local/lib/nullsink/current-payments
+Restart=always
+RestartSec=2
+
+# In-flight orders (the buy rails), the sales book, and the durable credit outbox — all in pending.db, in the
+# StateDirectory shared with nullsink-proxy.service (which owns balances.db there). While an order is
+# in-flight this DB holds the ONLY payment→token link, and an unacked outbox row is a credit the customer has
+# PAID FOR but not yet received — losing it = a paid customer with nothing to credit. BACK IT UP.
+StateDirectory=nullsink
+Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
+
+# The credit crossing (payments → proxy, one direction, one verb). nullsink-proxy.service binds this socket
+# and owns its RuntimeDirectory; we only connect, so this unit must NOT declare RuntimeDirectory=nullsink —
+# systemd tears a RuntimeDirectory down when the unit that declares it stops, which would delete the live
+# socket out from under a running proxy. ProtectSystem=strict leaves /run read-only, which does not block
+# this: the kernel exempts sockets from the read-only-filesystem check, and connect(2) still enforces the
+# socket file's own write bit. Must match nullsink-proxy.service's CREDIT_SOCK exactly.
+Environment=CREDIT_SOCK=/run/nullsink/credit.sock
+
+# Memory + task containment; the small half of the old single-unit envelope (see nullsink-proxy.service).
+# This service serves tiny JSON bodies and makes short wallet/rate RPC calls — no streaming, no 32 MiB
+# uploads. A cgroup OOM kill here is safe: settle() writes are transactional and undelivered credits stay
+# durable in the outbox for the next start.
+MemoryHigh=192M
+MemoryMax=256M
+TasksMax=128
+OOMPolicy=stop
+
+# No long-lived streams to drain: SIGTERM stops the poller and the HTTP server and exits. An abandoned
+# in-flight poll tick is safe (transactional writes, durable outbox), so this window is far shorter than the
+# proxy's.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Hardening. Writes only pending.db under StateDirectory; needs egress for the rail RPCs (wallet, node, Tor
+# SOCKS) and the rate sources.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

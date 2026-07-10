@@ -1,6 +1,6 @@
 {
   "name": "nullsink",
-  "version": "1.6.1",
+  "version": "1.8.0",
   "private": true,
   "license": "AGPL-3.0-or-later",
   "repository": {
@@ -11,11 +11,16 @@
   "homepage": "https://nullsink.is",
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun --watch src/index.ts",
+    "start:proxy": "bun run src/proxy.ts",
+    "start:payments": "bun run src/payments.ts",
+    "dev:proxy": "bun --watch src/proxy.ts",
+    "dev:payments": "bun --watch src/payments.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bun build --compile --target=bun-linux-x64 src/index.ts --outfile nullsink-linux-x64",
+    "build:proxy": "bun build --compile --target=bun-linux-x64 src/proxy.ts --outfile nullsink-proxy-linux-x64",
+    "build:payments": "bun build --compile --target=bun-linux-x64 src/payments.ts --outfile nullsink-payments-linux-x64",
+    "assert:worlds": "bun run scripts/assert-worlds.ts",
+    "build": "bun run build:proxy && bun run build:payments && bun run assert:worlds",
     "build:nsk": "bun build --compile --target=bun-linux-x64 cli/index.ts --outfile nsk-linux-x64",
     "build:all": "bun run build && bun run build:nsk",
     "e2e:capture": "bun run scripts/e2e-capture.ts",

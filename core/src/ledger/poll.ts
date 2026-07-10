@@ -1,4 +1,4 @@
-// Pure classification of a settlement-poll tick's outcome for ONE rail — extracted from index.ts's pollRail
+// Pure classification of a settlement-poll tick's outcome for ONE rail — extracted from payments.ts's pollRail
 // so the alert/recovery state machine is unit-testable without a wallet, timers, or a logger. The poller still
 // owns the per-rail consecutive-failure streak (pollFailsByRail), the actual I/O, and the logging; this just
 // decides — given the prior streak and whether THIS tick's deposit fetch succeeded — the new streak count and

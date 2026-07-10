@@ -8,7 +8,13 @@
 # `email you@example.com` line to the global block below if you want Let's Encrypt cert-expiry notices.
 #
 # Design:
-#   - The app stays bound to 127.0.0.1:8080 (HOST=127.0.0.1); only Caddy faces the internet.
+#   - TWO upstreams, both loopback-bound (HOST=127.0.0.1); only Caddy faces the internet.
+#       :8080  nullsink-proxy    — the prompt world: /v1/* + /balance
+#       :8081  nullsink-payments — the payment world: /buy + /order-status + /rails
+#     The split is privilege separation, not scale: a request that carries a prompt never reaches the
+#     process that holds the payment→token link, and vice versa. Route each path to exactly one upstream —
+#     there is no shared router behind these ports any more, so a misrouted path is a hard 404, not a
+#     silent cross-world call.
 #   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions (OpenAI, when enabled)
 #     + GET /v1/models + GET /balance + POST /buy + POST /order-status + GET /rails.
 #   - /buy IS routed: a browser-side UI can only call a reachable endpoint, and we run no server-side BFF,
@@ -103,37 +109,38 @@
 		}
 	}
 
-	# --- Credit purchase (called by the UI). Tiny JSON body. ---
+	# --- Credit purchase (called by the UI). Tiny JSON body. PAYMENT WORLD -> :8081. ---
 	handle /buy {
 		request_body {
 			max_size 4KB
 		}
-		reverse_proxy 127.0.0.1:8080 {
+		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For
 		}
 	}
 
 	# --- Order status (the UI polls a pending payment's progress, keyed by the token HASH — never the
-	#     raw token). Tiny JSON body, same as /buy; reveals no balance. ---
+	#     raw token). Tiny JSON body, same as /buy; reveals no balance. PAYMENT WORLD -> :8081. ---
 	handle /order-status {
 		request_body {
 			max_size 4KB
 		}
-		reverse_proxy 127.0.0.1:8080 {
+		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For
 		}
 	}
 
 	# --- Active pay rails (the UI picker reads this to render the coin choices; reveals only which coins
-	#     we accept — already public on the marketing pages). Tiny GET, no body, no balance. ---
+	#     we accept — already public on the marketing pages). Tiny GET, no body, no balance.
+	#     PAYMENT WORLD -> :8081. ---
 	handle /rails {
-		reverse_proxy 127.0.0.1:8080 {
+		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For
 		}
 	}
 
-	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; it's a
-	#     localhost-only liveness check, so public requests for it just 404 here.) ---
+	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; BOTH services
+	#     expose it as a localhost-only liveness check, so public requests for it just 404 here.) ---
 	handle {
 		root * {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}
 		encode gzip zstd

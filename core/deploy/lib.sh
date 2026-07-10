@@ -10,8 +10,23 @@ REPO="${REPO:-nullsink/nullsink}"
 
 # Fetch one PUBLIC Release asset $2 for tag $1 into dir $3. The repo is public, so a plain unauthenticated
 # curl works — no gh, no auth on the box. -L follows GitHub's 302 to the asset CDN; -f fails the pipeline
-# on a 404/5xx. Callers still `test -f` + `sha256sum -c` what lands here.
+# on a 404/5xx. Callers still `test -f` + `verify_sums` what lands here.
 fetch_asset() { curl -fsSL "https://github.com/$REPO/releases/download/$1/$2" -o "$3/$2"; }
+
+# Verify downloaded assets against a SHA256SUMS in $1, running from that dir. The checksum is the ONLY thing
+# standing between a corrupted or tampered download and an installed+activated binary, so it must fail LOUD and
+# HARD — an explicit `|| return 1`, never a bare command that leans on `set -e`. Several callers run as
+# `if install_binary ...; then` (setup.sh) or `if install_client_ui ...; then` (deploy.sh); inside a function
+# invoked in a condition, bash SUSPENDS `set -e` for the whole body, so a bare `sha256sum -c` failure would NOT
+# abort — it would fall through to install + `ln -sfn`, activating an unverified artifact while the function
+# still returns success. Routing every verify through this helper makes the gate independent of the caller's
+# context. --ignore-missing: SHA256SUMS lists every release asset, but a given call pulled only some.
+verify_sums() {  # $1=dir containing SHA256SUMS + the fetched asset(s)
+  ( cd "$1" && sha256sum -c --ignore-missing SHA256SUMS ) || {
+    echo "    !! CHECKSUM MISMATCH in $1 — refusing to install (corrupt download or tampered asset)" >&2
+    return 1
+  }
+}
 
 # --- Pinned external toolchain + verified-install primitives, shared by setup.sh (app box) and
 # setup-nodes.sh (node box) so the pin + fetch/verify logic is ONE source of truth and can't drift. ---
@@ -20,9 +35,12 @@ fetch_asset() { curl -fsSL "https://github.com/$REPO/releases/download/$1/$2" -o
 BITCOIN_VERSION="31.0"
 BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074"
 
-fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; aborts (set -e) on mismatch
-  curl -fsSL "$1" -o "$3"
-  echo "$2  $3" | sha256sum -c -
+fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; refuses on mismatch
+  # Explicit `|| return 1` on the checksum, not a bare `set -e` gate: install_verified_tinfoil_proxy is called
+  # as `if install_verified_tinfoil_proxy ...` in setup.sh, which suspends set -e for the whole call chain (see
+  # verify_sums), so a bare pipe failure here would fall through to install an unverified binary.
+  curl -fsSL "$1" -o "$3" || return 1
+  echo "$2  $3" | sha256sum -c - || { echo "    !! CHECKSUM MISMATCH for $3 — refusing to install" >&2; return 1; }
 }
 require_x86_64() {  # $1=label — these pins are x86_64-only; fail loud rather than install a dud
   if [ "$(uname -m)" != "x86_64" ]; then
@@ -42,9 +60,34 @@ install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop cal
   echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
 }
 
+# The two app units (stage-2 split: one prompt-world process, one payment-world process). Every caller that
+# means "the app" now means both, in this order — the proxy binds the credit socket the payments service
+# connects to, so it goes up first and comes down last.
+PROXY_UNIT="nullsink-proxy"
+PAYMENTS_UNIT="nullsink-payments"
+
 install_units() {  # refresh ALL units + timers from the repo so on-box config can't drift, then reload
   cp "$APP_DIR"/deploy/*.service "$APP_DIR"/deploy/*.timer /etc/systemd/system/
   systemctl daemon-reload
+}
+
+retire_legacy_unit() {  # drop the pre-split nullsink.service; idempotent, a no-op on a fresh box
+  # install_units only ever COPIES the repo's units, so deleting nullsink.service from the repo leaves a
+  # stale (and still-enabled) copy on an existing box — which would fight nullsink-proxy for :8080. Retire it
+  # explicitly, BEFORE the new units start. The old single-binary symlink goes too; its versioned binary is
+  # left on disk, since rolling back across the split boundary needs it (see deploy/README.md).
+  [ -f /etc/systemd/system/nullsink.service ] || return 0
+  echo "    retiring the pre-split nullsink.service (superseded by $PROXY_UNIT + $PAYMENTS_UNIT)"
+  systemctl disable --now nullsink.service 2>/dev/null || true
+  rm -f /etc/systemd/system/nullsink.service /usr/local/lib/nullsink/current
+  systemctl daemon-reload
+}
+
+enable_app_units() { systemctl enable "$PROXY_UNIT" "$PAYMENTS_UNIT"; }   # idempotent; also arms them for reboot
+
+restart_app() {  # proxy first: it binds the credit socket payments connects to (payments retries regardless)
+  systemctl restart "$PROXY_UNIT"
+  systemctl restart "$PAYMENTS_UNIT"
 }
 
 enable_timers() {  # reconcile the box's timers from the repo — shared by setup.sh + deploy.sh, idempotent.
@@ -56,23 +99,33 @@ enable_timers() {  # reconcile the box's timers from the repo — shared by setu
   systemctl disable --now monero-wallet-rpc-watchdog.timer 2>/dev/null || true
 }
 
-install_binary() {  # $1=tag — fetch+verify+activate the self-contained app binary for a release tag
-  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-<tag> + a `current` symlink -> the active
-  # version (a RELATIVE target, so the dir is self-contained/relocatable). The unit's ExecStart runs the
-  # symlink; activation is an atomic `ln -sfn` swap, rollback is repointing it at the previous target.
-  # The binary is the self-contained `bun build --compile` artifact (bundles prices.json etc.) — it runs
-  # with only /etc/nullsink.env + /var/lib/nullsink, no source/Bun needed.
-  local tag="$1" tmp
+install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app binaries for a release tag
+  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-{proxy,payments}-<tag> + a `current-proxy` /
+  # `current-payments` symlink per service -> the active version (RELATIVE targets, so the dir is
+  # self-contained/relocatable). Each unit's ExecStart runs its symlink; activation is an atomic `ln -sfn`
+  # swap, rollback is repointing it at the previous target. Each binary is a self-contained
+  # `bun build --compile` artifact (bundles prices.json etc.) — it runs with only /etc/nullsink.env +
+  # /var/lib/nullsink, no source/Bun needed.
+  #
+  # The two are ONE release, deployed in lockstep: they speak a versioned credit wire and a mismatched pair
+  # fails closed (the proxy 400s an unknown wire version, credits wait in the durable outbox). So fetch and
+  # verify BOTH before flipping EITHER symlink — a half-applied activation is the one state we can always
+  # avoid here.
+  local tag="$1" tmp svc
   mkdir -p /usr/local/lib/nullsink
   tmp="$(mktemp -d)"
-  fetch_asset "$tag" 'nullsink-linux-x64' "$tmp"
+  for svc in proxy payments; do fetch_asset "$tag" "nullsink-$svc-linux-x64" "$tmp"; done
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
-  test -f "$tmp/nullsink-linux-x64"   # assert the asset downloaded
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )   # SHA256SUMS lists all 4 assets; verify the one we pulled
-  install -m755 "$tmp/nullsink-linux-x64" "/usr/local/lib/nullsink/nullsink-$tag"
-  ln -sfn "nullsink-$tag" /usr/local/lib/nullsink/current   # atomic activate (relative target)
+  for svc in proxy payments; do test -f "$tmp/nullsink-$svc-linux-x64"; done   # assert both assets downloaded
+  verify_sums "$tmp" || return 1   # the checksum gate — fires even when a caller invokes us in an `if` (see verify_sums). Verify BOTH assets before flipping EITHER symlink.
+  for svc in proxy payments; do
+    install -m755 "$tmp/nullsink-$svc-linux-x64" "/usr/local/lib/nullsink/nullsink-$svc-$tag"
+  done
+  for svc in proxy payments; do
+    ln -sfn "nullsink-$svc-$tag" "/usr/local/lib/nullsink/current-$svc"   # atomic activate (relative target)
+  done
   rm -rf "$tmp"
-  echo "    app binary $tag activated (/usr/local/lib/nullsink/current -> nullsink-$tag)"
+  echo "    app binaries $tag activated (current-proxy + current-payments -> nullsink-{proxy,payments}-$tag)"
 }
 
 install_nsk() {  # $1=tag — fetch+verify+install the operator CLI binary (nsk) to /usr/local/bin/nsk
@@ -83,7 +136,7 @@ install_nsk() {  # $1=tag — fetch+verify+install the operator CLI binary (nsk)
   fetch_asset "$tag" 'nsk-linux-x64' "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/nsk-linux-x64"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   install -m755 "$tmp/nsk-linux-x64" /usr/local/bin/nsk
   rm -rf "$tmp"
   echo "    operator CLI nsk $tag installed (/usr/local/bin/nsk)"
@@ -97,7 +150,7 @@ install_deploy_tree() {  # $1=tag $2=dest — fetch+verify+extract deploy-<tag>.
   fetch_asset "$tag" "deploy-${tag}.tar.gz" "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/deploy-${tag}.tar.gz"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   mkdir -p "$dest"
   tar -xzf "$tmp/deploy-${tag}.tar.gz" -C "$dest"   # release.yml `tar -czf … -C core deploy` -> $dest/deploy/*
   rm -rf "$tmp"
@@ -115,31 +168,40 @@ install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client U
   fetch_asset "$tag" "nullsink-ui-${tag}.tar.gz" "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/nullsink-ui-${tag}.tar.gz"
-  ( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS )
+  verify_sums "$tmp" || return 1
   # Stage the extract in web-$tag.new and swap it into place only once it's verified-good, so a
-  # fetch-ok-then-extract-fail on a SAME-tag redeploy can't destroy the currently-serving web-$tag
-  # (set -e aborts before the swap). The activate stays an atomic ln -sfn.
+  # fetch-ok-then-extract-fail on a SAME-tag redeploy can't destroy the currently-serving web-$tag. Each step
+  # that must hold before the destructive `rm -rf web-$tag` gets an explicit `|| return 1`: deploy.sh calls us
+  # as `if install_client_ui ...`, which SUSPENDS set -e for this whole body (see verify_sums), so a bare
+  # `test -f`/`tar` failure would otherwise fall straight through to the rm+mv and swap an EMPTY dir into place
+  # while returning success — silently breaking the buy UI. The activate stays an atomic ln -sfn.
   local staging="$webbase/web-$tag.new"
   rm -rf "${staging:?}"
   mkdir -p "$staging"
-  tar -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1   # dist/* -> web-$tag.new/*
-  test -f "$staging/index.html"               # assert the extract landed (guards a malformed/empty UI tarball)
+  tar -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1 || return 1   # dist/* -> web-$tag.new/*
+  test -f "$staging/index.html" || { echo "    !! UI tarball for $tag has no index.html — refusing to swap" >&2; return 1; }
   chmod -R a+rX "$staging"                     # Caddy runs as its own user — ensure it can read files + traverse dirs
   rm -rf "${webbase:?}/web-$tag"               # drop the old copy only now — the new one is staged + validated
-  mv "$staging" "$webbase/web-$tag"            # swap into place
-  ln -sfn "web-$tag" "$webbase/current-web"   # atomic activate (relative target)
+  mv "$staging" "$webbase/web-$tag" || return 1   # swap into place
+  ln -sfn "web-$tag" "$webbase/current-web" || return 1   # atomic activate (relative target)
   rm -rf "$tmp"
   echo "    client UI $tag activated ($webbase/current-web -> web-$tag)"
 }
 
-health_ok() {  # poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) seconds; return 0/1
-  # /healthz is localhost-only (Caddy never routes it). Port from the env file (default 8080).
-  local port health_url waited=0
-  port="$(grep -E '^PORT=' "${ENV_FILE:-/etc/nullsink.env}" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
-  health_url="http://127.0.0.1:${port:-8080}/healthz"
+env_val() { grep -E "^$1=" "${ENV_FILE:-/etc/nullsink.env}" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+proxy_port()    { local p; p="$(env_val PORT)";          echo "${p:-8080}"; }
+payments_port() { local p; p="$(env_val PAYMENTS_PORT)"; echo "${p:-8081}"; }
+
+health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) s; return 0/1
+  # /healthz is localhost-only (Caddy never routes it). Both services serve it on their own port.
+  local port="$1" waited=0
   while [ "$waited" -lt "${HEALTH_TIMEOUT:-60}" ]; do
-    if curl -fsS --max-time 3 "$health_url" >/dev/null 2>&1; then return 0; fi
+    if curl -fsS --max-time 3 "http://127.0.0.1:$port/healthz" >/dev/null 2>&1; then return 0; fi
     sleep 2; waited=$((waited + 2))
   done
   return 1
+}
+
+health_ok_app() {  # BOTH services must serve. Proxy first (it's the one that comes up first).
+  health_ok "$(proxy_port)" && health_ok "$(payments_port)"
 }

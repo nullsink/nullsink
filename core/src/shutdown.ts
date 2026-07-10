@@ -1,4 +1,4 @@
-// Graceful-shutdown drain for in-flight metered requests, extracted from index.ts so it's unit-testable
+// Graceful-shutdown drain for in-flight metered requests, extracted from proxy.ts so it's unit-testable
 // (clock, sleep, and the "handlers returned" signal are injected — no real server, no real time, no
 // process.exit). The handler registers each live STREAM's settle() in `inflight` (handler.ts); a buffered
 // request isn't tracked there (it has no metered partial until its upstream response lands).

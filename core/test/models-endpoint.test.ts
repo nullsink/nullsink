@@ -3,7 +3,7 @@
 // (and a disabled provider's models, or an off-card variant, never appear). Plus the OpenAI list shape,
 // the per-model USD/Mtok pricing, no-auth access, and that a POST to the path is not admitted.
 import { test, expect } from "bun:test";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler";
+import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
 import { pricedModels, isOffCardModel } from "../src/cost";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
