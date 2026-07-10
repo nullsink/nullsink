@@ -3,7 +3,7 @@
 
 // Community links — used in the Layout header/footer and the home orient column (HomeOrient).
 export const GITHUB_URL = "https://github.com/nullsink/nullsink";
-export const DISCORD_URL = "https://discord.gg/sFK36yrBq";
+export const DISCORD_URL = "https://discord.gg/7Y5YPQJnPD";
 export const MATRIX_URL = "https://matrix.to/#/#nullsink:matrix.org";
 
 // Safe defaults for any external (target="_blank") anchor: noopener severs the reverse-window
