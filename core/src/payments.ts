@@ -165,7 +165,9 @@ async function pollOnce(): Promise<void> {
   const { delivered, blocked } = await drainCreditOutboxOverSocket(orders, sendCredit, now);
   if (delivered > 0) log.info("credit", `delivered ${delivered} credit(s) over the socket`);
   // Ambiguous delivery (proxy restarting, socket not yet bound, timeout): the rows stay durable and we retry.
-  if (blocked) log.warn("credit", `credit delivery stopped at the oldest unacked row: ${blocked} — retrying next tick`);
+  // Say what it MEANS ourselves — the raw reason can be Bun's generic "Was there a typo in the url or port?",
+  // which reads like a config error when it is just the proxy being down.
+  if (blocked) log.warn("credit", `proxy unreachable or not acking over the credit socket — credits stay queued, retrying next tick (${blocked})`);
   // The "is money still crossing?" alarm. Greppable marker for deploy/status-check.sh.
   const age = oldestUnackedAgeMs(orders, now);
   if (age > OUTBOX_AGE_ALERT_MS)
