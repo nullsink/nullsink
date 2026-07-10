@@ -1,4 +1,4 @@
-// The ONE crossing between the two worlds (D2): payments → proxy, `credit {hash, micros, idempotency_key}`.
+// The ONE crossing between the two worlds: payments → proxy, `credit {hash, micros, idempotency_key}`.
 // This module is the shared wire contract only — no store, no I/O — so each world can import it without
 // dragging the other's code into its binary.
 //

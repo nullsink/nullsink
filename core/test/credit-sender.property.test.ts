@@ -1,6 +1,6 @@
 // Exactly-once across the SOCKET path, as a property. credit-socket.test.ts covers the crossing with a handful
 // of hand-picked cases; the money-property tests (settle/outbox/revenue) drive the TEST-ONLY in-process drain
-// (ledger/drain.ts). Neither stresses the PRODUCTION drain — drainCreditOutboxOverSocket — under arbitrary
+// (test/support/drain.ts). Neither stresses the PRODUCTION drain — drainCreditOutboxOverSocket — under arbitrary
 // interleavings of its distinctive failure mode: an AMBIGUOUS result (a timeout / lost response) where the proxy
 // may or may not have committed. The dangerous case is "applied, but the ack was lost": the row stays unacked,
 // the next tick re-sends the same idempotency_key, and only applied_orders on the receiver keeps it exactly-once.
