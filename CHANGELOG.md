@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.1](https://github.com/nullsink/nullsink/compare/v1.8.0...v1.8.1) (2026-07-10)
+
+
+### Bug Fixes
+
+* **client:** order fable first among Anthropic models, tier gpt-5.6 sol/terra/luna ([#89](https://github.com/nullsink/nullsink/issues/89)) ([6e8209f](https://github.com/nullsink/nullsink/commit/6e8209f1cfad445d011ec6de5a0465d10f9ad19f))
+* **pricing:** bill gpt-5.6 cache writes; complete, table-driven rate card ([#87](https://github.com/nullsink/nullsink/issues/87)) ([59bd921](https://github.com/nullsink/nullsink/commit/59bd921aa8935c8603012bd43206d07e62832003))
+* **pricing:** sync prices from models.dev ([#83](https://github.com/nullsink/nullsink/issues/83)) ([3041c6d](https://github.com/nullsink/nullsink/commit/3041c6d5c31bf6396cc500a3f97881dff3c42107))
+
+
+### Documentation
+
+* **deploy:** document the split cutover bootstrap + the rollback enable trap ([#85](https://github.com/nullsink/nullsink/issues/85)) ([24c568a](https://github.com/nullsink/nullsink/commit/24c568ac85f5193ba4e22b6548f05e2d84b0d706))
+
 ## [1.8.0](https://github.com/nullsink/nullsink/compare/v1.7.1...v1.8.0) (2026-07-10)
 
 
