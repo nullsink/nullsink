@@ -95,7 +95,9 @@ const namedVariantArb = fc
   .tuple(registeredArb, fc.constantFrom("pro", "nova", "max", "preview", "latest", "audio-preview", "20a"))
   .map(([id, v]) => `${id}-${v}`);
 const noDashArb = fc
-  .tuple(registeredArb, fc.integer({ min: 0, max: 999_999 }))
+  // Up to 10 digits, so the appended run can reach the 8-digit DATED window: a matcher that forgets the
+  // dash requirement would see `${id}1` + a valid date and absorb `gpt-5.6120260101` at gpt-5.6's rate.
+  .tuple(registeredArb, fc.integer({ min: 0, max: 9_999_999_999 }))
   .map(([id, n]) => `${id}${n}`);
 const opus41TrapArb = fc.integer({ min: 0, max: 99_999 }).map((n) => `claude-opus-4-1${n}`);
 const modelArb = fc.oneof(registeredArb, datedArb, isoDatedArb, namedVariantArb, noDashArb, opus41TrapArb, fc.string());
@@ -179,6 +181,7 @@ test("a NAMED variant is never absorbed by its base id; dated releases still are
   // cost. Named variants must be unpriced until the sync adds them explicitly.
   expect(isPriced("gpt-5.6-pro")).toBe(false);
   expect(isPriced("gpt-5.6-nova")).toBe(false);
+  expect(isPriced("gpt-5.6120260101")).toBe(false); // no-dash char + valid date: the dash is load-bearing
   expect(isPriced("o3-deep-research")).toBe(false); // off-card id can't ride its priced base either
   expect(isPriced("gpt-4o-audio-preview")).toBe(false);
   // Dated releases of a priced id resolve to that id's own rate — the most specific one.

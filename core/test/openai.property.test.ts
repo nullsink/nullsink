@@ -9,7 +9,7 @@ import { createHandler, type HandlerDeps, type RailView } from "../src/handler-c
 import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
-import { priceUsage, type Usage } from "../src/cost";
+import { extractOpenAIChatUsage, extractOpenAIResponsesUsage, priceUsage, type Usage } from "../src/cost";
 import * as metrics from "../src/metrics";
 
 type Upstream = (url: string, init: any) => Promise<Response>;
@@ -435,6 +435,20 @@ test("hostile cache slices are CLAMPED: read caps at the total, write at the rem
   expect(res.status).toBe(200);
   const expected: Usage = { input_tokens: 0, cache_read_input_tokens: 80, cache_creation_input_tokens: 20, output_tokens: 10 };
   expect(debit(balances, token)).toBe(priceUsage("gpt-5.6", expected));
+});
+
+test("hostile READ slice: cached_tokens above the prompt total caps at the total, on both shapes", () => {
+  // cached alone exceeds the total: read caps at the total, leaving nothing for write or input. Unclamped,
+  // a lying cached_tokens would bill cache-reads on tokens the prompt never had — unbounded overcharge at
+  // the adapter (the handler's hold clamp merely caps the damage, it doesn't correct the split).
+  const chat = extractOpenAIChatUsage(
+    JSON.stringify({ model: "gpt-5.6", usage: { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 250, cache_write_tokens: 80 } } }),
+  );
+  expect(chat!.usage).toEqual({ input_tokens: 0, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 10 });
+  const responses = extractOpenAIResponsesUsage(
+    JSON.stringify({ model: "gpt-5.6", usage: { input_tokens: 100, output_tokens: 10, input_tokens_details: { cached_tokens: 250, cache_write_tokens: 80 } } }),
+  );
+  expect(responses!.usage).toEqual({ input_tokens: 0, cache_read_input_tokens: 100, cache_creation_input_tokens: 0, output_tokens: 10 });
 });
 
 test("responses streaming: a clean close bills the usage from the response.completed event (no include_usage needed)", async () => {
