@@ -68,6 +68,52 @@ backup keys) lives only in `/etc/nullsink.env` and systemd drop-ins on the box, 
 over HTTPS and verify them against `SHA256SUMS` — no `gh`, no auth on the box. Build provenance is attested
 in CI (`release.yml`); verify off-box with `gh attestation verify <file> --repo nullsink/nullsink`.
 
+## Cutting over to the split
+
+The first deploy of a split release onto a pre-split box needs a bootstrap step. `deploy.sh` fetches the
+binaries *before* it refreshes the deploy tree, and the pre-split `install_binary` still on the box asks for
+`nullsink-linux-x64` — an asset split releases no longer publish. That fetch 404s and, under `set -e`, the run
+aborts on its first step, changing nothing (verified: it exits 22 with the service still serving). Install the
+split deploy tree first, then run **its** `deploy.sh`.
+
+Pick a window where the money seam is unambiguous — both counts `0`:
+
+```sh
+sudo -u nullsink sqlite3 -readonly /var/lib/nullsink/pending.db \
+  'SELECT (SELECT count(*) FROM pending_orders), (SELECT count(*) FROM credit_outbox WHERE acked_at IS NULL);'
+```
+
+Take the safety copies, so a rollback never depends on GitHub being reachable:
+
+```sh
+cp -a /opt/nullsink/deploy /root/deploy.pre-split
+cp /etc/caddy/Caddyfile /root/Caddyfile.pre-split
+```
+
+Then, as root:
+
+```sh
+TAG=<split-tag>
+
+# 1. Replace the deploy tree with the split release's. REPLACE, don't overlay: a stale nullsink.service left
+#    behind in the tree gets copied back into /etc/systemd/system by install_units on every later deploy.
+tmp="$(mktemp -d)"
+for f in "deploy-$TAG.tar.gz" SHA256SUMS; do
+  curl -fsSL "https://github.com/nullsink/nullsink/releases/download/$TAG/$f" -o "$tmp/$f"
+done
+( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS ) || exit 1
+tar -xzf "$tmp/deploy-$TAG.tar.gz" -C "$tmp"
+rm -rf /opt/nullsink/deploy && mv "$tmp/deploy" /opt/nullsink/deploy
+
+# 2. Now the split deploy.sh runs: verifies both binaries, retires nullsink.service, enables both units,
+#    swaps in the :8081 routing, restarts proxy then payments, and health-gates both.
+/opt/nullsink/deploy/deploy.sh "$TAG"
+```
+
+The split changes no schema, so there is no migration and no `nsk migrate-revenue` — downtime is just the
+restart. On the **first** cutover `deploy.sh` has no previous split binaries to fall back on, so a failed health
+gate stops at `ROLLBACK IMPOSSIBLE`; recover with the section below.
+
 ## Rolling back across the split
 
 `deploy.sh` rolls a failed deploy back by flipping the two version symlinks, which needs a *previous* pair of
@@ -111,6 +157,17 @@ rm -rf /opt/nullsink/deploy && mv "$tmp/deploy" /opt/nullsink/deploy
 # 3. Run THAT deploy.sh: single binary + `current`, nullsink.service, pre-split Caddyfile, health gate.
 /opt/nullsink/deploy/deploy.sh "$TAG"
 rm -f /usr/local/lib/nullsink/current-proxy /usr/local/lib/nullsink/current-payments   # split leftovers
+
+# 4. Re-arm it for boot. `retire_legacy_unit` DISABLED nullsink.service during the cutover, and deploy.sh only
+#    ever restarts the app — enabling it is setup.sh's job, at bootstrap. Skip this and the rollback looks
+#    perfectly healthy until the next reboot comes up with no app at all.
+systemctl enable nullsink
+```
+
+Confirm before you walk away — `active` is not enough:
+
+```sh
+systemctl is-active nullsink && systemctl is-enabled nullsink   # want: active + enabled
 ```
 
 Keep a local copy before cutting over, so recovery survives GitHub being unreachable:
