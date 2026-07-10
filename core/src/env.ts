@@ -5,8 +5,6 @@
 // RATE_MIN_USD would make the sane-band check reject EVERY rate quote (silently taking down /buy, the sole
 // purchasing path), and a malformed *_TIMEOUT_MS would become AbortSignal.timeout(NaN). Fail fast at startup
 // instead, so a malformed value never boots a subtly-broken process.
-// (This was the pre-split root's local helper; lifted here so rate.ts/rails read config the same validated
-// way instead of bare Number(), which is where the NaN risk actually lived.)
 import * as log from "./log";
 
 // Read a numeric env var, validating finite and in range — a malformed value (→ NaN) would otherwise

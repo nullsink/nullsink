@@ -43,7 +43,7 @@ export function openDb(path: string) {
   micros  INTEGER NOT NULL
 )`);
 
-  // The sales book (`revenue`) is PAYMENT-world state and lives in pending.db now (D5, see ledger/orders.ts),
+  // The sales book (`revenue`) is PAYMENT-world state and lives in pending.db (see ledger/orders.ts),
   // not here — so coin amounts, locked rates, and txid-derived keys never enter the prompt world. settle()
   // books it in the outbox transaction; this store only credits balances.
 
@@ -103,8 +103,8 @@ export function openDb(path: string) {
   // applied-orders insert and balance credit run in ONE transaction (same DB, atomic even under WAL), making
   // a repeated apply of the same deposit (a poller re-scan, or an outbox re-delivery from the sender) a no-op.
   // Returns true if this call applied the credit, false if `orderId` was already applied — BOTH mean the credit
-  // is durably in the ledger (the sender acks on either). Revenue books payment-side now (D5, ledger/orders.ts),
-  // in the outbox transaction, so this no longer touches the sales book.
+  // is durably in the ledger (the sender acks on either). Revenue books payment-side (ledger/orders.ts), in
+  // the outbox transaction, so this never touches the sales book.
   function creditOnce(hash: string, micros: number, orderId: string, atMs: number): boolean {
     const apply = db.transaction(() => {
       if (insertAppliedStmt.run(orderId, atMs).changes === 0) return false; // already credited
@@ -190,7 +190,7 @@ export function openDb(path: string) {
 export type BalanceStore = ReturnType<typeof openDb>;
 
 // Default on-disk path. The composition root (src/proxy.ts) and each nsk subcommand pass this to openDb();
-// no store is opened at import time — a module-load singleton would reunify the two DBs across the stage-2
-// process split (the proxy would open pending.db and payments would open balances.db just by importing a
-// shared module). Callers construct + inject their own store instead.
+// no store is opened at import time — a module-load singleton would reunify the two DBs across the process
+// boundary (the proxy would open pending.db and payments would open balances.db just by importing a shared
+// module). Callers construct + inject their own store instead.
 export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";

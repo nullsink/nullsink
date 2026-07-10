@@ -104,12 +104,12 @@ export function openOrderStore(path: string) {
   // that reverse lookup. Cheap on a table bounded by MAX_OPEN_ORDERS.
   db.run(`CREATE INDEX IF NOT EXISTS idx_pending_hash ON pending_orders (hash)`);
 
-  // --- Stage-2 payment→prompt-world crossing (D3) + the sales book (D5) — both PAYMENT-world state, so they
+  // --- The payment→prompt-world credit crossing + the sales book — both PAYMENT-world state, so they
   //     live here in pending.db and never in the prompt world's balances.db. ---
 
   // credit_outbox: the durable, exactly-once credit hand-off. settle() writes a row here in the SAME
-  // transaction that closes the order; a sender drains unacked rows into the balance ledger's creditOnce
-  // (in-process today; a peer-authed unix socket once the proxy splits out). Keyed by the rail's opaque
+  // transaction that closes the order; the sender (credit-sender.ts) drains unacked rows into the balance
+  // ledger's creditOnce over the owner-only unix socket. Keyed by the rail's opaque
   // idempotency_key — the very key creditOnce dedupes on — so a redelivery is a no-op at the receiver. acked_at
   // stays NULL until the credit lands; the partial index keeps the sender's "what's unsent" scan O(unacked).
   db.run(`CREATE TABLE IF NOT EXISTS credit_outbox (
@@ -123,10 +123,9 @@ export function openOrderStore(path: string) {
 
   // revenue: append-only sales book (cli/financials.ts data source). One row per credited payment: WHEN, the
   // coin (`asset` + `scale` = atomic-units-per-whole) and how much of it landed (`asset_atomic`), and the USD
-  // credit issued. Holds NO token hash / address / identity — a "$X sale at time T", not a request log. D5
-  // moves it OFF balances.db to here so coin amounts, locked rates, and txid-derived keys stay out of the prompt
-  // world; settle() writes it in the outbox transaction (booked iff a credit is enqueued). Schema matches the
-  // pre-split balances.db revenue table byte-for-byte, so the one-time cross-DB copy at cutover is a plain move.
+  // credit issued. Holds NO token hash / address / identity — a "$X sale at time T", not a request log. It
+  // lives here rather than in balances.db so coin amounts, locked rates, and txid-derived keys stay out of
+  // the prompt world; settle() writes it in the outbox transaction (booked iff a credit is enqueued).
   db.run(`CREATE TABLE IF NOT EXISTS revenue (
   id           INTEGER PRIMARY KEY,
   at           INTEGER NOT NULL,
@@ -282,7 +281,7 @@ export function openOrderStore(path: string) {
     recordRevenueStmt.run(atMs, asset, assetAtomic, scale, usdMicros, grossMicros);
   }
 
-  // Sales rows in [fromMs, toMs) (default: everything). For cli/financials.ts, now a pending.db reader (D5).
+  // Sales rows in [fromMs, toMs) (default: everything). The cli/financials.ts data source.
   function listRevenue(fromMs = 0, toMs = Number.MAX_SAFE_INTEGER): { at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }[] {
     return listRevenueStmt.all(fromMs, toMs);
   }
@@ -320,7 +319,7 @@ export type OrdersStore = ReturnType<typeof openOrderStore>;
 
 // Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The composition root
 // (src/payments.ts) and `nsk orders` pass this to openOrderStore(); nothing opens at import time — see the
-// note in ledger/db.ts on why the stage-2 split forbids a module-load singleton.
+// note in ledger/db.ts on why the two-process design forbids a module-load singleton.
 export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
 
 function defaultPendingPath(): string {

@@ -59,9 +59,9 @@ const BUY_RATE_CAPACITY = numEnv("BUY_RATE_CAPACITY", 20, 1, 1_000_000);
 const BUY_RATE_REFILL_PER_MIN = numEnv("BUY_RATE_REFILL_PER_MIN", 60, 1, 60_000_000);
 const buyRateLimit = makeTokenBucket({ capacity: BUY_RATE_CAPACITY, refillPerSec: BUY_RATE_REFILL_PER_MIN / 60 });
 
-// Global, identity-free throttle for THIS world's free reads (/order-status, /rails). Sized at HALF the
-// pre-split single bucket: the proxy now runs its own bucket for /balance + /v1/models, so leaving both at the
-// old value would silently double the aggregate free-read capacity the cap exists to bound.
+// Global, identity-free throttle for THIS world's free reads (/order-status, /rails). The proxy runs its
+// own bucket for /balance + /v1/models and reads the SAME env names, so each default is sized at half the
+// intended aggregate — raising the shared env raises BOTH worlds' caps at once.
 const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });

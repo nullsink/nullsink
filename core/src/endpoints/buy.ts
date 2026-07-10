@@ -85,8 +85,8 @@ export function makeBuy(d: PaymentsEndpointDeps) {
     // Reserve a create slot BEFORE the irreversible createAddress, gating on committed orders + creates
     // already in flight. The check and the ++ run with no await between them, so in this single-threaded
     // event loop they're atomic: at most (MAX_OPEN_ORDERS − openCount()) creates are ever in flight, so a
-    // loser is shed HERE and never mints an address — closing the orphan-on-race the post-create claim
-    // used to merely reject after the fact. Held until the row commits or the attempt fails, then released
+    // loser is shed HERE and never mints an address — a claim made only after the create would reject the
+    // race but orphan the minted address. Held until the row commits or the attempt fails, then released
     // in `finally` (a committed order is then counted by openCount() instead, keeping the sum stable).
     if (openCount() + pendingCreates >= MAX_OPEN_ORDERS) {
       metrics.recordReject("orders"); // at the open-order cap, reservation gate

@@ -32,8 +32,8 @@ RPC_TIMEOUT="${RPC_TIMEOUT:-15}"
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"    # where balances.db / pending.db (+ WAL sidecars) live
 SVC_USER="${SVC_USER:-nullsink}"         # the user the DBs + sidecars must stay owned by
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
-# The stage-2 split: two app units, two loopback ports, two /healthz. Kept literal (this script is run
-# standalone by systemd and never sources deploy/lib.sh).
+# Two app units, two loopback ports, two /healthz. Kept literal (this script is run standalone by systemd
+# and never sources deploy/lib.sh).
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 PROXY_HEALTHZ="${PROXY_HEALTHZ_URL:-http://127.0.0.1:8080/healthz}"
@@ -176,7 +176,7 @@ if systemctl is-active --quiet "$PROXY_UNIT" 2>/dev/null; then
 fi
 
 # --- 3b. recent PAYMENTS journal: /buy down, deposit detection down, and credits not crossing to the ledger.
-#     These live in the OTHER unit's journal since the split — grepping the proxy's would silently always pass. ---
+#     These live in the payments unit's journal — grepping the proxy's would silently always pass. ---
 if systemctl is-active --quiet "$PAYMENTS_UNIT" 2>/dev/null; then
   jlog="$(journalctl -u "$PAYMENTS_UNIT" --since "$LOG_WINDOW" --no-pager 2>/dev/null)"
   if grep -qiE 'rate unavailable' <<<"$jlog"; then
@@ -259,7 +259,7 @@ fi
 #     rpcauth pair surfaces here as a failed probe (bitcoin-cli's datadir cookie would mask it; see
 #     regen-bitcoin-rpcauth.sh). Gated on PAY_RAILS (the app's source of truth for active rails, matching
 #     setup.sh rail_active), NOT on a local bitcoind unit — monitoring survives the node moving off-box,
-#     and goes quiet during a deliberate rail drain (the cutover runbook). Env vars come from
+#     and goes quiet during a deliberate rail drain (node-box-runbook.md). Env vars come from
 #     status-check.service's EnvironmentFile; all read ${VAR:-} — an unset var must skip/warn, never
 #     abort the whole check under set -u. ---
 _btc_rails="${PAY_RAILS:-${PAY_RAIL:-}}"

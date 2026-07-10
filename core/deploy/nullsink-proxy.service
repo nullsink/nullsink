@@ -8,7 +8,7 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=simple
-# ONE service user for both halves of the split, for now. Splitting uids would force splitting
+# ONE service user for both app services, for now. Splitting uids would force splitting
 # StateDirectory (systemd chowns it to the unit's User=), which moves balances.db / pending.db to new
 # paths — and `nsk financials` opens BOTH, as a non-root user (cli/guard.ts refuses root: a root open
 # strands root-owned WAL sidecars that break billing writes). So the uid split is blocked on the
@@ -55,10 +55,10 @@ LimitNOFILE=1048576
 # the cgroup OOM killer, which reaps only processes in THIS unit (never Caddy/sshd box-wide), and
 # OOMPolicy=stop + Restart=always relaunch cleanly. MemoryHigh applies reclaim back-pressure first (soft),
 # below the hard cap. A post-OOM kill strands any in-flight holds, the same accepted edge as any ungraceful
-# death (see proxy.ts shutdown notes). TasksMax bounds a thread/fork runaway. The split divides the old
-# single-unit envelope (1536M/2048M) asymmetrically: this service streams 32 MiB bodies over long-lived
-# connections and gets the bulk; payments handles tiny JSON and gets 256M. Their MemoryMax sums to the old
-# 2048M, leaving roughly 2 GB for everything else on the box.
+# death (see proxy.ts shutdown notes). TasksMax bounds a thread/fork runaway. The two services' envelopes
+# are deliberately asymmetric: this service streams 32 MiB bodies over long-lived connections and gets the
+# bulk; payments handles tiny JSON and gets 256M. Their MemoryMax sums to 2048M, leaving roughly 2 GB for
+# everything else on the box.
 MemoryHigh=1408M
 MemoryMax=1792M
 TasksMax=512

@@ -104,11 +104,11 @@ done
 # cross-DB ATTACH rather than un-acking everything, so a box with a long history redelivers only what is
 # genuinely missing instead of its entire lifetime of credits.
 #
-# NEVER un-ack a TOMBSTONE. reconcileOutbox (the revenue cutover) seeds one acked row per already-applied key
-# with hash='' and micros=0, purely to stop a pre-cutover zombie double-booking its sale; the real credit
-# landed before the cutover and its values were never recorded here. Un-acking one hands the sender a row
-# whose empty hash can never be delivered, wedging every genuine credit queued behind it. `hash <> ''` selects
-# real credits only: settle() always enqueues a 64-hex token hash, and nothing but reconcileOutbox writes ''.
+# NEVER un-ack a TOMBSTONE. Some outboxes carry acked marker rows with hash='' and micros=0 — seeded once per
+# already-applied key so a zombie order the old ledger had already credited could not double-book its sale;
+# the real credit landed long ago and its values were never recorded here. Un-acking one hands the sender a
+# row whose empty hash can never be delivered, wedging every genuine credit queued behind it. `hash <> ''`
+# selects real credits only: settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
 # Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
 # break the services' billing writes (the same trap cli/guard.ts exists to prevent).
