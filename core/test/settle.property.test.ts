@@ -10,7 +10,7 @@ import { unlinkSync } from "node:fs";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { settle, type SettleConfig } from "../src/ledger/settle";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import type { Incoming } from "../src/rails/types";
 import type { PendingOrder } from "../src/ledger/orders";
 import { ATOMIC_PER_XMR } from "../src/rails/units";

@@ -1,9 +1,9 @@
-// Stage-4 attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world
+// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world
 // code (rails clients, the order store, settle, /buy); symmetrically the payments binary must not carry the
-// metered path or the balance store. Today that's a STRUCTURAL property, not a tree-shaking hope: we root the
+// metered path or the balance store. That's a STRUCTURAL property, not a tree-shaking hope: we root the
 // closures at the COMPOSITION ROOTS (proxy.ts / payments.ts — the actual compiled binaries), not just their
 // handlers, so a root's non-handler imports (shutdown, ratelimit, the poller, settle) are covered too. The one
-// place the two worlds meet (handler-combined.ts) is imported by no root.
+// place the two worlds meet (test/support/handler-combined.ts) is imported by no root.
 //
 // We walk the transitive closure of VALUE imports (`import type` / `export type` are erased at compile time and
 // contribute no bundled code, so they're excluded). A stray cross-world import fails here loudly rather than
@@ -43,7 +43,7 @@ function valueClosure(entry: string): Set<string> {
 
 const PAYMENT_WORLD = [
   "rails/index.ts", "rails/monero.ts", "rails/bitcoin.ts", "rails/rate.ts",
-  "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/drain.ts", "ledger/poll.ts",
+  "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/poll.ts",
   "endpoints/buy.ts", "endpoints/payments.ts", "endpoints/payment-reads.ts", "payments-handler.ts", "credit-sender.ts",
 ];
 const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "endpoints/reads.ts", "handler.ts", "credit-server.ts"];
@@ -74,18 +74,20 @@ test("credit-sender (payment world) imports NO prompt-world module", () => {
 });
 
 test("the endpoints barrel is imported by NO world module (it joins both worlds)", () => {
-  // Only handler-combined.ts + tests may pull the barrel; the world handlers use endpoints/{proxy,payments}.
+  // Only the combined test router (test/support/handler-combined.ts) + tests may pull the barrel; the world
+  // handlers use endpoints/{proxy,payments}.
   for (const world of ["handler.ts", "payments-handler.ts"]) {
     expect(valueClosure(world).has("endpoints/index.ts")).toBe(false);
   }
 });
 
-test("no composition root imports the combined router", () => {
-  // Importing it would drag the other world into that binary. Assert the roots EXIST before asserting what
-  // they don't import: a `continue`-on-missing would turn a renamed/deleted root into a silent pass, which is
-  // exactly the failure this guard is supposed to be incapable of.
+test("no composition root imports the combined test router", () => {
+  // Importing test/support/handler-combined.ts would drag the other world into that binary. It lives outside
+  // src/, so match on the module name anywhere in the closure rather than a src-relative path. Assert the
+  // roots EXIST before asserting what they don't import: a `continue`-on-missing would turn a renamed/deleted
+  // root into a silent pass, which is exactly the failure this guard is supposed to be incapable of.
   for (const root of ["proxy.ts", "payments.ts"]) {
     expect(existsSync(resolve(SRC, root))).toBe(true);
-    expect(valueClosure(root).has("handler-combined.ts")).toBe(false);
+    expect([...valueClosure(root)].filter((m) => m.includes("handler-combined"))).toEqual([]);
   }
 });

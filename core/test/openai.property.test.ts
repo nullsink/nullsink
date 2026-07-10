@@ -5,7 +5,7 @@
 // n>1 / service_tier / web_search rejects, key-presence enablement). The shared hold/refund skeleton is
 // already covered in billing.property.test.ts, so these focus on OpenAI-specific behavior.
 import { test, expect, spyOn } from "bun:test";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
+import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";

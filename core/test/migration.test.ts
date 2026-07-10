@@ -9,7 +9,7 @@ import { unlinkSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
 import { settle } from "../src/ledger/settle";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import { migrateRevenue, reconcileOutbox } from "../src/ledger/migrate-revenue";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 

@@ -1,5 +1,5 @@
-// Barrel for nullsink's own (non-metered) endpoints. ONLY the combined router (handler-combined.ts) and tests
-// import this — it joins both worlds, so pulling it from a composition root would drag the other world's code
+// Barrel for nullsink's own (non-metered) endpoints. ONLY the combined test router
+// (test/support/handler-combined.ts) and tests import this — it joins both worlds, so pulling it from a composition root would drag the other world's code
 // into that binary. The prompt world imports ./endpoints/proxy; the payment world imports ./endpoints/payments.
 import { makeProxyEndpoints } from "./proxy";
 import { makePaymentsEndpoints } from "./payments";

@@ -5,7 +5,7 @@
 import { test, expect } from "bun:test";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
 const HASH = "a".repeat(64);

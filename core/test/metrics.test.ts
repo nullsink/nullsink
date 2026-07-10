@@ -3,7 +3,7 @@
 // tests sequentially, so the reads are deterministic despite the shared module state.
 import { test, expect, spyOn } from "bun:test";
 import * as metrics from "../src/metrics";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
+import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";
