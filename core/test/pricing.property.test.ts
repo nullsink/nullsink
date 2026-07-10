@@ -11,21 +11,25 @@
 //     user (floor), and the response→request fallback (a request can never end up unpriced/free).
 import { test, expect } from "bun:test";
 import fc from "fast-check";
-import { costOf, holdBoundOf, isPriced, isReasoningModel, mergeRawPrices, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
+import { assertRateInvariants, costOf, holdBoundOf, isPriced, isReasoningModel, mergeRawPrices, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
 import prices from "../src/cost/prices.json";
 
-type UsdRate = { provider: string; input: number; output: number; cache_read: number; cache_write: number };
+type UsdRate = { provider: string; input: number; output: number; cache_read: number; cache_write: number; cache_write_1h: number };
 // The oracle reads the same single prices.json the table does (all providers incl. Tinfoil are synced there
 // now), so it stays a faithful independent check of the real rates.
 const PRICES = prices as Record<string, UsdRate>;
 const IDS = Object.keys(PRICES);
 
-// Independent reimplementation of the matcher: among every registered id that is an exact match or a
-// "<id>-…" prefix of `model`, the LONGEST id wins. Mirrors findRate's contract without copying its code.
+// Independent reimplementation of the matcher: among every registered id that is an exact match, or that
+// `model` extends by a DATED suffix only (-YYYYMMDD / -YYYY-MM-DD), the LONGEST id wins. A dash-separated
+// NAMED variant must NOT match: variants are priced independently of their base, so absorbing one would
+// serve it at the wrong rate (gpt-5.6-pro at gpt-5.6's card). Mirrors findRate's contract without copying
+// its code.
 function oracleRate(model: string): UsdRate | undefined {
   let best: { id: string; rate: UsdRate } | undefined;
   for (const [id, rate] of Object.entries(PRICES)) {
-    if ((model === id || model.startsWith(id + "-")) && (!best || id.length > best.id.length)) {
+    const dated = model.startsWith(id + "-") && /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/.test(model.slice(id.length + 1));
+    if ((model === id || dated) && (!best || id.length > best.id.length)) {
       best = { id, rate };
     }
   }
@@ -37,14 +41,14 @@ function oracleRate(model: string): UsdRate | undefined {
 // the implementation takes, so a precision bug there would show up as a divergence.
 function oracleCost(rate: UsdRate, u: Usage): number {
   const m = (usd: number) => BigInt(Math.round(usd * 1_000_000));
-  // Split the cache-write total into its 1-hour (2× input, Anthropic-only) and 5-min tiers, clamping the 1h
-  // slice to the total — mirroring pricing.ts so the oracle stays an INDEPENDENT check, not a copy. The 1h
-  // micro-rate is the input micro-rate × 2 (the exact arithmetic the table build uses), so no rounding drift.
+  // Split the cache-write total into its 1-hour and standard tiers, clamping the 1h slice to the total —
+  // mirroring pricing.ts so the oracle stays an INDEPENDENT check, not a copy. Both tiers now come
+  // straight off the entry's own rate card (cache_write_1h is on disk, per provider), no provider logic.
   const total = BigInt(u.cache_creation_input_tokens ?? 0);
   const raw1h = BigInt(Math.max(0, u.cache_creation_1h_input_tokens ?? 0));
   const write1h = raw1h < total ? raw1h : total;
   const write5m = total - write1h;
-  const cacheWrite1hMicro = rate.provider === "anthropic" ? m(rate.input) * 2n : 0n;
+  const cacheWrite1hMicro = m(rate.cache_write_1h);
   const sum =
     BigInt(u.input_tokens ?? 0) * m(rate.input) +
     BigInt(u.output_tokens ?? 0) * m(rate.output) +
@@ -78,20 +82,27 @@ const usageArb: fc.Arbitrary<Usage> = fc.record({
   cache_read_input_tokens: tokenArb,
 });
 
-// A spread of model strings: exact ids, dated suffixes (-YYYYMMDD-ish), digits appended WITHOUT a dash
-// (the safety boundary), the specific claude-opus-4-1 vs claude-opus-4-12345 trap, and random noise.
+// A spread of model strings: exact ids, dated suffixes (both -YYYYMMDD and -YYYY-MM-DD), digits appended
+// WITHOUT a dash (one safety boundary), dash-separated NAMED variants (the other: -pro/-nova/… must not
+// absorb into the base id), the specific claude-opus-4-1 vs claude-opus-4-12345 trap, and random noise.
 const datedArb = fc
   .tuple(registeredArb, fc.integer({ min: 0, max: 99_999_999 }))
   .map(([id, n]) => `${id}-${String(n).padStart(8, "0")}`);
+const isoDatedArb = fc
+  .tuple(registeredArb, fc.integer({ min: 2024, max: 2027 }), fc.integer({ min: 1, max: 12 }), fc.integer({ min: 1, max: 28 }))
+  .map(([id, y, mo, d]) => `${id}-${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+const namedVariantArb = fc
+  .tuple(registeredArb, fc.constantFrom("pro", "nova", "max", "preview", "latest", "audio-preview", "20a"))
+  .map(([id, v]) => `${id}-${v}`);
 const noDashArb = fc
   .tuple(registeredArb, fc.integer({ min: 0, max: 999_999 }))
   .map(([id, n]) => `${id}${n}`);
 const opus41TrapArb = fc.integer({ min: 0, max: 99_999 }).map((n) => `claude-opus-4-1${n}`);
-const modelArb = fc.oneof(registeredArb, datedArb, noDashArb, opus41TrapArb, fc.string());
+const modelArb = fc.oneof(registeredArb, datedArb, isoDatedArb, namedVariantArb, noDashArb, opus41TrapArb, fc.string());
 
 // Strings guaranteed NOT priced (filtered through the oracle so the set can't silently rot).
 const unpricedArb = fc
-  .constantFrom("gpt-4", "claude", "claude-opus-4-2", "claude-opus-4-12345", "unknown", "")
+  .constantFrom("gpt-4", "claude", "claude-opus-4-2", "claude-opus-4-12345", "gpt-5.6-pro", "unknown", "")
   .filter((m) => oracleRate(m) === undefined);
 
 test("isPriced agrees with the longest-prefix oracle", () => {
@@ -148,8 +159,32 @@ test("1-hour cache writes bill 2× input, 5-minute writes 1.25×, and a lying 1h
   expect(haiku({ cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: -50_000 })).toBe(1_250_000);
   // A report claiming MORE 1-hour than the total is clamped to the total — never cheaper than all-1-hour.
   expect(haiku({ cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 5_000_000 })).toBe(2_000_000);
-  // OpenAI has no cache-write fee in either tier, even if a 1h field somehow appeared (it never does).
+  // Pre-5.6 OpenAI has no cache-write fee in either tier, even if a 1h field somehow appeared.
   expect(priceUsage("gpt-4o-mini", { cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 1_000_000 })).toBe(0);
+});
+
+test("gpt-5.6 cache writes bill 1.25× input, and a 1h-classified write bills the SAME — never free", () => {
+  // The incident pin: gpt-5.6 is the first OpenAI family with a cache-write fee ($5 input → $6.25 write).
+  // OpenAI has no 1-hour tier, so its cache_write_1h = cache_write on the rate card: a usage report that
+  // classifies write tokens as 1-hour is billing-neutral, not a discount to zero (the old synthesis).
+  const sol = (u: Usage) => priceUsage("gpt-5.6", u);
+  expect(sol({ cache_creation_input_tokens: 1_000_000 })).toBe(6_250_000); // 1.25× the $5 input rate
+  expect(sol({ cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 1_000_000 })).toBe(6_250_000); // same, not 0
+  expect(sol({ cache_creation_input_tokens: 1_000_000, cache_creation_1h_input_tokens: 400_000 })).toBe(6_250_000); // any split, same
+});
+
+test("a NAMED variant is never absorbed by its base id; dated releases still are", () => {
+  // The wildcard trap behind the incident's price sync: gpt-5.6 is priced, so before the dated-suffix
+  // rule a future gpt-5.6-pro (~$30/$180 if history repeats) would have matched it and served ~6× under
+  // cost. Named variants must be unpriced until the sync adds them explicitly.
+  expect(isPriced("gpt-5.6-pro")).toBe(false);
+  expect(isPriced("gpt-5.6-nova")).toBe(false);
+  expect(isPriced("o3-deep-research")).toBe(false); // off-card id can't ride its priced base either
+  expect(isPriced("gpt-4o-audio-preview")).toBe(false);
+  // Dated releases of a priced id resolve to that id's own rate — the most specific one.
+  expect(isPriced("gpt-5.6-luna-2026-01-01")).toBe(true);
+  expect(priceUsage("gpt-5.6-luna-2026-01-01", { input_tokens: 1_000_000 })).toBe(1_000_000); // luna $1, not base $5
+  expect(isPriced("claude-opus-4-8-20260101")).toBe(true);
 });
 
 test("costOf / holdBoundOf are PURE: they price against any Rate, with no prices.json involved", () => {
@@ -172,7 +207,7 @@ test("priceUsage / priceHoldBound are thin wrappers: they delegate to the pure f
   // module internals (findRate is private).
   const m = (usd: number) => Math.round(usd * 1_000_000);
   const e = PRICES["claude-opus-4-8"]!;
-  const rate: Rate = { input: m(e.input), output: m(e.output), cache_read: m(e.cache_read), cache_write: m(e.cache_write), cache_write_1h: e.provider === "anthropic" ? m(e.input) * 2 : 0 };
+  const rate: Rate = { input: m(e.input), output: m(e.output), cache_read: m(e.cache_read), cache_write: m(e.cache_write), cache_write_1h: m(e.cache_write_1h) };
   const usage: Usage = { input_tokens: 1234, output_tokens: 567, cache_creation_input_tokens: 89, cache_creation_1h_input_tokens: 12, cache_read_input_tokens: 34 };
   expect(priceUsage("claude-opus-4-8", usage)).toBe(costOf(rate, usage));
   expect(priceHoldBound("claude-opus-4-8", 5000, 1000, { oneHourCache: true })).toBe(holdBoundOf(rate, 5000, 1000, { oneHourCache: true }));
@@ -211,6 +246,12 @@ test("isReasoningModel: reasoning families yes, their -chat variants no", () => 
   expect(isReasoningModel("o4-mini")).toBe(true);
   expect(isReasoningModel("gpt-5")).toBe(true);
   expect(isReasoningModel("gpt-5.2-codex")).toBe(true);
+  // The gpt-5.6 tiers reason like the rest of the family (mini/nano precedent) — re-verify against OpenAI's
+  // docs when the family leaves limited preview; a chat-tuned tier without "-chat" in its id would need one.
+  expect(isReasoningModel("gpt-5.6")).toBe(true);
+  expect(isReasoningModel("gpt-5.6-sol")).toBe(true);
+  expect(isReasoningModel("gpt-5.6-terra")).toBe(true);
+  expect(isReasoningModel("gpt-5.6-luna")).toBe(true);
   expect(isReasoningModel("gpt-5-chat-latest")).toBe(false);
   expect(isReasoningModel("gpt-5.2-chat-latest")).toBe(false);
   expect(isReasoningModel("gpt-4o")).toBe(false);
@@ -220,8 +261,22 @@ test("isReasoningModel: reasoning families yes, their -chat variants no", () => 
 // The price-table merge is the tripwire for an id served by >1 provider: a duplicate across sources must
 // THROW (else one source silently shadows the other). Exercises the throw the committed files never trigger.
 test("mergeRawPrices throws on a duplicate id across sources, merges disjoint ones", () => {
-  const e = { provider: "x", input: 1, output: 1, cache_read: 0, cache_write: 0 };
+  const e = { provider: "x", input: 1, output: 1, cache_read: 0, cache_write: 0, cache_write_1h: 0 };
   expect(() => mergeRawPrices({ a: e }, { a: e })).toThrow(/duplicate priced model id/);
   expect(() => mergeRawPrices({ a: e, b: e })).not.toThrow(); // one source is internally id-unique
   expect(mergeRawPrices({ a: e }, { b: e }).map(([id]) => id).sort()).toEqual(["a", "b"]);
+});
+
+// The load-time tripwire for a bad rate card: a prices.json that could bill NaN, mint balance, or break
+// monotonicity must refuse to boot. Exercises the throws the committed (generator-validated) file never
+// triggers, and every-field acceptance on a good rate.
+test("assertRateInvariants: rejects non-finite/negative rates and a 1h write tier below the standard one", () => {
+  const ok: Rate = { input: 2, output: 8, cache_read: 1, cache_write: 3, cache_write_1h: 3 };
+  expect(assertRateInvariants("m", ok)).toBe(ok);
+  expect(() => assertRateInvariants("m", { ...ok, output: NaN })).toThrow(/finite non-negative/);
+  expect(() => assertRateInvariants("m", { ...ok, input: -1 })).toThrow(/finite non-negative/);
+  expect(() => assertRateInvariants("m", { ...ok, cache_read: Infinity })).toThrow(/finite non-negative/);
+  expect(() => assertRateInvariants("m", { ...ok, cache_write_1h: 2 })).toThrow(/would bill less/);
+  // The incident shape: a non-zero standard write tier with a zero 1h tier (the old non-Anthropic synthesis).
+  expect(() => assertRateInvariants("gpt-5.6", { ...ok, cache_write: 6.25, cache_write_1h: 0 })).toThrow(/would bill less/);
 });

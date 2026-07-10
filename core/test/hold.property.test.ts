@@ -9,17 +9,17 @@ import { byteBoundHold, makeCountTokensHold, HOLD_INPUT_MARGIN, HOLD_INPUT_PAD, 
 import { priceUsage, priceHoldBound } from "../src/cost";
 import { hasOneHourCacheControl } from "../src/providers/anthropic";
 
-// Span the live rate shapes in prices.json (cheapest → priciest). The retired exotic shapes
-// (claude-3-haiku at 1.2×, claude-3-sonnet-20240229 with cache_write CHEAPER than input) were pruned
-// from prices.json along with the other dead models, so they can no longer be referenced here; every
-// live model is the standard cache_write = 1.25× input shape. The bound still derives the per-model MAX
-// input rate from the table rather than hardcoding 1.25×, so it stays sound if an exotic shape returns —
-// and the synthesized cache_write_1h (2×input on Anthropic) is in that max, so 1-hour cache writes are covered.
+// Span the live rate shapes in prices.json (cheapest → priciest), across BOTH cache-fee models: Anthropic
+// (cache_write 1.25× input, cache_write_1h 2×) and gpt-5.6 — the first OpenAI family with a cache-write
+// fee (1.25× input; its cache_write_1h equals cache_write, there is no 1h tier). The bound derives the
+// per-model MAX input rate from the table rather than hardcoding a ratio, so it stays sound for any shape
+// the sync brings in — cache_write_1h included, so 1-hour cache writes are covered.
 const MODELS = [
   "claude-opus-4-1", // priciest (15/75)
   "claude-opus-4-8",
   "claude-haiku-4-5", // cheapest (1/5)
   "claude-sonnet-4-6",
+  "gpt-5.6", // OpenAI with a cache-write fee (5/30, write 6.25)
 ];
 
 test("byteBoundHold ≥ actual cost for any usage the request could produce (never-negative refund)", () => {
@@ -58,12 +58,14 @@ test("byteBoundHold ≥ actual cost for any usage the request could produce (nev
 });
 
 test("the 1-hour cache tier is GATED: oneHourCache enlarges an Anthropic hold, no-ops on OpenAI", () => {
-  // Same inputs, only the flag differs. On Anthropic the input ceiling jumps 1.25×→2× input; on OpenAI
-  // (no cache-write fee, cache_write_1h=0) the flag changes nothing.
+  // Same inputs, only the flag differs. On Anthropic the input ceiling jumps 1.25×→2× input; on OpenAI the
+  // flag changes nothing — cache_write_1h is 0 on the fee-free models and equals cache_write on gpt-5.6
+  // (which the unconditional max already includes), so neither shape has a bigger 1h ceiling to reserve.
   const raw = JSON.stringify({ messages: [{ role: "user", content: "x".repeat(8000) }] });
   const sized = (model: string, oneHourCache: boolean) => byteBoundHold({ model, raw, body: {}, maxTokens: 1000, oneHourCache }).micros;
   expect(sized("claude-opus-4-8", true)).toBeGreaterThan(sized("claude-opus-4-8", false));
   expect(sized("gpt-4o", true)).toBe(sized("gpt-4o", false));
+  expect(sized("gpt-5.6", true)).toBe(sized("gpt-5.6", false));
 });
 
 test("hasOneHourCacheControl: detects ttl:1h anywhere; ignores 5-minute and absent breakpoints", () => {

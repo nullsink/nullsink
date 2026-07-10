@@ -386,6 +386,57 @@ test("responses buffered: input_tokens split on cached, output already includes 
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
+// --- gpt-5.6 cache writes: the first OpenAI family with a cache-write fee (1.25× input). The adapter must
+// slice cache_write_tokens out of the input total and bill it at the cache_write rate, on BOTH shapes —
+// leaving it inside input_tokens would eat the 0.25× surcharge on every cached gpt-5.6 request.
+
+test("gpt-5.6 chat buffered: cache_write_tokens bills at the cache-write rate, not the input rate", async () => {
+  const usage = {
+    prompt_tokens: 1000,
+    completion_tokens: 100,
+    prompt_tokens_details: { cached_tokens: 200, cache_write_tokens: 300 },
+  };
+  const token = "pr_56chat";
+  const { handler, balances } = makeHandler(okChat("gpt-5.6", usage));
+  fund(balances, token);
+  const res = await handler(chatReq(token, { model: "gpt-5.6", max_completion_tokens: 500, messages: [{ role: "user", content: "hi" }] }));
+  expect(res.status).toBe(200);
+  const expected: Usage = { input_tokens: 500, cache_read_input_tokens: 200, cache_creation_input_tokens: 300, output_tokens: 100 };
+  expect(debit(balances, token)).toBe(priceUsage("gpt-5.6", expected));
+  expect(priceUsage("gpt-5.6", expected)).toBeGreaterThan(priceUsage("gpt-5.6", { input_tokens: 800, cache_read_input_tokens: 200, output_tokens: 100 })); // the surcharge is real money
+});
+
+test("gpt-5.6 responses buffered: cache_write_tokens sliced out of input_tokens identically", async () => {
+  const usage = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 1000 }, output_tokens: 50 };
+  const upstream: Upstream = async () =>
+    new Response(JSON.stringify({ object: "response", status: "completed", model: "gpt-5.6", usage, output: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  const token = "pr_56resp";
+  const { handler, balances } = makeHandler(upstream);
+  fund(balances, token);
+  const res = await handler(responsesReq(token, { model: "gpt-5.6", max_output_tokens: 1000, input: "hi" }));
+  expect(res.status).toBe(200);
+  const expected: Usage = { input_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1000, output_tokens: 50 };
+  expect(debit(balances, token)).toBe(priceUsage("gpt-5.6", expected));
+});
+
+test("hostile cache slices are CLAMPED: read caps at the total, write at the remainder, input never negative", async () => {
+  // cached + written > prompt total: read takes its slice first, write gets what remains, input floors at 0.
+  // Unclamped, a lying report could bill write tokens the prompt never had (overcharging the user) or push
+  // input_tokens negative.
+  const usage = {
+    prompt_tokens: 100,
+    completion_tokens: 10,
+    prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 80 },
+  };
+  const token = "pr_56clamp";
+  const { handler, balances } = makeHandler(okChat("gpt-5.6", usage));
+  fund(balances, token);
+  const res = await handler(chatReq(token, { model: "gpt-5.6", max_completion_tokens: 500, messages: [{ role: "user", content: "hi" }] }));
+  expect(res.status).toBe(200);
+  const expected: Usage = { input_tokens: 0, cache_read_input_tokens: 80, cache_creation_input_tokens: 20, output_tokens: 10 };
+  expect(debit(balances, token)).toBe(priceUsage("gpt-5.6", expected));
+});
+
 test("responses streaming: a clean close bills the usage from the response.completed event (no include_usage needed)", async () => {
   const usage = { input_tokens: 1000, input_tokens_details: { cached_tokens: 0 }, output_tokens: 400 };
   const chunks = [
