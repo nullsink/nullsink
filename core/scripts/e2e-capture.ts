@@ -21,7 +21,7 @@
 // Spend: each shape uses a cheap model + a small output cap + a trivial prompt, so well under $0.01 each
 // (reasoning shapes cap higher for headroom). Exits non-zero if any shape fails its checks.
 
-import type { HandlerDeps, RailView } from "../src/handler"; // type-only: erased at runtime, evaluates no module
+import type { HandlerDeps, RailView } from "../src/handler-combined"; // type-only: erased at runtime, evaluates no module
 import { mkdirSync, writeFileSync } from "node:fs";
 
 // Neutralise the import-time prod DB singletons (db.ts/orders.ts open at import) BEFORE importing src — set
@@ -29,7 +29,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 // ambient DB_PATH (a dev shell often exports the prod path).
 process.env.DB_PATH = ":memory:";
 process.env.PENDING_DB_PATH = ":memory:";
-const { createHandler } = await import("../src/handler");
+const { createHandler } = await import("../src/handler-combined");
 const { byteBoundHold } = await import("../src/hold");
 const { openDb, hashToken } = await import("../src/ledger/db");
 const { openOrderStore } = await import("../src/ledger/orders");

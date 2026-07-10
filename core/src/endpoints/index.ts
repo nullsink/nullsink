@@ -1,18 +1,16 @@
-// nullsink's own (non-metered) endpoints, assembled over one EndpointDeps bag. createHandler (handler.ts)
-// calls makeEndpoints once and the router dispatches by method + path; the money/forward path (handleMetered)
-// stays in the handler. Each handler is `(req) => Promise<Response>`.
-import { makeBuy } from "./buy";
-import { makeOrderStatus, makeRails, makeBalance, makeModels } from "./reads";
+// Barrel for nullsink's own (non-metered) endpoints. ONLY the combined router (handler-combined.ts) and tests
+// import this — it joins both worlds, so pulling it from a composition root would drag the other world's code
+// into that binary. The prompt world imports ./endpoints/proxy; the payment world imports ./endpoints/payments.
+import { makeProxyEndpoints } from "./proxy";
+import { makePaymentsEndpoints } from "./payments";
 import type { EndpointDeps } from "./types";
 
-export type { EndpointDeps } from "./types";
+export { makeProxyEndpoints } from "./proxy";
+export { makePaymentsEndpoints } from "./payments";
+export type { EndpointDeps, ProxyEndpointDeps, PaymentsEndpointDeps } from "./types";
 
+// Both worlds — EndpointDeps satisfies each half. The two halves have disjoint keys, so the spread can't
+// collide: {balance, models} + {buy, orderStatus, rails}.
 export function makeEndpoints(d: EndpointDeps) {
-  return {
-    buy: makeBuy(d),
-    orderStatus: makeOrderStatus(d),
-    rails: makeRails(d),
-    balance: makeBalance(d),
-    models: makeModels(d),
-  };
+  return { ...makeProxyEndpoints(d), ...makePaymentsEndpoints(d) };
 }

@@ -2,7 +2,7 @@
 // wallet-rpc, no server). I/O-pure and PAYMENT-world only: takes the already-fetched, rail-normalised inbounds
 // plus the orders store and, for each confirmed deposit, ENQUEUES a credit + books the sale + closes the order
 // in one pending.db transaction (orders.commitSettlement). The actual balance credit is delivered
-// asynchronously by the sender (ledger/drain.ts), idempotent per idempotencyKey — so re-scanning the same
+// asynchronously by the sender (credit-sender.ts, over the credit socket), idempotent per idempotencyKey — so re-scanning the same
 // deposit (every tick, forever) can't double-credit. Coin-agnostic: the rail pre-computes each inbound's
 // finality (`final`) + an opaque idempotencyKey, so this core never sees txids or coin-specific finality flags.
 import type { Incoming } from "../rails/types";
@@ -65,7 +65,7 @@ export function settle(
     const grossMicros = Math.round((g.amount / cfg.scale) * o.rate_usd * 1_000_000);
     // Enqueue the credit + book the sale + close the order in ONE pending.db transaction (see
     // orders.commitSettlement). The credit is delivered to the balance ledger asynchronously by the sender
-    // (ledger/drain.ts), idempotent per `key` — so this stays synchronous and the money-critical step is a
+    // (credit-sender.ts), idempotent per `key` — so this stays synchronous and the money-critical step is a
     // single atomic write on one DB (the old two-DB credit→remove zombie window is gone). Pay-once: the order
     // closes on this first confirmed payment regardless of coverage — a later top-up is a NEW order.
     orders.commitSettlement(key, o.hash, share, now, { asset: cfg.asset, assetAtomic: g.amount, scale: cfg.scale, grossMicros }, o.order_index, rail);

@@ -20,7 +20,7 @@ Read the databases as the service user with `-readonly`. A root open of a WAL da
 r() { sudo -u nullsink sqlite3 -readonly -cmd '.timeout 5000' "$1" "$2"; }
 
 cat /opt/nullsink/REVISION
-systemctl is-active nullsink && curl -fsS localhost:8080/healthz
+systemctl is-active nullsink-proxy nullsink-payments && curl -fsS localhost:8080/healthz
 
 r /var/lib/nullsink/balances.db 'SELECT COUNT(*) FROM revenue;'          # sales rows to copy
 r /var/lib/nullsink/balances.db 'SELECT COUNT(*) FROM applied_orders;'   # tombstones to seed
@@ -84,19 +84,21 @@ once. Without the tombstone the revenue book gains a phantom sale.
 
 ## 5. The cutover
 
-The migration must land **before** the settlement poller's first tick. The app polls immediately on start, so a
-service that comes up pre-migration can re-settle an order a prior crash left open, find its key absent from the
-fresh `credit_outbox`, and book its sale a second time. That is exactly what `reconcileOutbox`'s tombstones
-prevent, so they have to exist first. Hence: stop, migrate, then deploy.
+The migration must land **before** the settlement poller's first tick. `nullsink-payments` polls immediately on
+start, so a service that comes up pre-migration can re-settle an order a prior crash left open, find its key
+absent from the fresh `credit_outbox`, and book its sale a second time. That is exactly what
+`reconcileOutbox`'s tombstones prevent — so they have to exist first. Hence: stop, migrate, then deploy.
 
 ```sh
 sudo deploy/install-nsk.sh <tag>     # the migration exists only in the new nsk
-sudo systemctl stop nullsink
+
+# stop the app -- BOTH halves (the rail daemons keep running; they hold no app state)
+sudo systemctl stop nullsink-payments nullsink-proxy
 
 sudo -u nullsink nsk migrate-revenue          # dry run: figures must match step 1
 sudo -u nullsink nsk migrate-revenue --apply  # expect: RESULT: ✓
 
-sudo deploy/deploy.sh <tag>          # binary + units + edge + health gate, then restart
+sudo deploy/deploy.sh <tag>          # binaries + units + edge + health gate, then restart
 ```
 
 `--apply` reconciles the row count and the gross sum and exits non-zero on any mismatch. The source table in
@@ -138,8 +140,9 @@ r /var/lib/nullsink/pending.db "SELECT name FROM sqlite_master WHERE type='table
 r /var/lib/nullsink/pending.db "SELECT COUNT(*) FROM pragma_table_info('pending_orders') WHERE name='seen_at';"
 r /var/lib/nullsink/pending.db 'SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NULL;'  # 0 within a poll tick
 stat -c '%U' /var/lib/nullsink/*.db-wal          # still `nullsink` — nothing ran as root
-curl -fsS localhost:8080/healthz
-journalctl -u nullsink -n 50 | grep -i credit
+curl -fsS localhost:8080/healthz                 # nullsink-proxy
+curl -fsS localhost:8081/healthz                 # nullsink-payments
+journalctl -u nullsink-payments -n 50 | grep -i credit   # '[credit] delivered N credit(s) over the socket'
 /opt/nullsink/deploy/status-check.sh
 ```
 
@@ -150,19 +153,20 @@ Between the migration and the deploy the `-wal`/`-shm` files vanish. That is a c
 
 ## 7. Rolling back
 
-`deploy.sh` health-gates the restart and rolls the **binary** back on failure. The migration stays applied.
+`deploy.sh` health-gates the restart and rolls the **binaries** back on failure. The migration stays applied.
 Immediately after the cutover that is harmless: `balances.db` still holds its `revenue` copy, no new sales have
-landed, and the two books are identical. The longer the new binary serves, the further the `balances.db` copy
+landed, and the two books are identical. The longer the new binaries serve, the further the `balances.db` copy
 falls behind — sales booked after the cutover live only in `pending.db`, so `nsk financials` on an old binary
 undercounts until you roll forward again.
 
 Before rolling back, **drain the credit outbox.** Any release older than the outbox cannot see `credit_outbox`
-at all, so a row still unacked at rollback is a paid credit that will sit undelivered. With the service running,
-wait for this to read `0`:
+at all, so a row still unacked at rollback is a paid credit that will sit undelivered. With both services
+running, wait for this to read `0`:
 
 ```sh
 sudo -u nullsink sqlite3 -readonly /var/lib/nullsink/pending.db \
   'SELECT count(*) FROM credit_outbox WHERE acked_at IS NULL;'
 ```
 
-Then `sudo deploy/deploy.sh <older-tag>`.
+Then follow **Rolling back across the split** in [README.md](README.md) — a pre-split tag ships one binary and
+one `nullsink.service`, so it is not a symlink flip and `deploy.sh` will refuse to half-restore.

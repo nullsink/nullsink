@@ -166,6 +166,10 @@ export function openOrderStore(path: string) {
     "SELECT idempotency_key, hash, micros FROM credit_outbox WHERE acked_at IS NULL ORDER BY created_at ASC",
   );
   const ackCreditStmt = db.query("UPDATE credit_outbox SET acked_at = ? WHERE idempotency_key = ?");
+  // Served by the partial index (created_at WHERE acked_at IS NULL), so it stays O(1)-ish as the book grows.
+  const oldestUnackedStmt = db.query<{ at: number }, []>(
+    "SELECT created_at AS at FROM credit_outbox WHERE acked_at IS NULL ORDER BY created_at ASC LIMIT 1",
+  );
   const recordRevenueStmt = db.query(
     "INSERT INTO revenue (at, asset, asset_atomic, scale, usd_micros, gross_micros) VALUES (?, ?, ?, ?, ?, ?)",
   );
@@ -248,6 +252,13 @@ export function openOrderStore(path: string) {
     ackCreditStmt.run(atMs, key);
   }
 
+  // created_at of the OLDEST undelivered credit, or null when the outbox is drained. The health signal for the
+  // crossing: two /healthz probes can't see a wedged credit socket or a stalled sender, but credits piling up
+  // here can — the payments root alerts on this age.
+  function oldestUnackedCreditAt(): number | null {
+    return oldestUnackedStmt.get()?.at ?? null;
+  }
+
   // Book a sale (see the revenue table). settle() calls this inside the same transaction as the outbox enqueue.
   function recordRevenue(atMs: number, asset: string, assetAtomic: number, scale: number, usdMicros: number, grossMicros: number): void {
     recordRevenueStmt.run(atMs, asset, assetAtomic, scale, usdMicros, grossMicros);
@@ -283,14 +294,14 @@ export function openOrderStore(path: string) {
 
   return {
     db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale, markSeen,
-    enqueueCredit, listUnackedCredits, ackCredit, recordRevenue, listRevenue, commitSettlement,
+    enqueueCredit, listUnackedCredits, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
   };
 }
 
 export type OrdersStore = ReturnType<typeof openOrderStore>;
 
 // Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The composition root
-// (src/index.ts) and `nsk orders` pass this to openOrderStore(); nothing opens at import time — see the
+// (src/payments.ts) and `nsk orders` pass this to openOrderStore(); nothing opens at import time — see the
 // note in ledger/db.ts on why the stage-2 split forbids a module-load singleton.
 export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
 

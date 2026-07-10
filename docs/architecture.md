@@ -9,36 +9,57 @@ ever stored.
 This doc maps how the pieces fit. For the privacy and money-safety guarantees see
 [trust-model.md](trust-model.md); for the billing math see [billing-model.md](billing-model.md).
 
-## The shape: a composition root over a pure core
+## The shape: two processes over a pure core
 
-`src/index.ts` is the composition root — the only place that binds the port, starts the two
-timers (the settlement poller and the metrics flush), and installs the SIGTERM/SIGINT handler
-that drains in-flight requests before exit — force-settling any live streams, billing the metered
-partial and refunding the rest. At startup it also validates the environment, selects the rails,
-builds the request handler, and refunds holds an ungraceful crash left stranded. Those are the two
-recovery paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that
-skipped it.
+nullsink runs as two processes on one box, split by privilege rather than by scale. Each is a
+composition root — the only place that binds a port, starts timers, opens a database, and
+installs signal handlers.
 
-The request core it wires up — `handler.ts`, settlement, pricing, the providers and endpoints
-— is pure factories and functions: import-safe and testable in isolation. The two SQLite
-stores (`ledger/`) and the rail and rate clients (`rails/`) are the exception: they're
-module-load singletons that open their database handle or read their config the moment
-they're imported.
+- **`src/proxy.ts`** (the *prompt world*) serves the metered `/v1` paths and `GET /balance`,
+  and owns `balances.db`. It installs the SIGTERM/SIGINT handler that drains in-flight requests
+  before exit, force-settling live streams by billing the metered partial and refunding the rest,
+  and at boot it refunds holds an ungraceful crash left stranded. Those are the two recovery
+  paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that skipped it.
+- **`src/payments.ts`** (the *payment world*) serves `/buy`, `/order-status`, `/rails`, runs the
+  settlement poller, and owns `pending.db` and the watch-only rail wallets.
+
+A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
+The two meet at exactly one place: a unix socket over which payments delivers credits to the
+proxy, in one direction, with one verb. Neither router imports the other's code, which
+`test/world-isolation.test.ts` enforces at the module level and `scripts/assert-worlds.ts` on
+the compiled binaries — the proxy binary is the unit stage 4 will attest, so it must stay
+payments-free structurally, not by hoping a bundler tree-shakes.
+
+Everything both roots wire up — the handlers, settlement, pricing, the providers and endpoints —
+is pure factories and functions: import-safe and testable in isolation. Nothing opens a database
+or binds a port at import time; the roots pass those in.
 
 ## Request path
 
 ```
 client
   │
-  ▼
-Bun.serve ── handle() router ──┬─ GET  /healthz
-                               ├─ POST /buy           ┐
-                               ├─ POST /order-status  │
-                               ├─ GET  /rails         ├─ endpoints/ (not metered)
-                               ├─ GET  /balance       │
-                               ├─ GET  /v1/models     ┘
-                               └─ POST /v1/...  → exact-path provider(s) → handleMetered
+  ├─ /v1/... /balance ──► nullsink-proxy    :8080 ──┬─ GET  /healthz
+  │                                                 ├─ GET  /balance     ┐ endpoints/proxy.ts
+  │                                                 ├─ GET  /v1/models   ┘ (not metered)
+  │                                                 └─ POST /v1/...  → exact-path provider(s) → handleMetered
+  │                                                        │
+  │                                                        ▼  balances.db
+  │                                            ┌──────────────────────┐
+  │                                            │  credit socket       │  payments → proxy, one direction
+  │                                            └──────────▲───────────┘
+  │                                                       │
+  └─ /buy /order-status /rails ──► nullsink-payments :8081 ──┬─ GET  /healthz
+                                                             ├─ POST /buy          ┐ endpoints/payments.ts
+                                                             ├─ POST /order-status │ (not metered)
+                                                             └─ GET  /rails        ┘
+                                                                    │
+                                                                    ▼  pending.db + the rails
 ```
+
+Caddy fronts both, routing each public path to exactly one of them. Each router fails closed:
+an unmatched path is a 404, so a path routed to the wrong world is a hard error rather than a
+silent cross-world call.
 
 The `/v1` branch matches an **exact-path** registry, not a prefix (so
 `/v1/messages/batches` isn't silently admitted); an unmatched path is denied — the router
@@ -65,38 +86,65 @@ but never holds spend authority — custody stays cold. Active rails come from `
 (comma list, first is the default). Monero is the reference implementation; Bitcoin is the
 second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin HD index).
 
-## The ledger: two databases, kept separate
+## The ledger: two databases, one per process
 
-- **`balances.db`** — `tokens` (hash → balance, in micro-dollars), `applied_orders` (an
-  idempotency ledger so a deposit credits exactly once), `holds` (a crash-recovery journal:
-  a row exists while a hold is outstanding, and survivors are refunded at boot), and
-  `revenue` (an append-only sales book).
-- **`pending.db`** — in-flight orders. This is the **only** place the payment ↔ token link
-  lives, in a separate database on purpose: a leak of `balances.db` can't reveal who funded
-  which token. The link is dropped when the order settles.
+- **`balances.db`** (proxy) — `tokens` (hash → balance, in micro-dollars), `applied_orders` (an
+  idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
+  a row exists while a hold is outstanding, and survivors are refunded at boot).
+- **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
+  `credit_outbox` (credits owed to the balance ledger). Orders are the **only** place the payment
+  ↔ token link lives, in a separate database on purpose: a leak of `balances.db` can't reveal who
+  funded which token. The link is dropped when the order settles. Coin amounts, locked rates, and
+  transaction-derived keys stay on this side of the wall too.
 
-The `nsk` operator CLI (`issue` / `topup` / `balance` / `financials`) is a second writer to
-`balances.db`: it opens the database directly on the box, and SQLite's WAL mode lets that run
-alongside the server's reads.
+Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
+/ `financials`) is the exception and a second writer: it opens both directly on the box, and
+SQLite's WAL mode lets that run alongside the servers' reads.
 
-`ledger/settle.ts` is the coin-agnostic settlement core. It credits each confirmed deposit
-exactly once and reaps orders that expire unfunded. It is deliberately **synchronous and
-await-free** so that settlements across different rails can't interleave on the shared
-databases — keep it that way.
+`ledger/settle.ts` is the coin-agnostic settlement core. It closes each confirmed deposit's order,
+books the sale, and enqueues the credit — all three in one transaction — and reaps orders that
+expire unfunded. It is deliberately **synchronous and await-free** so that settlements across
+different rails can't interleave on the shared database — keep it that way.
+
+## The credit crossing
+
+Settlement and crediting now live in different processes, so the hand-off is a **transactional
+outbox** rather than a function call. `settle()` writes a `credit_outbox` row in the same
+`pending.db` transaction that closes the order: if the row exists, the sale happened. A sender
+drains unacked rows over the unix socket, and only marks a row acked once the proxy confirms the
+credit is durable.
+
+That gives at-least-once delivery. The receiver makes it exactly-once: `creditOnce` commits the
+balance credit and its `applied_orders` marker in a single `balances.db` transaction, keyed by the
+rail's idempotency key, so a redelivery is a no-op that still reports a definite outcome. A crash
+anywhere — before the ack, mid-socket, during the credit — leaves a durable row that is simply
+retried. Delivery stops at the first ambiguous row rather than skipping past it, so credits cannot
+be reordered around a stuck one.
+
+Authentication is the filesystem. The socket is a pathname socket bound owner-only, and Linux
+checks write permission on the socket file at `connect(2)` — an unspoofable, kernel-enforced gate
+that an abstract-namespace socket (no file, no permissions) would not have.
+
+The one failure this creates is silent: a wedged socket means a customer has **paid** and holds no
+credit, while both processes answer `/healthz` and every unit reads `active`. So payments emits a
+`CREDIT OUTBOX STALLED` error once the oldest undelivered credit ages past
+`OUTBOX_AGE_ALERT_MS`, and `deploy/status-check.sh` pages on it.
 
 ## The two flows
 
 **Buy** — turning a deposit into balance:
 
 ```
-POST /buy {hash, credit_usd, rail?}
+POST /buy {hash, credit_usd, rail?}                              [payments]
   → quote the coin's USD rate, lock it
   → mint a per-order address
   → store the pending order (pending.db)
   → return {pay_to, amount, expires_at, ...}
   ─ ─ ─ ─ ─ (user pays on-chain) ─ ─ ─ ─ ─
-poller tick → rail.incomingTransfers() → settle()
-  → creditOnce(hash) once the deposit is final → drop the order
+poller tick → rail.incomingTransfers() → settle()               [payments]
+  → one transaction: drop the order, book the sale, enqueue the credit
+  → drain the outbox over the credit socket
+       → creditOnce(hash) → ack                                 [proxy]
 ```
 
 **Spend** — billing a request:

@@ -1,7 +1,9 @@
-# Build the self-contained linux-x64 artifacts (`bun build --compile`) for the server + the `nsk` operator
-# CLI, build the client UI (Vite), and attach them — with a SHA256SUMS file — to the GitHub Release for a
-# tag: server binary, `nsk` operator CLI, the deploy/ tarball, and the client UI tarball. These are the
-# verifiable artifacts a box downloads + checksums + serves/runs directly (no source/Bun on the box).
+# Build the self-contained linux-x64 artifacts (`bun build --compile`) for the two server processes + the
+# `nsk` operator CLI, build the client UI (Vite), and attach them — with a SHA256SUMS file — to the GitHub
+# Release for a tag: the proxy + payments binaries, `nsk`, the deploy/ tarball, and the client UI tarball.
+# These are the verifiable artifacts a box downloads + checksums + serves/runs directly (no source/Bun on the
+# box). The two server binaries are ONE release and the box installs them in lockstep (deploy/lib.sh's
+# install_binary): they speak a versioned credit wire, and a mismatched pair fails closed.
 # Notify/produce-only — it does not touch any running box.
 #
 # Normally driven by release-please.yml (workflow_call) when a release PR is merged; the Release already
@@ -43,9 +45,11 @@ jobs:
           printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > client/src/version.ts   # baked into the client UI bundle (shown by the wordmark)
       - name: build server + operator-CLI binaries (linux-x64)
         run: |
-          bun --filter './core' build       # -> core/nullsink-linux-x64 (same script CI smoke-checks on every PR)
-          bun --filter './core' build:nsk   # -> core/nsk-linux-x64 (the nsk ops CLI; same tag as the server, can't drift)
-          mv core/nullsink-linux-x64 core/nsk-linux-x64 .   # to repo root so the asset names = basenames the box fetches
+          # `build` compiles BOTH service binaries and then runs assert-worlds.ts, which greps each compiled
+          # binary for the other world's symbols — so a cross-world import fails the release, not just CI.
+          bun --filter './core' build       # -> core/nullsink-{proxy,payments}-linux-x64 (same script CI smoke-checks on every PR)
+          bun --filter './core' build:nsk   # -> core/nsk-linux-x64 (the nsk ops CLI; same tag as the servers, can't drift)
+          mv core/nullsink-proxy-linux-x64 core/nullsink-payments-linux-x64 core/nsk-linux-x64 .   # to repo root so the asset names = basenames the box fetches
       - name: build client UI (Vite + prerender)
         run: bun --filter './client' build   # -> client/dist (the static UI Caddy serves at the edge)
       - name: package deploy tree + client UI
@@ -53,12 +57,13 @@ jobs:
           tar -czf "deploy-${TAG}.tar.gz" -C core deploy        # box fetches + extracts this instead of cloning source
           tar -czf "nullsink-ui-${TAG}.tar.gz" -C client dist    # box extracts this into the versioned webroot
       - name: checksum
-        run: sha256sum nullsink-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
+        run: sha256sum nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
       - name: attest build provenance   # signed SLSA provenance for each artifact (public repo only)
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
-            nullsink-linux-x64
+            nullsink-proxy-linux-x64
+            nullsink-payments-linux-x64
             nsk-linux-x64
             deploy-${{ env.TAG }}.tar.gz
             nullsink-ui-${{ env.TAG }}.tar.gz
@@ -70,7 +75,7 @@ jobs:
           # release-please already created the Release (notes = the CHANGELOG section). For a manual tag
           # push there's no Release yet, so create one. Then attach/replace the verifiable assets.
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" \
-            --notes "Self-contained linux-x64 build of \`$TAG\`: server binary + operator CLI (\`nsk\`) + deploy tree + client UI tarball. The box downloads + checksum-verifies these (no source/Bun). Verify checksums: \`sha256sum -c SHA256SUMS\`. Verify provenance (any authenticated GitHub user): \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments server binaries (install them in lockstep) + operator CLI (\`nsk\`) + deploy tree + client UI tarball. The box downloads + checksum-verifies these (no source/Bun). Verify checksums: \`sha256sum -c SHA256SUMS\`. Verify provenance (any authenticated GitHub user): \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
           gh release upload "$TAG" \
-            nullsink-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
+            nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
             --clobber

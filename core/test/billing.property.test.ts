@@ -5,7 +5,7 @@
 // matrix, the privacy/header invariants, the /buy never-undercharge rounding, and the fail-closed gate.
 import { test, expect, spyOn } from "bun:test";
 import fc from "fast-check";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler";
+import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { openDb, type BalanceStore } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";

@@ -4,7 +4,7 @@
 //
 // Estimator SEAM. The default below is deterministic and provider-agnostic (no extra upstream call); a
 // tighter per-provider path (Anthropic/Bedrock/Vertex `count_tokens`) can drop in as an alternative
-// HoldEstimator closing over the upstream creds in index.ts, zero handler changes. Reach for it only if
+// HoldEstimator closing over the upstream creds in proxy.ts, zero handler changes. Reach for it only if
 // the over-reservation below causes real false-402s.
 import { priceHoldBound } from "./cost";
 
@@ -60,7 +60,7 @@ export function byteBoundHold({ model, raw, maxTokens, oneHourCache }: HoldInput
 // The margin makes the bet safe against realistic drift, not adversarial pathology; for a hard guarantee
 // set HOLD_ESTIMATOR=byte. Either way the handler's refund clamp caps the charge at the hold, so even a
 // blown bet can't overdraft — it just bills the full hold. FAILS SAFE: any error (down, timeout,
-// malformed, non-positive count) falls back to byteBoundHold. Built in index.ts so it closes over creds.
+// malformed, non-positive count) falls back to byteBoundHold. Built in proxy.ts so it closes over creds.
 
 // Token headroom over the count_tokens result. Multiply by MARGIN and add PAD (covers small fixed
 // per-request overhead like cache-breakpoint bookkeeping). 10%+64 tok is still dwarfed by the byte bound.
@@ -140,7 +140,7 @@ export type CountTokensHoldOptions = {
 };
 
 // Both providers' counters return `{ input_tokens }`, so the parse + headroom + byte-cap logic is shared;
-// only the URL, auth headers, and omit-set differ (closed over per provider in index.ts).
+// only the URL, auth headers, and omit-set differ (closed over per provider in proxy.ts).
 export function makeCountTokensHold(opts: CountTokensHoldOptions): HoldEstimator {
   const fetchImpl = opts.fetchImpl ?? fetch;
   return async function countTokensHold(input: HoldInput): Promise<HoldResult> {

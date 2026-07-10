@@ -189,7 +189,7 @@ export function openDb(path: string) {
 
 export type BalanceStore = ReturnType<typeof openDb>;
 
-// Default on-disk path. The composition root (src/index.ts) and each nsk subcommand pass this to openDb();
+// Default on-disk path. The composition root (src/proxy.ts) and each nsk subcommand pass this to openDb();
 // no store is opened at import time — a module-load singleton would reunify the two DBs across the stage-2
 // process split (the proxy would open pending.db and payments would open balances.db just by importing a
 // shared module). Callers construct + inject their own store instead.
