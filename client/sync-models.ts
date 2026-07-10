@@ -42,11 +42,11 @@ function isDatedAlias(id: string): boolean {
 
 // Display order within a provider: a curated FAMILY rank (flagship → small) is the primary key, then newest
 // version first, then a variant tier (pro → base → mini → nano). Curated because a model's tier isn't in its
-// id or its price — Anthropic priced legacy Opus *above* the current one, and "claude-fable-5"'s version
-// would otherwise top the list. New versions sort themselves; only a brand-new family needs a line here.
-// Families not listed (and "fable") fall to the bottom; the /models preview shows the head of this order.
+// id or its price — Anthropic priced legacy Opus *above* the current one. New versions sort themselves;
+// only a brand-new family needs a line here. Families not listed fall to the bottom; the /models preview
+// shows the head of this order.
 const FAMILY: Record<string, string[]> = {
-  anthropic: ["claude-opus", "claude-sonnet", "claude-haiku"],
+  anthropic: ["claude-fable", "claude-opus", "claude-sonnet", "claude-haiku"],
   openai: ["gpt-5", "o4", "o3", "o1", "gpt-4.1", "gpt-4o", "gpt-4", "gpt-3"],
   tinfoil: ["glm", "kimi", "gpt-oss-120b", "llama", "gemma", "gpt-oss"],
 };
@@ -64,14 +64,15 @@ function familyRank(id: string, fams: string[]): number {
   return rank;
 }
 
-// Variant tier inside one version: pro → base → codex* → chat → mini → nano.
+// Variant tier inside one version: pro → base → codex* → chat → mini → nano. gpt-5.6's named tiers map
+// onto the same ladder: sol is the flagship (base rates), terra the mid tier, luna the small one.
 function variantRank(id: string): number {
   if (id.includes("pro")) return 0;
   if (id.includes("codex")) return id.includes("max") ? 2 : id.includes("mini") ? 4 : 3;
   if (id.includes("chat")) return 5;
-  if (id.includes("mini")) return 6;
-  if (id.includes("nano")) return 7;
-  return 1; // base
+  if (id.includes("mini") || id.includes("terra")) return 6;
+  if (id.includes("nano") || id.includes("luna")) return 7;
+  return 1; // base (incl. sol — same card as the bare id)
 }
 
 function ordered(modelIds: string[], fams: string[]): string[] {
