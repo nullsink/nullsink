@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/nullsink/nullsink/compare/v1.7.1...v1.8.0) (2026-07-10)
+
+
+### Features
+
+* **app:** split into proxy + payments processes over a credit socket ([#73](https://github.com/nullsink/nullsink/issues/73)) ([545c9b7](https://github.com/nullsink/nullsink/commit/545c9b7fbbf84ec934a417dea72374b23d0f2ffc))
+
 ## [1.7.1](https://github.com/nullsink/nullsink/compare/v1.7.0...v1.7.1) (2026-07-10)
 
 
