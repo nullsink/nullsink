@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/nullsink/nullsink/compare/v1.7.0...v1.7.1) (2026-07-10)
+
+
+### Documentation
+
+* Open WebUI guide with a bundled Claude pipe function ([#80](https://github.com/nullsink/nullsink/issues/80)) ([d6b41eb](https://github.com/nullsink/nullsink/commit/d6b41eb0abe88ff1f61d7ba35f601b9f77301bb3))
+* remove the LibreChat section from the README ([#82](https://github.com/nullsink/nullsink/issues/82)) ([517d561](https://github.com/nullsink/nullsink/commit/517d561f01e6ea4067c384a74021a3b94fcbb8de))
+
 ## [1.7.0](https://github.com/nullsink/nullsink/compare/v1.6.1...v1.7.0) (2026-07-09)
 
 
