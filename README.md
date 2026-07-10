@@ -136,7 +136,7 @@ Anthropic (Claude):
 
 ### Open WebUI
 
-[Open WebUI](https://github.com/open-webui/open-webui) is OpenAI-protocol only, so through nullsink it reaches gpt-5.5 and the open-weight models (not Claude — nullsink serves Claude only on `/v1/messages`). Add an OpenAI connection in ⚙️ **Admin Settings → Connections → OpenAI → ＋ Add Connection** (URL `https://nullsink.is/v1`, key `0sink_YOUR_KEY`), or by env:
+[Open WebUI](https://github.com/open-webui/open-webui) reaches gpt-5.5 and the open-weight models through an OpenAI connection — ⚙️ **Admin Settings → Connections → OpenAI → ＋ Add Connection** (URL `https://nullsink.is/v1`, key `0sink_YOUR_KEY`), or by env:
 
 ```sh
 ENABLE_OPENAI_API=true
@@ -144,7 +144,7 @@ OPENAI_API_BASE_URLS=https://nullsink.is/v1
 OPENAI_API_KEYS=0sink_YOUR_KEY
 ```
 
-Restrict the connection's **Model IDs** to the OpenAI-format ids (`gpt-5.5`, `gpt-5.5-pro`, `gpt-oss-120b`, `glm-5-2`, …) — nullsink lists Claude in `/v1/models`, but Claude is only callable on the Anthropic path. [Docs](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-openai-compatible/).
+Claude rides a bundled pipe function. Full walkthrough — connection, pipe install, model-picker cleanup, troubleshooting: **[docs/openwebui.md](docs/openwebui.md)**.
 
 ### LibreChat
 
