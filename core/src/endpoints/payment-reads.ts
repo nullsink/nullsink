@@ -5,13 +5,19 @@ import { deny, readJsonBody } from "../http";
 import { decimalsOf, type PaymentsEndpointDeps } from "./types";
 import { readThrottled } from "./read-throttle";
 
+// Upper bound on the optional /order-status `address` (the /buy pay_to a client scopes to). A type + length
+// check is the whole validation: a non-matching address simply reads `closed`, so no per-rail charset regex
+// is needed. 128 comfortably covers the longest we mint (Monero ~95, Bitcoin ~62) while rejecting a body
+// padded past any real address to waste the exact-match lookup.
+const MAX_ADDRESS_LEN = 128;
+
 // POST /order-status: live payment progress for an in-flight order, keyed by the token's HASH (never the raw
 // token — that goes only to /balance). The hash already crossed the wire to /buy, so this leaks nothing new;
 // it reveals only how far along a payment is, never the balance. Once an order settles the row is dropped
 // (settle.ts), so a credited/reaped/never-existed order all read `closed` — the dropped-link privacy
 // property. The client confirms the actual credit via /balance.
 export function makeOrderStatus(d: PaymentsEndpointDeps) {
-  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, orderStatus, readRateLimit } = d;
+  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, orderStatus, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
     if (throttled) return throttled;
@@ -20,7 +26,17 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
     const body = parsed.body;
     const hash: string | null = typeof body?.hash === "string" ? body.hash : null;
     if (!hash || !/^[0-9a-f]{64}$/.test(hash)) return deny(400, "invalid_hash");
-    const order = latestOpenOrderByHash(hash);
+    // Optional `address`: the /buy pay_to the client is tracking. When present it is AUTHORITATIVE — it scopes
+    // the lookup to the ONE order the payer is looking at, since a hash can have several open orders at once
+    // (a top-up opens a second). Kept OPTIONAL, never required: an older cached bundle (or a curl user) polls
+    // {hash} alone and must not 400 mid-payment — that would 400 the exact person the scoping protects. A
+    // non-matching address just falls through to `closed` below, so validation is a type + length check only.
+    let address: string | null = null;
+    if (body?.address !== undefined) {
+      if (typeof body.address !== "string" || body.address.length > MAX_ADDRESS_LEN) return deny(400, "invalid_address");
+      address = body.address;
+    }
+    const order = address !== null ? openOrderByHashAddress(hash, address) : latestOpenOrderByHash(hash);
     if (!order) return Response.json({ state: "closed" });
     // Format by the ORDER's rail (a BTC order shows BTC sats/unit even while Monero is also active).
     // Fallback fires only if a rail is dropped from PAY_RAILS with open orders still live — it would then

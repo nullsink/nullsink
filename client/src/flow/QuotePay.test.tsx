@@ -9,7 +9,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { OrderStatus, Quote } from "../lib/api.ts";
 
 // checkNow drives exactly two network calls; stub both so we control the funded / not-yet-funded outcome.
-const fetchOrderStatus = mock((_hash: string): Promise<OrderStatus> => Promise.resolve({ state: "closed" }));
+const fetchOrderStatus = mock((_hash: string, _address?: string): Promise<OrderStatus> => Promise.resolve({ state: "closed" }));
 const checkBalance = mock((_token: string): Promise<number | null> => Promise.resolve(null));
 
 // Replace the whole api module BEFORE QuotePay is imported (mock.module is not hoisted). buyErrorMessage
@@ -88,6 +88,18 @@ test("not-yet-funded check re-enables the button without calling /balance", asyn
   await waitFor(() => expect(button).not.toBeDisabled());
   expect(funded).toBe(false);
   expect(checkBalance).not.toHaveBeenCalled();
+});
+
+// Scoping: a hash can have several open orders at once, so the poll must name the one THIS tab is tracking.
+// QuotePay holds the quote (with pay_to) in memory, so checkNow passes it — otherwise the read collapses to
+// "newest wins" and an empty newer order shadows the paid one the payer is watching.
+test("checkNow scopes the poll to THIS order: fetchOrderStatus is called with the quote's pay_to", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "confirming", confirmations: 1, required: 3 }));
+  renderPay(() => {});
+  fireEvent.click(screen.getByRole("button", { name: "check" }));
+  await waitFor(() => expect(fetchOrderStatus).toHaveBeenCalled());
+  // hashToken is stubbed to "aa".repeat(32); the address is the quote's pay_to. Dropping the arg in QuotePay fails this.
+  expect(fetchOrderStatus).toHaveBeenCalledWith("aa".repeat(32), quote.pay_to);
 });
 
 // `detected` = the server durably saw an inbound (seen_at) but has no live confirmation count, because it

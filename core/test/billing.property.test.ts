@@ -1266,6 +1266,103 @@ test("/order-status rejects malformed JSON, non-64-hex hashes, and oversized bod
   expect(big.status).toBe(413);
 });
 
+// --- /order-status address scoping: a hash can have SEVERAL open orders (a top-up opens a second), so the
+//     read is scoped to the pay_to the client tracks; the unscoped fallback prefers the SEEN (paid) order. ---
+
+// Add a pending order for `hash` directly (bypassing /buy so the test controls order_index, address,
+// created_at, and seen_at) — the real store wired into the handler, so /order-status resolves against it.
+const seedOrder = (
+  orders: ReturnType<typeof makeHandler>["orders"],
+  o: { order_index: number; address: string; hash: string; created_at: number; expected_atomic: number; seen?: boolean },
+) => {
+  orders.tryAddOrder(
+    { rail: "monero", order_index: o.order_index, address: o.address, hash: o.hash, expected_atomic: o.expected_atomic, credit_micros: 1_000_000, received_atomic: 0, created_at: o.created_at, rate_usd: 150 },
+    1000,
+  );
+  if (o.seen) orders.markSeen(o.order_index, "monero", o.created_at + 1);
+};
+const xmr = (atomic: number) => (atomic / ATOMIC_PER_XMR).toFixed(12); // the expected/received string /order-status renders
+
+test("/order-status with an `address` returns THAT order, not the newest — even when the newest is empty", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "a".repeat(64);
+  // Older, PAID order (seen) and a NEWER, EMPTY one on the SAME hash — distinct address, index, created_at.
+  seedOrder(orders, { order_index: 0, address: "PAID_ADDR", hash, created_at: 1000, expected_atomic: 2_000_000_000, seen: true });
+  seedOrder(orders, { order_index: 1, address: "EMPTY_ADDR", hash, created_at: 2000, expected_atomic: 9_000_000_000 });
+
+  // Scoped to the PAID order's address → the OLDER order, though a newer one exists (newest-wins would return EMPTY).
+  const paid = (await (await handler(orderStatusReq({ hash, address: "PAID_ADDR" }))).json()) as any;
+  expect(paid.expected).toBe(xmr(2_000_000_000)); // the paid order's amount, not the empty order's 9.0
+  expect(paid.expires_at).toBe(1000 + ORDER_TTL_MS); // derived from the OLDER order's created_at
+
+  // Scoped to the NEWER order's address → the newer order (kills a "drop AND address = ?" mutant, which
+  // would return the first-by-rowid PAID row here).
+  const empty = (await (await handler(orderStatusReq({ hash, address: "EMPTY_ADDR" }))).json()) as any;
+  expect(empty.expected).toBe(xmr(9_000_000_000));
+  expect(empty.expires_at).toBe(2000 + ORDER_TTL_MS);
+});
+
+test("/order-status with an `address` that matches no open order (or belongs to another hash) returns closed", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "a".repeat(64);
+  const otherHash = "b".repeat(64);
+  seedOrder(orders, { order_index: 0, address: "PAID_ADDR", hash, created_at: 1000, expected_atomic: 2_000_000_000, seen: true });
+
+  // No order carries this address → closed (credited/reaped/never-existed are indistinguishable).
+  const none = (await (await handler(orderStatusReq({ hash, address: "NOPE_ADDR" }))).json()) as any;
+  expect(none.state).toBe("closed");
+
+  // The address exists, but under a DIFFERENT hash → still closed (kills a "drop AND hash = ?" mutant, which
+  // would find PAID_ADDR regardless of hash).
+  const wrongHash = (await (await handler(orderStatusReq({ hash: otherHash, address: "PAID_ADDR" }))).json()) as any;
+  expect(wrongHash.state).toBe("closed");
+});
+
+test("/order-status without an `address` (older cached bundle) surfaces the SEEN order over a newer empty one", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "a".repeat(64);
+  seedOrder(orders, { order_index: 0, address: "PAID_ADDR", hash, created_at: 1000, expected_atomic: 2_000_000_000, seen: true });
+  seedOrder(orders, { order_index: 1, address: "EMPTY_ADDR", hash, created_at: 2000, expected_atomic: 9_000_000_000 });
+
+  // The fallback ordering `(seen_at IS NOT NULL) DESC, created_at DESC` returns the OLDER seen order, not the
+  // newer empty one (kills a "drop the (seen_at IS NOT NULL) DESC term" mutant, which reverts to newest-wins).
+  const body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.expected).toBe(xmr(2_000_000_000));
+  expect(body.expires_at).toBe(1000 + ORDER_TTL_MS);
+});
+
+test("/order-status without an `address` and neither order seen: newest wins (unchanged fallback tie-break)", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "a".repeat(64);
+  seedOrder(orders, { order_index: 0, address: "OLD_ADDR", hash, created_at: 1000, expected_atomic: 2_000_000_000 });
+  seedOrder(orders, { order_index: 1, address: "NEW_ADDR", hash, created_at: 2000, expected_atomic: 9_000_000_000 });
+
+  // Both unseen → the (seen_at IS NOT NULL) class ties, so created_at DESC decides: the newer order.
+  const body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.expected).toBe(xmr(9_000_000_000));
+  expect(body.expires_at).toBe(2000 + ORDER_TTL_MS);
+});
+
+test("/order-status rejects a non-string or over-long `address` with 400 invalid_address (128-char cap)", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "a".repeat(64);
+  seedOrder(orders, { order_index: 0, address: "x".repeat(128), hash, created_at: 1000, expected_atomic: 2_000_000_000 });
+
+  // A non-string address is a 400 (a scoping field the caller controls; reject rather than coerce).
+  const notString = await handler(orderStatusReq({ hash, address: 123 }));
+  expect(notString.status).toBe(400);
+  expect(((await notString.json()) as { error: string }).error).toBe("invalid_address");
+
+  // 129 chars is over the cap → 400. Exactly 128 is accepted (boundary is `>`, not `>=`): it just doesn't
+  // match anything here, so it reads closed — a 200, proving the 128-char address wasn't rejected.
+  const tooLong = await handler(orderStatusReq({ hash, address: "y".repeat(129) }));
+  expect(tooLong.status).toBe(400);
+  expect(((await tooLong.json()) as { error: string }).error).toBe("invalid_address");
+  const atCap = await handler(orderStatusReq({ hash, address: "x".repeat(128) }));
+  expect(atCap.status).toBe(200); // 128 is under/at the cap → looked up (and matches the seeded order)
+  expect(((await atCap.json()) as any).expected).toBe(xmr(2_000_000_000));
+});
+
 test("F3: a 2xx with NEGATIVE usage never inflates the balance (cost floored at 0 → full refund)", async () => {
   // priceUsage of negative tokens is negative; the billActual floor (Math.max(0, actual)) must turn that
   // into a FULL refund, never credit MORE than was held. (Not reachable under honest upstreams — a latent

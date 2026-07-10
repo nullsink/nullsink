@@ -44,7 +44,7 @@ export type PaymentsHandlerDeps = {
 // Dispatch only the PAYMENT-world paths. undefined = "not mine" (the combined router already tried the
 // prompt-world routes; createPaymentsHandler turns it into the fail-closed 404).
 export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
-  const { tryAddOrder, openCount, latestOpenOrderByHash } = d.orders;
+  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress } = d.orders;
   const endpoints = makePaymentsEndpoints({
     rails: d.rails,
     defaultRail: d.defaultRail,
@@ -57,6 +57,7 @@ export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url:
     tryAddOrder,
     openCount,
     latestOpenOrderByHash,
+    openOrderByHashAddress,
     buyRateLimit: d.buyRateLimit,
     readRateLimit: d.readRateLimit,
     orderStatus: d.orderStatus,

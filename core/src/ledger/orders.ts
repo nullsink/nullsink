@@ -149,8 +149,16 @@ export function openOrderStore(path: string) {
   );
   const openStmt = db.query<PendingOrder, []>("SELECT * FROM pending_orders");
   const openByRailStmt = db.query<PendingOrder, [string]>("SELECT * FROM pending_orders WHERE rail = ?");
+  // Unscoped fallback: prefer an order that has money on it. A hash can have several open orders at once
+  // (a buyer tops up a $2 order with a second $10 one), so `(seen_at IS NOT NULL) DESC` surfaces the SEEN
+  // one ahead of a newer EMPTY one — otherwise a client that can't scope (an old cached bundle mid-deploy,
+  // a curl user) polls "newest wins" and is told "not seen yet" over a confirming payment, and may pay
+  // twice. created_at DESC only tie-breaks within the same seen/unseen class.
   const byHashStmt = db.query<PendingOrder, [string]>(
-    "SELECT * FROM pending_orders WHERE hash = ? ORDER BY created_at DESC LIMIT 1",
+    "SELECT * FROM pending_orders WHERE hash = ? ORDER BY (seen_at IS NOT NULL) DESC, created_at DESC LIMIT 1",
+  );
+  const byHashAddrStmt = db.query<PendingOrder, [string, string]>(
+    "SELECT * FROM pending_orders WHERE hash = ? AND address = ? LIMIT 1",
   );
   const countStmt = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM pending_orders");
   const markSeenStmt = db.query<never, [number, string, number]>(
@@ -201,11 +209,21 @@ export function openOrderStore(path: string) {
     return countStmt.get()?.n ?? 0;
   }
 
-  // The most-recent still-open order for a token hash, or null. Powers /order-status (show this order's
-  // confirmation progress) — read-only and privacy-safe: the hash already crossed the wire to /buy, and
-  // the row is dropped at settle, so a closed/never-existed order is indistinguishable (returns null).
+  // The best single still-open order for a token hash, or null. Powers /order-status's UNSCOPED fallback,
+  // for a client that can't name the order (an old cached bundle, a curl user). "Best" = seen-before-unseen
+  // then newest (see byHashStmt), so a paid order is never shadowed by an empty newer sibling. Read-only and
+  // privacy-safe: the hash already crossed the wire to /buy, and the row is dropped at settle, so a
+  // closed/never-existed order is indistinguishable (returns null).
   function latestOpenOrderByHash(hash: string): PendingOrder | null {
     return byHashStmt.get(hash) ?? null;
+  }
+
+  // The still-open order a client is TRACKING, scoped to the exact (hash, pay_to address) /buy returned, or
+  // null. A hash may have several open orders at once; the address disambiguates the one-to-many so a status
+  // read reflects the order the payer is actually looking at, never a newer empty sibling. Same privacy
+  // property as above: a non-matching address is indistinguishable from a closed/never-existed order.
+  function openOrderByHashAddress(hash: string, address: string): PendingOrder | null {
+    return byHashAddrStmt.get(hash, address) ?? null;
   }
 
   // Drop an order's row — on its first confirmed payment (pay-once) or a reap. Also drops the index→hash
@@ -293,7 +311,7 @@ export function openOrderStore(path: string) {
   }
 
   return {
-    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, removeOrder, purgeStale, markSeen,
+    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, openOrderByHashAddress, removeOrder, purgeStale, markSeen,
     enqueueCredit, listUnackedCredits, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
   };
 }

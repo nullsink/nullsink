@@ -101,8 +101,15 @@ test("fetchOrderStatus POSTs the hash and returns parsed status; throws order_st
   stubFetch(() => json({ state: "confirming", confirmations: 2, required: 10 }));
   const st = await fetchOrderStatus("HASH");
   expect(st.state).toBe("confirming");
-  expect(bodyOf(calls[0])).toEqual({ hash: "HASH" });
+  expect(bodyOf(calls[0])).toEqual({ hash: "HASH" }); // no address key when the caller omits it
   expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key"); // hash-only; no raw token on this path
+
+  // With the tracked order's address, it rides in the body so the server scopes to THAT order (still no token).
+  calls = [];
+  stubFetch(() => json({ state: "confirming", confirmations: 2, required: 10 }));
+  await fetchOrderStatus("HASH", "PAY_TO_ADDR");
+  expect(bodyOf(calls[0])).toEqual({ hash: "HASH", address: "PAY_TO_ADDR" });
+  expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key");
 
   stubFetch(() => new Response("x", { status: 404 }));
   await expect(fetchOrderStatus("HASH")).rejects.toThrow("order_status_404");
