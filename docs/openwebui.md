@@ -37,3 +37,4 @@ The connection lists every id from nullsink's `/v1/models`, including bare `clau
 | `unsupported_model` | A bare `claude-*` id from the connection. Chat with the `anthropic/claude-…` entries instead. |
 | `HTTP 401: no API key provided …` | The pipe's `NULLSINK_API_KEY` valve is empty. Set it on the function you're chatting with — each installed copy keeps its own valves. |
 | Claude models missing from the picker | Function toggled off, or its 5-minute model cache is stale — toggle it off and on to refresh. |
+| `HTTP 400: \`temperature\` is deprecated for this model` | The newest Claude models reject `temperature`. Set it back to Default in the chat's Controls → Advanced Params. |

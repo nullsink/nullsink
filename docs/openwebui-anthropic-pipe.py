@@ -196,22 +196,21 @@ class Pipe:
                 {"role": message["role"], "content": processed_content}
             )
 
-        # Claude 4.x+ models reject requests with both temperature and top_p/top_k set.
-        # Priority: temperature > top_p/top_k > default temperature.
+        # Only forward sampling params the user set — the newest Claude models reject
+        # `temperature` outright, and 4.x+ rejects temperature combined with top_p/top_k,
+        # so temperature wins when both are set.
         temperature = body.get("temperature")
         top_p = body.get("top_p")
         top_k = body.get("top_k")
 
+        sampling_params = {}
         if temperature is not None:
             sampling_params = {"temperature": temperature}
         elif top_p is not None or top_k is not None:
-            sampling_params = {}
             if top_p is not None:
                 sampling_params["top_p"] = top_p
             if top_k is not None:
                 sampling_params["top_k"] = top_k
-        else:
-            sampling_params = {"temperature": 0.8}
 
         payload = {
             "model": body["model"][body["model"].find(".") + 1 :],
