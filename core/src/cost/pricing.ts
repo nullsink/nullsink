@@ -10,28 +10,21 @@
 //   cost_micros = tokens * rate / 1_000_000   (no floats; truncation favours the user).
 import prices from "./prices.json";
 
-// Same four rate fields in prices.json (USD per Mtok) and, after the scaling below, internally
-// (micro-dollars per Mtok), PLUS the synthesized `cache_write_1h` tier (see below — not on disk).
-// Each prices.json entry also carries a `provider` tag (see RawEntry). EXPORTED so the pure cost functions
-// (costOf / holdBoundOf) can price against ANY rate source — not just this prices.json-backed table.
+// Same five rate fields in prices.json (USD per Mtok) and, after the scaling below, internally
+// (micro-dollars per Mtok). Each prices.json entry also carries a `provider` tag (see RawEntry).
+// EXPORTED so the pure cost functions (costOf / holdBoundOf) can price against ANY rate source — not
+// just this prices.json-backed table.
 export type Rate = { input: number; output: number; cache_read: number; cache_write: number; cache_write_1h: number };
 
-// A prices.json entry as stored on disk: the provider tag + the four USD/Mtok rates. NOTE: prices.json does
-// NOT carry cache_write_1h — that tier is synthesized in the RATES build below, so the on-disk file stays a
-// pure models.dev mirror (regenerate with `bun run cli/sync-prices.ts`, never hand-edit).
-export type RawEntry = Omit<Rate, "cache_write_1h"> & { provider: string };
+// A prices.json entry as stored on disk: the provider tag + the five USD/Mtok rates. The generator
+// (cli/sync-prices.ts) emits the COMPLETE rate card — including cache_write_1h, which models.dev doesn't
+// model, derived there per provider (Anthropic 2× input; otherwise = cache_write) — so this cost engine
+// is purely table-driven, with zero provider knowledge. Regenerate with `bun run cli/sync-prices.ts`,
+// never hand-edit.
+export type RawEntry = Rate & { provider: string };
 
 // A resolved model: which provider owns it (for the cross-provider endpoint gate) + its scaled rate.
 type PricedModel = { provider: string; rate: Rate };
-
-// Anthropic bills 1-hour cache-TTL writes at 2× base input, vs 1.25× for the default 5-minute tier (the
-// latter is `cache_write`, already in prices.json). models.dev models only that single 5-minute tier, so we
-// synthesize the 1-hour rate from the input rate × this multiplier at table-build time — keeping prices.json
-// a pure models.dev mirror (no hand-edited JSON) while the pricing math (priceUsage, priceHoldBound) stays
-// purely table-driven. Anthropic-only; OpenAI has no cache-write fee and never emits 1h cache tokens.
-// Source: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-//   "1-hour cache write tokens are 2× the base input tokens price".
-const ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER = 2;
 
 // Merge id-keyed price sources, THROWING on a duplicate id across them — the tripwire that an id is now
 // served by >1 provider (at which point pricing must key by (provider, id), and the handler's `provider/model`
@@ -56,28 +49,36 @@ export function mergeRawPrices(...sources: Record<string, RawEntry>[]): [string,
 // cross-PROVIDER dup tripwire now lives in cli/sync-prices.ts (build time, across providers in the one file).
 const RAW_PRICES = mergeRawPrices(prices as Record<string, RawEntry>);
 
-// id → {provider, rate}, sorted longest-id-first so the most specific match wins. Matching is
-// exact-or-prefix, which absorbs dated suffixes (claude-opus-4-8 also matches claude-opus-4-8-20260101,
-// gpt-4o also matches gpt-4o-2024-08-06) codeless.
+// Billing invariants every table rate must satisfy, re-asserted on the post-rounding micro rates costOf
+// actually bills with (the generator asserts the same on the USD figures). Throwing at module load means a
+// bad prices.json — hand-edited, or a generator regression that slipped review — refuses to BOOT rather
+// than under-billing quietly: non-finite/negative rates could bill NaN or mint balance, and a 1-hour write
+// tier below the standard one would let a usage report bill LESS by classifying write tokens as 1-hour
+// (the monotonicity the property tests pin in CI). Exported + pure so the throw is unit-testable.
+export function assertRateInvariants(id: string, rate: Rate): Rate {
+  for (const [k, v] of Object.entries(rate)) {
+    if (!(Number.isFinite(v) && v >= 0)) throw new Error(`prices.json: ${id}.${k} is not a finite non-negative rate: ${v}`);
+  }
+  if (rate.cache_write_1h < rate.cache_write) throw new Error(`prices.json: ${id}.cache_write_1h (${rate.cache_write_1h}) < cache_write (${rate.cache_write}) — a 1h-classified write would bill less`);
+  return rate;
+}
+
+// id → {provider, rate}, sorted longest-id-first so the most specific match wins (see findModel for the
+// dated-suffix matching rule).
 const RATES: [id: string, m: PricedModel][] = RAW_PRICES
-  .map(([id, c]): [string, PricedModel] => {
-    const input = Math.round(c.input * 1_000_000);
-    return [
-      id,
-      {
-        provider: c.provider,
-        rate: {
-          input,
-          output: Math.round(c.output * 1_000_000),
-          cache_read: Math.round(c.cache_read * 1_000_000),
-          cache_write: Math.round(c.cache_write * 1_000_000),
-          // cache_write_1h: 2× input on Anthropic, 0 elsewhere (see ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER).
-          // Derived from the same `input` micro-rate so it can't drift from the table.
-          cache_write_1h: c.provider === "anthropic" ? input * ANTHROPIC_1H_CACHE_WRITE_MULTIPLIER : 0,
-        },
-      },
-    ];
-  })
+  .map(([id, c]): [string, PricedModel] => [
+    id,
+    {
+      provider: c.provider,
+      rate: assertRateInvariants(id, {
+        input: Math.round(c.input * 1_000_000),
+        output: Math.round(c.output * 1_000_000),
+        cache_read: Math.round(c.cache_read * 1_000_000),
+        cache_write: Math.round(c.cache_write * 1_000_000),
+        cache_write_1h: Math.round(c.cache_write_1h * 1_000_000),
+      }),
+    },
+  ])
   .sort((a, b) => b[0].length - a[0].length);
 
 // Fields we read out of an Anthropic `usage` object. output_tokens is the only one guaranteed present;
@@ -85,19 +86,33 @@ const RATES: [id: string, m: PricedModel][] = RAW_PRICES
 export type Usage = {
   input_tokens?: number;
   output_tokens?: number;
-  cache_creation_input_tokens?: number; // TOTAL cache-write tokens (5-min + 1-hour) — Anthropic reports the sum
+  // TOTAL cache-write tokens, all TTL tiers. Anthropic reports the 5-min + 1-hour sum; OpenAI reports its
+  // single tier's cache_write_tokens here via the usage adapter (a real fee since gpt-5.6: 1.25× input).
+  cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
-  // Anthropic's 1-hour-TTL slice of cache_creation_input_tokens (the rest is the 5-min tier). usage.ts
+  // Anthropic's 1-hour-TTL slice of cache_creation_input_tokens (the rest is the standard tier). usage.ts
   // normalizes both the buffered and streamed Anthropic shapes — where it arrives nested under
-  // usage.cache_creation.ephemeral_1h_input_tokens — to this flat field, which priceUsage bills at the 2×
-  // rate. OpenAI never sets it (no cache-write fee). Absent → 0 → the whole cache-write total bills at 5-min.
+  // usage.cache_creation.ephemeral_1h_input_tokens — to this flat field, which priceUsage bills at the
+  // cache_write_1h rate. Only Anthropic has the tier; other providers' adapters never set it, and their
+  // cache_write_1h = cache_write keeps a lying report billing-neutral rather than cheaper. Absent → 0 →
+  // the whole cache-write total bills at the standard tier.
   cache_creation_1h_input_tokens?: number;
 };
 
-// Exact match, or a dated suffix of a known id. The trailing "-" is required so `claude-opus-4-1` matches
-// `claude-opus-4-1-20250805` but NOT a hypothetical pricier `claude-opus-4-12345`. Longest id wins.
+// A dated release suffix: -YYYYMMDD / -YYYY-MM-DD (Anthropic / OpenAI style), or the 8-digit numeric form.
+// Same shape client/sync-models.ts collapses. Anchored: the WHOLE remainder after the id must be the date.
+const DATED_SUFFIX = /^(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+
+// Exact match, or a known id extended by a DATED suffix only — `claude-opus-4-1` matches
+// `claude-opus-4-1-20250805`, `gpt-4o` matches `gpt-4o-2024-08-06`. Longest id wins. Anything else,
+// including a dash-separated NAMED variant, must NOT be absorbed: providers price variants independently
+// of their base (gpt-5.6 is $5/$30 while every recent OpenAI "-pro" is ~$30/$180), so absorbing a
+// `gpt-5.6-pro` at the base rate would serve it ~6× under cost the day it launches, until the next manual
+// price sync. An unabsorbed id is simply unpriced → the gate 400s it before any upstream spend. This also
+// covers `claude-opus-4-1` vs `claude-opus-4-12345` (no dash) and keeps off-card variants
+// (gpt-4o-audio-preview) out even without their isOffCardModel marker.
 function findModel(model: string): PricedModel | undefined {
-  return RATES.find(([id]) => model === id || model.startsWith(id + "-"))?.[1];
+  return RATES.find(([id]) => model === id || (model.startsWith(id + "-") && DATED_SUFFIX.test(model.slice(id.length + 1))))?.[1];
 }
 
 function findRate(model: string): Rate | undefined {
@@ -137,11 +152,10 @@ export function pricedModels(): ModelListing[] {
 // Model ids whose REAL billing falls outside the flat per-token rate card: bundled fee-bearing built-in
 // tools (web search, deep research — a PER-CALL fee no token rate covers) and non-text token rates
 // (audio/realtime — audio tokens bill ~16× the text input rate, and our usage mapping doesn't split them
-// out). cli/sync-prices.ts excludes all of these from prices.json — but that alone is NOT enough:
-// findModel() above matches by exact-OR-PREFIX, so an excluded id that is a suffix of a priced base
-// (o3-deep-research → matches priced `o3`; gpt-4o-audio-preview → `gpt-4o`) gets silently re-admitted at
-// the BASE model's TEXT token rates, under-billing the fee/audio premium. So the runtime gate MUST also
-// reject these by id. Single source shared with the generator so the two can't drift. (The body-level
+// out). cli/sync-prices.ts excludes all of these from prices.json, and findModel's dated-suffix-only
+// matching means an excluded NAMED variant (o3-deep-research, gpt-4o-audio-preview) can no longer be
+// silently re-admitted at its base model's TEXT token rates. This id gate stays as defense in depth on
+// top of both. Single source shared with the generator so the two can't drift. (The body-level
 // audio gate in providers/openai.ts OPENAI_CHAT_REJECTS backstops this list: even a future audio-capable id
 // missing a marker can't be asked for audio output without `modalities`/`audio` in the body.)
 export const OFF_CARD_MODEL_MARKERS = ["deep-research", "search", "audio", "realtime"];

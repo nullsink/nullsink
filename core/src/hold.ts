@@ -20,7 +20,7 @@ export type HoldInput = {
   // /v1/messages relay. Our injected auth always overrides these (they can't spoof x-api-key/version).
   countHeaders?: Record<string, string>;
   // True when the request opts into 1-hour cache writes; priceHoldBound then sizes the input ceiling at the
-  // 2× tier (vs the standard tier when absent/false). See the cache_write_1h synthesis in cost/pricing.ts.
+  // model's cache_write_1h tier (vs the standard tier when absent/false) — see the rate card in prices.json.
   oneHourCache?: boolean;
 };
 

@@ -93,18 +93,35 @@ for (const { name, retired, flatCache } of PROVIDERS) {
     // replaces the old cross-source dup-throw in pricing.mergeRawPrices, now that Tinfoil is synced here too.)
     if (id in out) throw new Error(`duplicate priced model id "${id}" across providers (${(out[id] as { provider: string }).provider} vs ${name}) — pricing must key by (provider, id)`);
     const c = m.cost;
-    out[id] = {
+    // cache_read: a real discount from models.dev when present. Absent → 0 for discount-providers (they
+    // never report cached tokens), but → INPUT for a flatCache provider (Tinfoil): its vLLM can report a
+    // cache hit yet bills it at the full input rate, so 0 would under-charge. cache_write is absent for
+    // providers with no cache-WRITE token fee (OpenAI before gpt-5.6, Tinfoil) → 0; the hold's
+    // max(input, cache_read, cache_write) still resolves to input.
+    const cache_write = c.cache_write ?? 0;
+    const entry = {
       provider: name,
       input: c.input,
       output: c.output,
-      // cache_read: a real discount from models.dev when present. Absent → 0 for discount-providers (they
-      // never report cached tokens), but → INPUT for a flatCache provider (Tinfoil): its vLLM can report a
-      // cache hit yet bills it at the full input rate, so 0 would under-charge. cache_write is absent on both
-      // OpenAI-shape providers (no cache-WRITE token fee) → 0; the hold's max(input, cache_read, cache_write)
-      // still resolves to input.
       cache_read: c.cache_read ?? (flatCache ? c.input : 0),
-      cache_write: c.cache_write ?? 0,
+      cache_write,
+      // cache_write_1h: the 1-hour-TTL cache-write tier, emitted explicitly so the runtime cost engine is
+      // purely table-driven (no provider conditionals). models.dev doesn't model the tier, so: Anthropic →
+      // 2× base input (https://platform.claude.com/docs/en/build-with-claude/prompt-caching: "1-hour cache
+      // write tokens are 2× the base input tokens price"); every other provider → its cache_write rate, so
+      // a usage report that classifies write tokens as 1-hour bills the same as the standard tier instead
+      // of free (providers without the tier never emit the field; this keeps cost monotonic if one lies).
+      // A real models.dev cache_write_1h, if it ever appears, wins over both rules.
+      cache_write_1h: c.cache_write_1h ?? (name === "anthropic" ? 2 * c.input : cache_write),
     };
+    // Generation-time billing invariants: every rate a sane non-negative number, and the 1-hour write tier
+    // at least the standard one — the precondition for "more reported tokens never bills less" (the
+    // monotonicity property pricing.ts re-asserts at load and the property tests check in CI).
+    for (const [k, v] of Object.entries(entry)) {
+      if (k !== "provider" && !(typeof v === "number" && Number.isFinite(v) && v >= 0)) throw new Error(`${id}: rate ${k} is not a finite non-negative number: ${v}`);
+    }
+    if (entry.cache_write_1h < entry.cache_write) throw new Error(`${id}: cache_write_1h (${entry.cache_write_1h}) < cache_write (${entry.cache_write}) would let a 1h-classified write bill less`);
+    out[id] = entry;
     counts[name] = (counts[name] ?? 0) + 1;
   }
 }
