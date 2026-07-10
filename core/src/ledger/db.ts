@@ -23,8 +23,8 @@ export function openDb(path: string) {
   // Idempotency guard for payment crediting. Records already-applied credits by the rail's opaque key, so an
   // outbox re-delivery (a sender retry after a crash before ack) or a poller re-scan can't double-credit. Holds
   // ONLY that key + timestamp (no token hash, no amount), so a balances.db leak reveals no payment↔token
-  // linkage. NOT auto-purged in stage 2 (D4): dropping a marker while a retry is still in flight would
-  // double-credit; purgeApplied() stays for a future payments-side safe-point prune. ~50 bytes/marker.
+  // linkage. NOT auto-purged: dropping a marker while a retry is still in flight would double-credit;
+  // purgeApplied() stays for a future payments-side safe-point prune. ~50 bytes/marker.
   db.run(`CREATE TABLE IF NOT EXISTS applied_orders (
   order_id   TEXT PRIMARY KEY,
   applied_at INTEGER NOT NULL
