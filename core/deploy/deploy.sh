@@ -66,8 +66,9 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   echo ">>> Deploying $REF  (proxy was ${prev_proxy:-none}, payments was ${prev_pay:-none}, UI was ${prev_web:-none})"
   install_binary "$REF"                  # fetch+verify+activate both current-{proxy,payments} symlinks
   # nsk is an OPTIONAL operator CLI (install on demand: deploy/install-nsk.sh). Only refresh it here when it's
-  # already installed, so it stays in lockstep with the server without being forced onto every box.
-  [ -x /usr/local/bin/nsk ] && install_nsk "$REF"
+  # already installed, so it stays in lockstep with the server without being forced onto every box. Must be an
+  # `if`, not `[ ... ] &&`: on a box without nsk that compound would exit 1 and abort the deploy under set -e.
+  if [ -x /usr/local/bin/nsk ]; then install_nsk "$REF"; fi
   install_deploy_tree "$REF" "$APP_DIR"  # refresh deploy/ (units + scripts + Caddyfile) from the release
   # UI is non-fatal: /healthz tests the BINARIES, which serve fine with a stale UI, so a UI fetch hiccup must not
   # abort (and half-apply) a binary deploy. Activate it; the health gate below still judges the binaries.

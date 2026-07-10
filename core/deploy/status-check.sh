@@ -262,7 +262,14 @@ fi
 #     and goes quiet during a deliberate rail drain (node-box-runbook.md). Env vars come from
 #     status-check.service's EnvironmentFile; all read ${VAR:-} — an unset var must skip/warn, never
 #     abort the whole check under set -u. ---
+# An EMPTY PAY_RAILS almost always means the env never loaded (a bare `sudo ./status-check.sh` instead of
+# `systemctl start status-check.service`, whose EnvironmentFile provides it) — every env-gated rail check
+# below would then silently self-skip and the run would go green without ever looking at the buy rail.
+# Fail LOUDLY instead of monitoring nothing.
 _btc_rails="${PAY_RAILS:-${PAY_RAIL:-}}"
+if [ -z "$_btc_rails" ]; then
+  warn "PAY_RAILS is not set — env not loaded (run via: systemctl start status-check.service), so the rail checks were NOT performed"
+fi
 case ",${_btc_rails// /}," in *,bitcoin,*)
   # Unset URL mirrors the APP's default (bitcoin.ts: local wallet-scoped endpoint) so the probe always
   # tests what the app would actually dial — never warn about a config the app happily runs with.
