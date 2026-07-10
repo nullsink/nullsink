@@ -70,30 +70,57 @@ in CI (`release.yml`); verify off-box with `gh attestation verify <file> --repo 
 
 ## Rolling back across the split
 
-A normal rollback is a symlink flip, and `deploy.sh` does it for you when `/healthz` fails. Rolling back to a
-**pre-split tag** is not: those releases ship one `nullsink-linux-x64` binary and one `nullsink.service`, and
-the split units cannot run it. `deploy.sh` detects this (no previous split binaries) and stops rather than
-half-restoring.
+`deploy.sh` rolls a failed deploy back by flipping the two version symlinks, which needs a *previous* pair of
+split binaries. On the first cutover there is none, so it stops with `ROLLBACK IMPOSSIBLE` and leaves the box
+on the split. Every later deploy rolls back on its own.
 
-**Drain the credit outbox first.** Every pre-split release also predates the outbox, so an old binary cannot
-see `credit_outbox` at all — any row still unacked is a paid credit that will sit undelivered until you roll
-forward again. With both services still running, wait for this to read `0`:
+Going back to a **pre-split tag** is a manual, two-stage job. The split `deploy.sh` cannot install one: its
+`install_binary` fetches `nullsink-proxy-linux-x64` and `nullsink-payments-linux-x64`, while a pre-split release
+publishes only `nullsink-linux-x64`. That fetch 404s and, under `set -e`, the script aborts on its first step —
+safely, having changed nothing, but it will never complete. Restore the target release's deploy tree first, then
+run **its** `deploy.sh`.
+
+**Drain the credit outbox first.** `v1.7.0` understands `credit_outbox` and drains it in-process, so rolling
+back to it strands nothing. Releases below `v1.7.0` cannot see the table at all: an unacked row there is a paid
+credit that sits undelivered until you roll forward. With both services still running, wait for this to read `0`:
 
 ```sh
-sudo -u nullsink sqlite3 /var/lib/nullsink/pending.db \
+sudo -u nullsink sqlite3 -readonly /var/lib/nullsink/pending.db \
   'SELECT count(*) FROM credit_outbox WHERE acked_at IS NULL;'
 ```
 
 Then, as root:
 
 ```sh
+TAG=<pre-split-tag>
+
+# 1. Stop the split and delete its units — install_units would otherwise copy them straight back.
 systemctl disable --now nullsink-proxy nullsink-payments
 rm -f /etc/systemd/system/nullsink-proxy.service /etc/systemd/system/nullsink-payments.service
 systemctl daemon-reload
-deploy/deploy.sh <pre-split-tag>   # restores nullsink.service + the single binary from that release's tree
+
+# 2. Swap in that release's deploy tree: its nullsink.service, its Caddyfile, its deploy.sh.
+tmp="$(mktemp -d)"
+for f in "deploy-$TAG.tar.gz" SHA256SUMS; do
+  curl -fsSL "https://github.com/nullsink/nullsink/releases/download/$TAG/$f" -o "$tmp/$f"
+done
+( cd "$tmp" && sha256sum -c --ignore-missing SHA256SUMS ) || exit 1
+tar -xzf "$tmp/deploy-$TAG.tar.gz" -C "$tmp"          # -> $tmp/deploy/*
+rm -rf /opt/nullsink/deploy && mv "$tmp/deploy" /opt/nullsink/deploy
+
+# 3. Run THAT deploy.sh: single binary + `current`, nullsink.service, pre-split Caddyfile, health gate.
+/opt/nullsink/deploy/deploy.sh "$TAG"
+rm -f /usr/local/lib/nullsink/current-proxy /usr/local/lib/nullsink/current-payments   # split leftovers
 ```
 
-The databases need no migration: both halves keep reading `/var/lib/nullsink/{balances,pending}.db`, and
-`migrate-revenue.ts` *copies* the sales book rather than moving it, so the old `balances.db` `revenue` table
-is still there. It is **stale**, though — sales booked after the cutover live only in `pending.db`, so
-`nsk financials` on the old binary undercounts until you roll forward. Balances themselves are unaffected.
+Keep a local copy before cutting over, so recovery survives GitHub being unreachable:
+
+```sh
+cp -a /opt/nullsink/deploy /root/deploy.pre-split
+cp /etc/caddy/Caddyfile /root/Caddyfile.pre-split
+```
+
+The databases need no migration in either direction: both halves read `/var/lib/nullsink/{balances,pending}.db`,
+and the split changes no schema. Below `v1.7.0` the sales book is the exception — `migrate-revenue.ts` *copies*
+rather than moves, so `balances.db`'s `revenue` table survives but goes stale, and `nsk financials` on such a
+binary undercounts every sale booked after that cutover. Balances themselves are unaffected.
