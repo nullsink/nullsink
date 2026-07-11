@@ -19,6 +19,8 @@ export const OWN_API_ERROR_CODES = [
   "rate_unavailable",
   "wallet_unavailable",
   "invalid_token",
+  "proxy_error",
+  "payments_error",
 ] as const;
 export type OwnApiErrorCode = (typeof OWN_API_ERROR_CODES)[number];
 

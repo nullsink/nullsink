@@ -10,6 +10,7 @@
 // test/world-isolation.test.ts at the module level and by scripts/assert-worlds.ts on the compiled binary.
 import { openDb, DB_PATH } from "./ledger/db";
 import { createProxyHandler } from "./handler";
+import { deny } from "./http";
 import { serveCreditSocket } from "./credit-server";
 import { byteBoundHold, makeCountTokensHold, ANTHROPIC_COUNT_OMIT, OPENAI_COUNT_OMIT } from "./hold";
 import { makeTokenBucket } from "./ratelimit";
@@ -144,7 +145,11 @@ const server = Bun.serve({
   maxRequestBodySize: MAX_MESSAGES_BODY_BYTES,
   fetch: handler,
   error() {
-    return new Response(JSON.stringify({ error: "proxy_error" }), { status: 500, headers: { "content-type": "application/json" } });
+    // This is Bun's last-resort handler: request logic normally catches and classifies every expected
+    // failure itself. Keep the journal event content-free (an unexpected Error may include request data),
+    // but never return a 500 with no operator-visible signal.
+    log.error("http", "unhandled proxy request error");
+    return deny(500, "proxy_error");
   },
 });
 
