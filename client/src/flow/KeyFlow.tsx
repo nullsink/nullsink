@@ -55,12 +55,13 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     prevPhase.current = phase;
   }, [phase]);
 
-  // Reconcile the optimistic seed against the server's authoritative set once on mount. Read-only +
-  // privacy-neutral; getRails() falls back to a one-rail default on any failure, so this never blocks the form.
-  // Keep the user's current coin if it survived into the reconciled set (they may have picked one before /rails
-  // resolved); otherwise take the server default. Picker shows only when ≥2 rails.
+  // Reconcile the optimistic seed against the server's authoritative set once on mount. A failed /rails read
+  // intentionally leaves the first-paint picker untouched: no flicker, no silent single-coin downgrade, and
+  // no invented configuration. /buy is authoritative when the visitor requests a quote. Keep their current
+  // coin if it survived a successful reconciliation; otherwise take the server default.
   useEffect(() => {
     getRails().then((r) => {
+      if (!r) return;
       setRails(r.rails);
       setRail((cur) => (r.rails.some((x) => x.name === cur) ? cur : r.default));
     });

@@ -94,16 +94,15 @@ test("getRails passes a valid multi-rail body through", async () => {
   expect(await getRails()).toEqual(rails);
 });
 
-test("getRails falls back on !ok, on a thrown fetch, and on an empty rails[]", async () => {
-  const FALLBACK = { default: "monero", rails: [{ name: "monero", unit: "XMR", confirmations: 10 }] };
+test("getRails reports an unestablished set on !ok, on a thrown fetch, and on an empty rails[]", async () => {
   stubFetch(() => new Response("{}", { status: 502 }));
-  expect(await getRails()).toEqual(FALLBACK);
+  expect(await getRails()).toBeNull();
 
   stubFetch(() => { throw new Error("offline"); });
-  expect(await getRails()).toEqual(FALLBACK);
+  expect(await getRails()).toBeNull();
 
   stubFetch(() => json({ default: "monero", rails: [] }));
-  expect(await getRails()).toEqual(FALLBACK); // empty set → never let the buy form block on /rails
+  expect(await getRails()).toBeNull();
 });
 
 // --- fetchOrderStatus (hash-only; never the raw token) -----------------------
