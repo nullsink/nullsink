@@ -2,10 +2,10 @@
 // (handler.ts billActual) caps the charge at the hold, so even an under-estimate can NEVER overdraft —
 // it just bills the full hold. A sound bound keeps the clamp from biting so the user is billed exactly.
 //
-// Estimator SEAM. The default below is deterministic and provider-agnostic (no extra upstream call); a
-// tighter per-provider path (Anthropic/Bedrock/Vertex `count_tokens`) can drop in as an alternative
-// HoldEstimator closing over the upstream creds in proxy.ts, zero handler changes. Reach for it only if
-// the over-reservation below causes real false-402s.
+// Estimator SEAM with two implementations below: a deterministic byte-bound (provider-agnostic, no extra
+// upstream call) and the count_tokens estimator that wraps it (tighter, one upstream call, falls back to
+// the byte bound on any failure) — the prod default (proxy.ts HOLD_ESTIMATOR ?? "count_tokens"). Any
+// HoldEstimator closing over the upstream creds in proxy.ts drops in with zero handler changes.
 import { priceHoldBound } from "./cost";
 
 export type HoldInput = {

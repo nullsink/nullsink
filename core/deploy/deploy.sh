@@ -13,7 +13,7 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/nullsink}"
 ENV_FILE="${ENV_FILE:-/etc/nullsink.env}"
 WEB_BASE="${WEB_BASE:-/var/www/nullsink}"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web)
-REF="${1:-}"                              # tag/SHA/branch to deploy; empty = fast-forward current branch
+REF="${1:-}"                              # release tag to deploy (vX.Y.Z) — required; the box is binary-only
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"    # seconds to wait for EACH service's /healthz before declaring failure
 
 # install_units() + health_ok() + the PROXY_UNIT/PAYMENTS_UNIT names live here — the shared "apply repo

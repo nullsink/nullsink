@@ -14,7 +14,7 @@
 #     The two processes separate privilege: a request that carries a prompt never reaches the process that
 #     holds the payment→token link, and vice versa. Route each path to exactly one upstream — there is no
 #     shared router behind these ports, so a misrouted path is a hard 404, not a silent cross-world call.
-#   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions (OpenAI, when enabled)
+#   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions + POST /v1/responses + GET /v1/models
 #     + GET /v1/models + GET /balance + POST /buy + POST /order-status + GET /rails.
 #   - /buy IS routed: a browser-side UI can only call a reachable endpoint, and we run no server-side BFF,
 #     so /buy is publicly reachable. That's fine: /buy hands out a payment address, not free value, and is
@@ -53,7 +53,7 @@
 		Content-Security-Policy "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
 		X-Frame-Options "DENY"
 		# The page uses no powerful browser APIs, so deny them all (defence in depth). payment=() forbids
-		# the browser Payment Request API — irrelevant here since funding is XMR, but explicit is better.
+		# the browser Payment Request API — irrelevant here since funding is on-chain XMR/BTC, but explicit is better.
 		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
 		-Server
 	}

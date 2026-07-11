@@ -10,7 +10,8 @@ See the [root README](../README.md) for monorepo setup, dev commands, and deploy
 
 ```
 src/
-  index.ts        composition root — boot, settlement poller, shutdown
+  proxy.ts        prompt-world composition root — boot, metered /v1, balance ledger, shutdown
+  payments.ts     payment-world composition root — /buy, rails, settlement poller
   handler.ts      request-handler factory (injected deps; the metered path)
   hold.ts         pre-flight hold sizing (count_tokens / byte bound)
   providers/      anthropic.ts, openai.ts — upstream forwarding + usage
@@ -23,7 +24,7 @@ src/
 
 cli/      the nsk operator CLI + dev tools
 deploy/   systemd units, Caddyfile, deploy.sh / setup.sh
-scripts/  e2e capture/hold, lint, migration rehearsal
+scripts/  e2e capture/hold, lint, world-isolation assert
 test/     bun test (mostly fast-check property tests)
 ```
 

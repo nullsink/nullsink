@@ -145,7 +145,7 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
 export type ProxyHandlerDeps = {
   // Provider configs — each present iff its key is set (proxy.ts). At least one is required: selectProviders
   // throws on an all-absent set and the root fails fast at boot. Absent → that provider's endpoints 404, so
-  // the proxy runs either-or (Anthropic-only, OpenAI-only, or both).
+  // the proxy runs any subset of the configured providers.
   anthropic?: {
     apiKey: string;
     baseUrl: string;
@@ -214,7 +214,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
   const defaultMaxOutput = d.defaultMaxOutputTokens ?? 0; // 0 = require an explicit output cap (strict)
 
   // Active upstream providers, resolved into an exact-path → Provider[] registry (providers/index.ts). Each is
-  // registered iff its config was given (d.anthropic / d.openai), so a disabled provider's endpoints 404;
+  // registered iff its config was given (d.anthropic / d.openai / d.tinfoil), so a disabled provider's endpoints 404;
   // selectProviders requires at least one. Passed straight through — each provider closes over its own creds.
   const PROVIDERS = selectProviders({ anthropic: d.anthropic, openai: d.openai, tinfoil: d.tinfoil });
   // Every active provider, flattened across paths — the source of both the provider-id set and the served-

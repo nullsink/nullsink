@@ -1,5 +1,6 @@
-// XMR/USD price for quoting /buy. Balances are USD micro-dollars, so /buy converts "$X of credit" into an
-// XMR amount at order time. Cached briefly; sources pluggable via RATE_URL. This fetch goes over clearnet:
+// Coin/USD prices for quoting /buy (xmrUsd + btcUsd). Balances are USD micro-dollars, so /buy converts
+// "$X of credit" into a coin amount at order time. Cached briefly; venues live in RATE_SOURCES (URLs
+// overridable per source via env). This fetch goes over clearnet:
 // a public price lookup reveals nothing new beyond that the service is running.
 import { numEnv } from "../env";
 

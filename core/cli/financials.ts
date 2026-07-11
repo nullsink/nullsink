@@ -1,6 +1,7 @@
 // Compile the books for accounting / legal: a SALES JOURNAL (every credited payment, valued in USD at
-// receipt) plus the current OUTSTANDING-CREDIT liability. Reads only the local ledger (balances.db) — no
-// identity, no per-customer data, no wallet RPC, writes nothing. Run on the box as the service user (DB
+// receipt) plus the current OUTSTANDING-CREDIT liability. Reads only the two local ledgers (the sales journal
+// in pending.db, the liability in balances.db) — no identity, no per-customer data, no wallet RPC,
+// writes nothing. Run on the box as the service user (DB
 // ownership), like the other CLIs:
 //
 //   nsk financials [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--format table|csv|json]

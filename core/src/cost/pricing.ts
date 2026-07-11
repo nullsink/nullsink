@@ -1,5 +1,5 @@
-// Per-model upstream pricing. The proxy bills exactly what Anthropic charges us; margin is applied
-// separately at issuance time, never here.
+// Per-model upstream pricing. The proxy bills exactly what the upstream provider charges us; the margin
+// is applied where credit is bought (/buy quotes credit × MARGIN), never here.
 //
 // Rates come from prices.json, generated from models.dev (USD per million tokens). Refresh with `bun run
 // cli/sync-prices.ts` and commit the diff — do NOT hand-edit (a hand-maintained table silently drifts).
@@ -81,7 +81,7 @@ const RATES: [id: string, m: PricedModel][] = RAW_PRICES
   ])
   .sort((a, b) => b[0].length - a[0].length);
 
-// Fields we read out of an Anthropic `usage` object. output_tokens is the only one guaranteed present;
+// Fields we read out of a provider `usage` object (the canonical cross-provider shape — see usage/). output_tokens is the only one guaranteed present;
 // the rest default to 0.
 export type Usage = {
   input_tokens?: number;

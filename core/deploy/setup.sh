@@ -167,7 +167,7 @@ PAYMENTS_PORT=8081
 # the committed Caddyfile hardcodes no host. EMPTY = setup.sh skips the public edge (the app still runs on
 # 127.0.0.1); re-run after setting it. Keep bare (no inline # comment).
 NULLSINK_DOMAIN=
-# Buy rail (POST /buy) — optional, and NOT to be exposed publicly yet (see README). PAY_RAILS is a comma list
+# Buy rail (POST /buy) — optional; the edge routes /buy publicly when a rail is active. PAY_RAILS is a comma list
 # of active rails (default monero; legacy PAY_RAIL=<one name> still works); the FIRST is the /buy default, and
 # each rail reads its own MONERO_CONFIRMATIONS / BITCOIN_CONFIRMATIONS. Monero needs a view-only
 # monero-wallet-rpc + node; Bitcoin needs a pruned watch-only bitcoind — add "bitcoin" only once its

@@ -169,7 +169,7 @@ bun run dev        # run the client (vite); core watchers are per-process: cd co
 bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
 bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
-bun run build      # core single-binary + client static bundle
+bun run build      # core service binaries (proxy + payments) + client static bundle
 bun run build:nsk  # the nsk operator-CLI binary
 ```
 

@@ -13,7 +13,7 @@ Dependencies install once at the repo root (`bun install`); run these from `clie
 
 | Script | What it does |
 | --- | --- |
-| `bun run dev` | dev server; proxies `/buy`, `/order-status`, `/balance`, `/v1` to a local core on `127.0.0.1:8080` |
+| `bun run dev` | dev server; proxies `/buy` + `/order-status` + `/rails` to a local `dev:payments` (`:8081`) and `/balance` + `/v1` to a local `dev:proxy` (`:8080`) |
 | `bun run dev:mock` | dev server with no backend — serves an in-process mock (`dev-mock.ts`) |
 | `bun run build` | typecheck, bundle, then prerender to `dist/` |
 | `bun run preview` | serve the built `dist/` |
