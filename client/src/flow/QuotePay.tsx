@@ -230,6 +230,10 @@ export function QuotePay({
             <Copy value={quote.pay_to} />
           </div>
           <div className="pay-meta"><RateSource unit={quote.unit} /></div>
+          {/* Pay-once: the order closes on its FIRST confirmed payment, so a second send to this address
+              cannot be credited. The privacy page says "single-use address"; the payer deciding how to
+              send is looking HERE, so the constraint has to be on this screen. */}
+          <div className="pay-meta">send the exact amount in one payment — this address is single-use.</div>
         </div>
       </div>
 
