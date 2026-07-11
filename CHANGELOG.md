@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.2](https://github.com/nullsink/nullsink/compare/v1.8.1...v1.8.2) (2026-07-11)
+
+
+### Bug Fixes
+
+* **deploy:** status-check fails loud when PAY_RAILS is unset; deploy.sh survives a box without nsk ([311e428](https://github.com/nullsink/nullsink/commit/311e428811c85f2ae967b26675192d6f748c436c))
+* **order-status:** scope a status lookup to the order the client is tracking ([#78](https://github.com/nullsink/nullsink/issues/78)) ([ed17254](https://github.com/nullsink/nullsink/commit/ed172547a253881b2e0e41e3fd53a6093ab4aa5b))
+* **payments:** say the proxy is unreachable instead of relaying Bun's typo hint ([311e428](https://github.com/nullsink/nullsink/commit/311e428811c85f2ae967b26675192d6f748c436c))
+
 ## [1.8.1](https://github.com/nullsink/nullsink/compare/v1.8.0...v1.8.1) (2026-07-10)
 
 
