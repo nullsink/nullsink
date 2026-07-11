@@ -1,4 +1,4 @@
-// Revenue book (cli/financials.ts data source), now PAYMENT-world state in pending.db (D5). settle() books a
+// Revenue book (cli/financials.ts data source), PAYMENT-world state in pending.db. settle() books a
 // sale in the SAME transaction as the outbox enqueue: booked iff a credit is requested, a re-scan double-counts
 // neither, gross (USD paid) is valued at the order's LOCKED rate so it never drifts when MARGIN changes, and
 // each row carries its coin (asset + scale) so a multi-rail book renders every coin exactly. The balance credit
@@ -7,7 +7,7 @@ import { test, expect } from "bun:test";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { settle } from "../src/ledger/settle";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import type { Incoming } from "../src/rails/types";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
@@ -79,5 +79,5 @@ test("the manual-issuance path (creditOnce) credits but books no sale — revenu
   const hash = "c".repeat(64);
   expect(balances.creditOnce(hash, 1_000_000, "manual:1", 1)).toBe(true);
   expect(balances.getBalance(hash)).toBe(1_000_000);
-  // creditOnce no longer touches any sales book — the balance ledger holds no revenue table (D5).
+  // creditOnce no longer touches any sales book — the balance ledger holds no revenue table.
 });

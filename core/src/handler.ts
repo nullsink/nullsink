@@ -4,9 +4,9 @@
 // usage, hashing) are imported directly.
 //
 // This module must NOT import anything payment-world (rails, the order store, /buy). The proxy binary is the
-// unit stage 4 attests, so it must never bundle payments code — that's a structural guarantee, not a
-// tree-shaking hope. The combined both-worlds router lives in handler-combined.ts, which only the tests
-// import; neither composition root does.
+// unit the sealed tier attests, so it must never bundle payments code — that's a structural guarantee, not a
+// tree-shaking hope. The combined both-worlds router lives in test/support/handler-combined.ts, which only
+// the tests import; neither composition root does.
 import { hashToken } from "./ledger/hash";
 import { priceUsage, isReasoningModel, pricedModels } from "./cost";
 import { BUILD_VERSION } from "./version";
@@ -193,9 +193,9 @@ export type ProxyHandlerDeps = {
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
 
-// Prompt-world route dispatch. Returns undefined when the path isn't ours, so the combined router
-// (handler-combined.ts) can fall through to the payment-world routes. createProxyHandler wraps this with
-// /healthz + the fail-closed 404.
+// Prompt-world route dispatch. Returns undefined when the path isn't ours, so the combined test router
+// (test/support/handler-combined.ts) can fall through to the payment-world routes. createProxyHandler wraps
+// this with /healthz + the fail-closed 404.
 export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
   const {
     upstreamTimeoutMs: UPSTREAM_TIMEOUT_MS,

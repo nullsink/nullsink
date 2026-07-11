@@ -3,7 +3,7 @@
 // masked 503, NOT the raw provider body. Plus the masked-error log scrub drops the upstream request_id.
 // The bodies below are captured VERBATIM from the live providers (real keys, 2026-06-22).
 import { test, expect, spyOn } from "bun:test";
-import { isModelNotFound, maskedErrorDetail, createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
+import { isModelNotFound, maskedErrorDetail, createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";

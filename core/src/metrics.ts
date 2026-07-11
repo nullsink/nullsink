@@ -166,8 +166,8 @@ export function snapshot(): MetricsSnapshot {
 }
 
 // Format a snapshot into the single [metrics] journald line + its level, or null when nothing happened (so
-// the flush never spams). PURE — extracted from the pre-split root's flushMetrics so the WARN-vs-INFO precedence is
-// unit-testable without a logger or timers. Problem signals (money anomalies + upstream errors + local
+// the flush never spams). PURE — kept free of the logger and timers so the WARN-vs-INFO precedence is
+// unit-testable. Problem signals (money anomalies + upstream errors + local
 // rejects) are notable → WARN, so `journalctl -p warning` stays problem-only; the served/req heartbeat +
 // peaks (and relayed user 4xx — a client error, not ours) are routine → INFO, and ride along on the WARN
 // line for context when a problem IS present. bill.* sorts first — it's the money-safety signal. `nowMs`

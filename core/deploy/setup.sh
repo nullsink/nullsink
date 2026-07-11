@@ -16,7 +16,7 @@ WEB_BASE="/var/www/nullsink"   # base for the versioned client UI ($WEB_BASE/web
 
 # Shared "apply repo config" library (install_units + health_ok + the PROXY_UNIT/PAYMENTS_UNIT names), also
 # sourced by deploy.sh so the unit-install glob is one source of truth across bootstrap + redeploy. The app
-# is TWO units since the stage-2 split; both run as $SVC_USER. Needs APP_DIR/ENV_FILE (set above).
+# is TWO units; both run as $SVC_USER. Needs APP_DIR/ENV_FILE (set above).
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -231,10 +231,7 @@ step "Installing systemd units"
 # One glob-based install of every deploy/*.service + *.timer (via lib.sh's install_units, shared with
 # deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
 # per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
-# retire_legacy_unit then stops + removes the pre-split nullsink.service on a box being upgraded across the
-# split (a no-op on a fresh one); it must run before nullsink-proxy tries to bind :8080.
 install_units
-retire_legacy_unit
 
 step "Installing the app binaries (pinned release)"
 # Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in

@@ -79,20 +79,19 @@ export function settle(
   // window still has time for a first sighting (which spares the order). Orders ever seen are spared until
   // they reach finality and close (pay-once) or hit the backstop.
   //
-  // "Ever seen" lives ONLY on disk, in seen_at. It used to also live in a process-local Set the poller threaded
-  // through here, but that Set is rebuilt empty on every process start — and the poller's first tick fires
-  // immediately, exactly when the local wallet/node is most likely still resyncing. A resyncing wallet reports
-  // an empty inbound list as a SUCCESS, not an error (rails/monero.ts), so that first tick is indistinguishable
-  // from "nobody paid" and would fast-reap an order the customer had already paid for. A durable column is the
-  // whole fix; the in-memory Set was redundant with it (every path that added to the Set also wrote seen_at on
-  // the same open row), so it is gone rather than kept as a second source of truth.
+  // "Ever seen" lives ONLY on disk, in seen_at — never in process memory. Anything in-memory is rebuilt empty
+  // on every process start, and the poller's first tick fires immediately, exactly when the local wallet/node
+  // is most likely still resyncing. A resyncing wallet reports an empty inbound list as a SUCCESS, not an
+  // error (rails/monero.ts), so that first tick is indistinguishable from "nobody paid" and would fast-reap an
+  // order the customer had already paid for. The durable column is the whole fix; keep it the single source of
+  // truth.
   // openOrders is re-read here, so it sees the seen_at this very tick just wrote.
   if (cfg.unfundedReapMs != null) {
     const cutoff = now - cfg.unfundedReapMs;
     for (const o of orders.openOrders(rail))
       if (o.seen_at == null && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
   }
-  // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is NOT purged
-  // in stage 2 (D4): purging on the payments-side clock could drop a marker while an outbox retry is still in
+  // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is never
+  // purged: purging on the payments-side clock could drop a marker while an outbox retry is still in
   // flight → double-credit. It is ~50 bytes/sale; a payments→proxy safe-point watermark can prune it later.
 }

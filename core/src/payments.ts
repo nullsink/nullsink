@@ -59,9 +59,9 @@ const BUY_RATE_CAPACITY = numEnv("BUY_RATE_CAPACITY", 20, 1, 1_000_000);
 const BUY_RATE_REFILL_PER_MIN = numEnv("BUY_RATE_REFILL_PER_MIN", 60, 1, 60_000_000);
 const buyRateLimit = makeTokenBucket({ capacity: BUY_RATE_CAPACITY, refillPerSec: BUY_RATE_REFILL_PER_MIN / 60 });
 
-// Global, identity-free throttle for THIS world's free reads (/order-status, /rails). Sized at HALF the
-// pre-split single bucket: the proxy now runs its own bucket for /balance + /v1/models, so leaving both at the
-// old value would silently double the aggregate free-read capacity the cap exists to bound.
+// Global, identity-free throttle for THIS world's free reads (/order-status, /rails). The proxy runs its
+// own bucket for /balance + /v1/models and reads the SAME env names, so each default is sized at half the
+// intended aggregate — raising the shared env raises BOTH worlds' caps at once.
 const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });
@@ -165,7 +165,9 @@ async function pollOnce(): Promise<void> {
   const { delivered, blocked } = await drainCreditOutboxOverSocket(orders, sendCredit, now);
   if (delivered > 0) log.info("credit", `delivered ${delivered} credit(s) over the socket`);
   // Ambiguous delivery (proxy restarting, socket not yet bound, timeout): the rows stay durable and we retry.
-  if (blocked) log.warn("credit", `credit delivery stopped at the oldest unacked row: ${blocked} — retrying next tick`);
+  // Say what it MEANS ourselves — the raw reason can be Bun's generic "Was there a typo in the url or port?",
+  // which reads like a config error when it is just the proxy being down.
+  if (blocked) log.warn("credit", `proxy unreachable or not acking over the credit socket — credits stay queued, retrying next tick (${blocked})`);
   // The "is money still crossing?" alarm. Greppable marker for deploy/status-check.sh.
   const age = oldestUnackedAgeMs(orders, now);
   if (age > OUTBOX_AGE_ALERT_MS)

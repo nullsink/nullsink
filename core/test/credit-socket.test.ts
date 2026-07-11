@@ -1,4 +1,4 @@
-// The credit crossing over a unix socket (stage-2 PR-C). Exactly-once must survive the hop: the outbox is
+// The credit crossing over a unix socket. Exactly-once must survive the hop: the outbox is
 // at-least-once delivery, creditOnce's applied_orders marker is the idempotent receiver, and the sender acks ONLY
 // on a definite applied/already_applied. Anything else — timeout, non-2xx, an unrecognised 2xx body, no socket —
 // is AMBIGUOUS (the proxy may have committed and lost the response), so the row stays unacked and is retried.

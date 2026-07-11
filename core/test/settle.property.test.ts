@@ -10,7 +10,7 @@ import { unlinkSync } from "node:fs";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { settle, type SettleConfig } from "../src/ledger/settle";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import type { Incoming } from "../src/rails/types";
 import type { PendingOrder } from "../src/ledger/orders";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
@@ -393,8 +393,8 @@ test("one tx paying two of our addresses credits both orders correctly", () => {
 });
 
 // The backstop horizon: stale unpaid orders are reaped, and a re-scan after an order has closed can't open a
-// double-credit window (the order is gone, so settle enqueues nothing; applied_orders is not purged in stage 2,
-// D4). The exact window length is immaterial here — the test only needs a finite, positive backstop (settle's
+// double-credit window (the order is gone, so settle enqueues nothing; applied_orders is never purged).
+// The exact window length is immaterial here — the test only needs a finite, positive backstop (settle's
 // default CFG neutralizes it with backstopMs=NOW ⇒ cutoff 0). Use the prod ORDER_BACKSTOP_MS default (24h).
 test("backstop reaps stale orders and re-scan after purge never double-credits", () => {
   const BACKSTOP = 24 * 60 * 60 * 1000;

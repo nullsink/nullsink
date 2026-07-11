@@ -60,26 +60,14 @@ install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop cal
   echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
 }
 
-# The two app units (stage-2 split: one prompt-world process, one payment-world process). Every caller that
-# means "the app" now means both, in this order — the proxy binds the credit socket the payments service
-# connects to, so it goes up first and comes down last.
+# The two app units: one prompt-world process, one payment-world process. Every caller that means "the app"
+# means both, in this order — the proxy binds the credit socket the payments service connects to, so it goes
+# up first and comes down last.
 PROXY_UNIT="nullsink-proxy"
 PAYMENTS_UNIT="nullsink-payments"
 
 install_units() {  # refresh ALL units + timers from the repo so on-box config can't drift, then reload
   cp "$APP_DIR"/deploy/*.service "$APP_DIR"/deploy/*.timer /etc/systemd/system/
-  systemctl daemon-reload
-}
-
-retire_legacy_unit() {  # drop the pre-split nullsink.service; idempotent, a no-op on a fresh box
-  # install_units only ever COPIES the repo's units, so deleting nullsink.service from the repo leaves a
-  # stale (and still-enabled) copy on an existing box — which would fight nullsink-proxy for :8080. Retire it
-  # explicitly, BEFORE the new units start. The old single-binary symlink goes too; its versioned binary is
-  # left on disk, since rolling back across the split boundary needs it (see deploy/README.md).
-  [ -f /etc/systemd/system/nullsink.service ] || return 0
-  echo "    retiring the pre-split nullsink.service (superseded by $PROXY_UNIT + $PAYMENTS_UNIT)"
-  systemctl disable --now nullsink.service 2>/dev/null || true
-  rm -f /etc/systemd/system/nullsink.service /usr/local/lib/nullsink/current
   systemctl daemon-reload
 }
 
@@ -94,9 +82,6 @@ enable_timers() {  # reconcile the box's timers from the repo — shared by setu
   # The always-on timers run on every box (safe with their creds unset — they just log / no-op). Run after
   # install_units (the unit files must exist).
   systemctl enable --now status-check.timer backup.timer
-  # The XMR liveness watchdog was removed in v1.3.1 (it could livelock a slow-starting wallet over Tor);
-  # disable the orphaned timer on any box still carrying it from a v1.3.0 deploy.
-  systemctl disable --now monero-wallet-rpc-watchdog.timer 2>/dev/null || true
 }
 
 install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app binaries for a release tag

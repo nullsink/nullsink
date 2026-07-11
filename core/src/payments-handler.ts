@@ -4,7 +4,7 @@
 //
 // This module must NOT import anything prompt-world (the balance store, providers, the metered path). The
 // mirror of handler.ts's rule: each binary bundles only its own world. The combined both-worlds router lives
-// in handler-combined.ts, which neither composition root imports.
+// in test/support/handler-combined.ts, which neither composition root imports.
 import { makePaymentsEndpoints } from "./endpoints/payments";
 import { deny } from "./http";
 import { BUILD_VERSION } from "./version";
@@ -14,7 +14,7 @@ import type { OrderProgress } from "./ledger/orderstatus";
 import type { TokenBucket } from "./ratelimit";
 
 // RailView lives in rails/types.ts (shared without a cycle); re-exported here as the payment world's public
-// handler type, the way handler.ts used to re-export it for the monolith.
+// handler type.
 export type { RailView } from "./rails/types";
 
 export type PaymentsHandlerDeps = {

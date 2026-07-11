@@ -9,8 +9,8 @@ import type { OrderProgress } from "../ledger/orderstatus";
 import type { TokenBucket } from "../ratelimit";
 import type { ModelListing } from "../cost";
 
-// Deps for the PROMPT-world endpoints (GET /balance, GET /v1/models) — built by the proxy composition root
-// (stage-2 split). Reads only the balance store + the served-model catalog; never the rails or order store.
+// Deps for the PROMPT-world endpoints (GET /balance, GET /v1/models) — built by the proxy composition root.
+// Reads only the balance store + the served-model catalog; never the rails or order store.
 export type ProxyEndpointDeps = {
   servedModels: ModelListing[]; // GET /v1/models: the priced models an active provider owns (computed once at boot)
   getBalance: BalanceStore["getBalance"]; // /balance
@@ -37,8 +37,8 @@ export type PaymentsEndpointDeps = {
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined; // live payment progress
 };
 
-// The combined bag: createHandler wires BOTH worlds (tests + the pre-split monolith). The two composition roots
-// each pass only their world's half (ProxyEndpointDeps / PaymentsEndpointDeps).
+// The combined bag: the test router (test/support/handler-combined.ts) wires BOTH worlds. The two
+// composition roots each pass only their world's half (ProxyEndpointDeps / PaymentsEndpointDeps).
 export type EndpointDeps = ProxyEndpointDeps & PaymentsEndpointDeps;
 
 // Render an atomic coin amount at its scale (a power of ten → decimals = digits of the scale minus 1).

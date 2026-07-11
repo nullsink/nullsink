@@ -1,4 +1,4 @@
-// `nsk financials` became a TWO-DB command with the D5 revenue move: the sales journal comes from pending.db
+// `nsk financials` is a TWO-DB command: the sales journal comes from pending.db
 // (listRevenue) and the outstanding-credit liability from balances.db (liabilityTotal). Drive the REAL CLI in a
 // subprocess (same pattern as guard.test.ts) so a DB swap — reading `revenue` from balances.db, where the table
 // no longer exists — would surface as a "no such table" crash here rather than silently in prod.

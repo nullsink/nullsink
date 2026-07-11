@@ -8,10 +8,6 @@
 # Only the app services are restarted; the rail daemons' unit files are refreshed (drift closure) but left
 # running — a redeploy WARNS when an enabled daemon's unit changed so you can restart it on your schedule.
 # Timers are reconciled too (status-check, backup).
-#
-# Crossing the stage-2 split: the FIRST post-split deploy retires nullsink.service and brings up
-# nullsink-proxy + nullsink-payments. Rolling back to a PRE-split tag is not a symlink flip — see
-# "Rolling back across the split" in deploy/README.md.
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
@@ -40,10 +36,8 @@ sync_caddy() {  # refresh the Caddy edge config from the repo; validate first, r
     echo "!! /etc/caddy/Caddyfile failed validation after refresh — left in place but NOT reloaded; fix it" >&2
   fi
 }
-# Everything the box derives from the repo (units + timers + edge). retire_legacy_unit runs right after the
-# new units land and BEFORE anything starts: the pre-split nullsink.service still owns :8080, so
-# nullsink-proxy cannot bind until it's stopped.
-apply_repo_config() { install_units; retire_legacy_unit; enable_app_units; enable_timers; sync_caddy; }
+# Everything the box derives from the repo (units + timers + edge).
+apply_repo_config() { install_units; enable_app_units; enable_timers; sync_caddy; }
 record() { printf '%s  %s%s\n' "$1" "$(date -u +%FT%TZ)" "${2:-}" > "$APP_DIR/REVISION"; }
 
 # Rail daemons (bitcoind, monero-wallet-rpc) are deliberately NOT bounced by a redeploy — restarting a node
@@ -72,8 +66,9 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   echo ">>> Deploying $REF  (proxy was ${prev_proxy:-none}, payments was ${prev_pay:-none}, UI was ${prev_web:-none})"
   install_binary "$REF"                  # fetch+verify+activate both current-{proxy,payments} symlinks
   # nsk is an OPTIONAL operator CLI (install on demand: deploy/install-nsk.sh). Only refresh it here when it's
-  # already installed, so it stays in lockstep with the server without being forced onto every box.
-  [ -x /usr/local/bin/nsk ] && install_nsk "$REF"
+  # already installed, so it stays in lockstep with the server without being forced onto every box. Must be an
+  # `if`, not `[ ... ] &&`: on a box without nsk that compound would exit 1 and abort the deploy under set -e.
+  if [ -x /usr/local/bin/nsk ]; then install_nsk "$REF"; fi
   install_deploy_tree "$REF" "$APP_DIR"  # refresh deploy/ (units + scripts + Caddyfile) from the release
   # UI is non-fatal: /healthz tests the BINARIES, which serve fine with a stale UI, so a UI fetch hiccup must not
   # abort (and half-apply) a binary deploy. Activate it; the health gate below still judges the binaries.
@@ -86,7 +81,7 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   new_proxy="$(readlink /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"
   new_pay="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
   warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
-  apply_repo_config                      # refresh units + retire the pre-split unit + timers + edge from the now-current deploy/
+  apply_repo_config                      # refresh units + timers + edge from the now-current deploy/
   restart_app                            # proxy, then payments
 
   if health_ok_app; then
@@ -105,9 +100,9 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
     if [ -n "$prev_web" ]; then
       ln -sfn "$prev_web" "$WEB_BASE/current-web"   # roll the UI back in lockstep with the binaries
     else
-      # Only reachable if the FIRST versioned-UI install happened via deploy.sh (not setup.sh) — the cutover is
-      # documented to go through setup.sh, which avoids this. Be honest rather than claim a lockstep we can't do.
-      echo "!! no prior versioned UI to roll back to (first/cutover deploy) — UI stays at ${new_web}; verify it against the rolled-back binaries, or re-point $WEB_BASE/current-web by hand" >&2
+      # Only reachable if the FIRST versioned-UI install happened via deploy.sh — bootstrap goes through
+      # setup.sh, which avoids this. Be honest rather than claim a lockstep we can't do.
+      echo "!! no prior versioned UI to roll back to (first deploy) — UI stays at ${new_web}; verify it against the rolled-back binaries, or re-point $WEB_BASE/current-web by hand" >&2
     fi
     restart_app
     if health_ok_app; then
@@ -118,11 +113,10 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
       echo "!! ROLLBACK ALSO UNHEALTHY — manual intervention: journalctl -u $PROXY_UNIT -u $PAYMENTS_UNIT" >&2
     fi
   else
-    # No previous SPLIT binaries: this was the cutover deploy from a pre-split tag, whose single binary the
-    # new units cannot run. There is nothing to flip back to — say so plainly instead of half-restoring.
-    record "$REF" "  (ROLLBACK IMPOSSIBLE — no previous split binaries)"
-    echo "!! no previous split binaries to roll back to (cutover from a pre-split tag) — this needs the manual
-!! path in deploy/README.md 'Rolling back across the split'. Diagnose first: journalctl -u $PROXY_UNIT -u $PAYMENTS_UNIT" >&2
+    # No previous binaries on this box: there is nothing to flip back to — say so plainly instead of
+    # half-restoring.
+    record "$REF" "  (ROLLBACK IMPOSSIBLE — no previous binaries)"
+    echo "!! no previous binaries to roll back to — diagnose: journalctl -u $PROXY_UNIT -u $PAYMENTS_UNIT" >&2
   fi
   exit 1
 }

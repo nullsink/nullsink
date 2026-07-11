@@ -5,7 +5,7 @@
 // forceReasoning (a disconnect bills the output cap for a model that isn't a REASONING_MARKER). The shared
 // hold/refund skeleton is covered in billing.property.test.ts.
 import { test, expect } from "bun:test";
-import { createHandler, type HandlerDeps, type RailView } from "../src/handler-combined";
+import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";

@@ -17,7 +17,6 @@ const COMMANDS: Record<string, () => Promise<(args: string[]) => void>> = {
   balances: () => import("./balances").then((m) => m.runBalances),
   financials: () => import("./financials").then((m) => m.runFinancials),
   orders: () => import("./orders").then((m) => m.runOrders),
-  "migrate-revenue": () => import("./migrate-revenue").then((m) => m.runMigrateRevenue),
 };
 
 const USAGE =
@@ -29,8 +28,6 @@ const USAGE =
   "  balances [--format table|csv|json]                               every token's hash + balance\n" +
   "  financials [--since ..] [--until ..] [--format table|csv|json]   sales journal + liability\n" +
   "  orders [--rail monero|bitcoin] [--format table|csv|json]         in-flight (unpaid) payment orders\n" +
-  "  migrate-revenue [--apply]   one-time cutover: move the sales book into pending.db\n" +
-  "                              (safe dry-run by default; stop the app first)\n" +
   "  version                     print the build version";
 
 const cmd = process.argv[2];

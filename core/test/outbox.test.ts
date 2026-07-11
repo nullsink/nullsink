@@ -1,11 +1,11 @@
-// credit_outbox + payment-world revenue accessors on the orders store (stage-2 D3/D5). These are the
+// credit_outbox + payment-world revenue accessors on the orders store. These are the
 // durable-crossing primitives the settle() rewrite builds on: enqueue is at-most-once per idempotency_key
 // (INSERT OR IGNORE, never throws), the sender drains unacked rows oldest-first and acks them, and revenue
 // now books here in pending.db instead of balances.db.
 import { test, expect } from "bun:test";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
-import { drainCreditOutbox } from "../src/ledger/drain";
+import { drainCreditOutbox } from "./support/drain";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
 const HASH = "a".repeat(64);
@@ -79,8 +79,8 @@ test("crash before ack: re-delivery credits exactly once (applied_orders dedupes
   expect(store.listUnackedCredits()).toEqual([]); // outbox drained clean
 });
 
-// F3 defense at the row level: commitSettlement books revenue ONLY when the outbox enqueue is fresh. If the key
-// already exists (e.g. a pre-cutover zombie deposit re-processed), the INSERT OR IGNORE is a no-op → no second
+// Double-booking defense at the row level: commitSettlement books revenue ONLY when the outbox enqueue is fresh. If the key
+// already exists (e.g. a zombie deposit re-processed after the ledger already credited it), the INSERT OR IGNORE is a no-op → no second
 // sale is booked and the original credit amount is preserved — while the order still closes.
 test("commitSettlement books no second sale when the outbox key already exists (INSERT OR IGNORE + fresh guard)", () => {
   const store = openOrderStore(":memory:");

@@ -45,9 +45,9 @@ const MAX_MESSAGES_BODY_BYTES = numEnv("MAX_MESSAGES_BODY_BYTES", 33_554_432, 10
 // that omit a cap still work. The hold is sized against it. 0 = strict (require an explicit cap).
 const DEFAULT_MAX_OUTPUT_TOKENS = numEnv("DEFAULT_MAX_OUTPUT_TOKENS", 0, 0, 1_000_000);
 
-// Global, identity-free throttle for THIS world's free reads (/balance, /v1/models). Sized at HALF the
-// pre-split single bucket: the payments service now runs its own bucket for /order-status + /rails, so leaving
-// both at the old value would silently double the aggregate free-read capacity the cap exists to bound.
+// Global, identity-free throttle for THIS world's free reads (/balance, /v1/models). The payments service
+// runs its own bucket for /order-status + /rails and reads the SAME env names, so each default is sized at
+// half the intended aggregate — raising the shared env raises BOTH worlds' caps at once.
 const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });

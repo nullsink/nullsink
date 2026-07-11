@@ -1,10 +1,10 @@
 // Payments side of the credit crossing: drain the durable outbox into the proxy over the unix socket.
 // PAYMENT-world module — imports the order store, never the balance store, providers, or the metered path.
 //
-// Why this lives beside ledger/drain.ts rather than replacing it: delivery over a socket is ASYNC and can be
-// AMBIGUOUS (a timeout may or may not have credited), whereas the in-process delivery in drain.ts is synchronous
-// and always definite. They are genuinely different loops, not duplication — drain.ts is the pre-split monolith's
-// path (and what the settle property tests drive); this is the split path.
+// A test-only in-process drain exists too (test/support/drain.ts, driven by the settle property tests). It is
+// NOT a duplicate of this loop: delivery over a socket is ASYNC and can be AMBIGUOUS (a timeout may or may not
+// have credited), whereas the in-process delivery there is synchronous and always definite. This is the only
+// production path.
 import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION, type CreditRequest, type DeliveryResult } from "./credit-wire";
 import * as log from "./log";
 import type { OrdersStore } from "./ledger/orders";

@@ -1,5 +1,5 @@
-// Stage-4 attestability check (PR-C audit finding D2). test/world-isolation.test.ts proves the IMPORT GRAPH is
-// clean; this proves the BUNDLER agreed — the compiled proxy binary, which is the unit we attest, must carry no
+// Compiled-binary attestability check. test/world-isolation.test.ts proves the IMPORT GRAPH is clean; this
+// proves the BUNDLER agreed — the compiled proxy binary, which is the unit we attest, must carry no
 // payment-world code. Runs as part of `bun run build`, so CI enforces it on every PR.
 //
 // Markers are SQL fragments / identifiers that exist in exactly one world. A positive control asserts each marker
