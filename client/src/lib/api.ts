@@ -86,6 +86,39 @@ export interface BuyError {
   status: number;
 }
 
+// Failure shape for the browser's own non-metered reads. This is intentionally small: callers need to
+// distinguish "try later", "check your connection", and "the service answered but is unavailable" — not
+// duplicate server prose or infer token validity from a transport failure.
+export type ReadFailure = {
+  kind: "network" | "rate_limited" | "server";
+  status: number;
+  retryAfterSec?: number;
+};
+
+function retryAfterSec(res: Response): number | undefined {
+  const value = Number(res.headers.get("retry-after"));
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function readFailure(res: Response): ReadFailure {
+  return {
+    kind: res.status === 429 ? "rate_limited" : "server",
+    status: res.status,
+    retryAfterSec: retryAfterSec(res),
+  };
+}
+
+export function balanceErrorMessage(error: ReadFailure): string {
+  switch (error.kind) {
+    case "rate_limited":
+      return "Balance checks are busy right now. Try again in a moment.";
+    case "network":
+      return "Couldn't reach nullsink. Check your connection and try again.";
+    case "server":
+      return "The balance service is temporarily unavailable. Try again shortly.";
+  }
+}
+
 // Map a /buy error code to calm, user-facing copy.
 export function buyErrorMessage(code: string): string {
   switch (code) {
@@ -185,9 +218,14 @@ export async function requestQuote(hash: string, creditUsd: number, rail?: strin
 // We hold no list of tokens, so a 401 is genuinely ambiguous: wrong token, or right
 // token whose deposit hasn't confirmed yet.
 export async function checkBalance(rawToken: string): Promise<number | null> {
-  const res = await fetch("/balance", { headers: { "x-api-key": rawToken } });
+  let res: Response;
+  try {
+    res = await fetch("/balance", { headers: { "x-api-key": rawToken } });
+  } catch {
+    throw { kind: "network", status: 0 } as ReadFailure;
+  }
   if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`balance_${res.status}`);
+  if (!res.ok) throw readFailure(res);
   const body = (await res.json()) as { balance_usd: number };
   return body.balance_usd;
 }
@@ -215,11 +253,16 @@ export interface OrderStatus {
 // THIS order — a hash can have several open at once, and the newest empty one must not shadow a paid older
 // one. Omitted callers (an older cached bundle) still get the server's seen-preferring fallback.
 export async function fetchOrderStatus(hash: string, address?: string): Promise<OrderStatus> {
-  const res = await fetch("/order-status", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(address ? { hash, address } : { hash }),
-  });
-  if (!res.ok) throw new Error(`order_status_${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch("/order-status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(address ? { hash, address } : { hash }),
+    });
+  } catch {
+    throw { kind: "network", status: 0 } as ReadFailure;
+  }
+  if (!res.ok) throw readFailure(res);
   return (await res.json()) as OrderStatus;
 }

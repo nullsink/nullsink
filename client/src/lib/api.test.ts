@@ -2,7 +2,7 @@
 // test (QuotePay.test mocks the whole module away). Each request's body/headers and each status/error branch
 // is exercised against a stubbed global fetch. Privacy-critical: the raw token may appear ONLY in /balance.
 import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { requestQuote, checkBalance, getRails, fetchOrderStatus, buyErrorMessage, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
+import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
 
 type Call = { url: string; init?: RequestInit };
 let calls: Call[] = [];
@@ -72,9 +72,19 @@ test("checkBalance maps 401 to null (ambiguous unknown/unconfirmed), not an erro
   expect(await checkBalance("pr_x")).toBeNull();
 });
 
-test("checkBalance throws balance_<status> on a non-401 non-OK", async () => {
+test("checkBalance distinguishes rate limit, network, and server failures without treating them as an empty key", async () => {
+  stubFetch(() => new Response("nope", { status: 429, headers: { "retry-after": "7" } }));
+  await expect(checkBalance("pr_x")).rejects.toEqual({ kind: "rate_limited", status: 429, retryAfterSec: 7 });
+
   stubFetch(() => new Response("nope", { status: 500 }));
-  await expect(checkBalance("pr_x")).rejects.toThrow("balance_500");
+  await expect(checkBalance("pr_x")).rejects.toEqual({ kind: "server", status: 500, retryAfterSec: undefined });
+
+  stubFetch(() => { throw new TypeError("offline"); });
+  await expect(checkBalance("pr_x")).rejects.toEqual({ kind: "network", status: 0 });
+
+  expect(balanceErrorMessage({ kind: "rate_limited", status: 429 })).toMatch(/busy/i);
+  expect(balanceErrorMessage({ kind: "network", status: 0 })).toMatch(/connection/i);
+  expect(balanceErrorMessage({ kind: "server", status: 500 })).toMatch(/temporarily unavailable/i);
 });
 
 // --- getRails ---------------------------------------------------------------
@@ -97,7 +107,7 @@ test("getRails falls back on !ok, on a thrown fetch, and on an empty rails[]", a
 });
 
 // --- fetchOrderStatus (hash-only; never the raw token) -----------------------
-test("fetchOrderStatus POSTs the hash and returns parsed status; throws order_status_<status> on non-OK", async () => {
+test("fetchOrderStatus POSTs the hash and returns parsed status; preserves typed transient failures", async () => {
   stubFetch(() => json({ state: "confirming", confirmations: 2, required: 10 }));
   const st = await fetchOrderStatus("HASH");
   expect(st.state).toBe("confirming");
@@ -112,7 +122,7 @@ test("fetchOrderStatus POSTs the hash and returns parsed status; throws order_st
   expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key");
 
   stubFetch(() => new Response("x", { status: 404 }));
-  await expect(fetchOrderStatus("HASH")).rejects.toThrow("order_status_404");
+  await expect(fetchOrderStatus("HASH")).rejects.toEqual({ kind: "server", status: 404, retryAfterSec: undefined });
 });
 
 // --- trocadorSwapUrl (pure URL builder; no fetch) ---------------------------
