@@ -13,13 +13,13 @@
 # Two modes:
 #   sudo deploy/regen-bitcoin-rpcauth.sh
 #       Same-box (bitcoin.conf + /etc/nullsink.env both here): writes both halves, restarts
-#       bitcoind + nullsink, and verifies the app's Basic-auth path end-to-end.
+#       bitcoind + nullsink-payments, and verifies the app's Basic-auth path end-to-end.
 #   sudo PRINT_PASSWORD=1 deploy/regen-bitcoin-rpcauth.sh
 #       NODE BOX (split deploy — bitcoin.conf here, the app env on the app box): writes rpcauth= to the
 #       local bitcoin.conf, restarts bitcoind, and PRINTS the matched BITCOIN_RPC_PASSWORD= line ONCE for
 #       the operator to paste into the APP box's /etc/nullsink.env. Nothing is written locally beyond the
 #       conf — the node box never holds the app's env. Then, on the app box:
-#         systemctl restart nullsink && systemctl start status-check.service   # instant rpcauth verify
+#         systemctl restart nullsink-payments && systemctl start status-check.service   # instant rpcauth verify
 #
 # Env overrides (all optional): BITCOIN_CONF, ENV_FILE, BTC_RPC_USER, PRINT_PASSWORD.
 set -euo pipefail
@@ -49,7 +49,7 @@ conf = pathlib.Path(conf_path)
 conf.write_text("\n".join([l for l in conf.read_text().splitlines() if not l.startswith(f"rpcauth={user}:")] + [rpcauth]) + "\n")
 if print_pw == "1":
     print("wrote matched rpcauth -> %s" % conf_path)
-    print("paste this line into the APP box's /etc/nullsink.env (replacing any existing one), then restart nullsink:")
+    print("paste this line into the APP box's /etc/nullsink.env (replacing any existing one), then restart nullsink-payments:")
     print("BITCOIN_RPC_PASSWORD=%s" % pw)
 else:
     env = pathlib.Path(env_path)
@@ -57,7 +57,7 @@ else:
     print("wrote matched rpcauth -> %s  and  BITCOIN_RPC_PASSWORD -> %s" % (conf_path, env_path))
 PY
 
-# 2) restart so the new pair loads. Node-box mode stops here: nullsink and the verify target live on the
+# 2) restart so the new pair loads. Node-box mode stops here: nullsink-payments and the verify target live on the
 #    app box (paste + restart + `systemctl start status-check.service` there — its BTC probe uses the same
 #    Basic-auth path this would verify).
 if [ "$PRINT_PW" = 1 ]; then
@@ -65,10 +65,10 @@ if [ "$PRINT_PW" = 1 ]; then
   systemctl restart bitcoind
   exit 0
 fi
-echo "restarting bitcoind + nullsink…"
+echo "restarting bitcoind + nullsink-payments…"
 systemctl restart bitcoind
 sleep 4
-systemctl restart nullsink
+systemctl restart nullsink-payments
 sleep 2
 
 # 3) verify the APP path (reads the env back, does the same Basic-auth getnewaddress; prints status only)
@@ -77,7 +77,7 @@ import sys, re, json, base64, pathlib, urllib.request, urllib.error
 e = dict(re.findall(r"^(BITCOIN_RPC_\w+)=(.*)$", pathlib.Path(sys.argv[1]).read_text(), re.M))
 url, user, pw = e.get("BITCOIN_RPC_URL", ""), e.get("BITCOIN_RPC_USER", ""), e.get("BITCOIN_RPC_PASSWORD", "")
 if not url:
-    print("VERIFY SKIPPED - BITCOIN_RPC_URL not set in env (Phase B not wired yet)"); sys.exit(0)
+    print("VERIFY SKIPPED - BITCOIN_RPC_URL not set in env (bitcoin rail not configured on this box)"); sys.exit(0)
 a = base64.b64encode(("%s:%s" % (user, pw)).encode()).decode()
 req = urllib.request.Request(url, data=b'{"jsonrpc":"1.0","id":"v","method":"getnewaddress","params":[]}',
     headers={"authorization": "Basic " + a, "content-type": "application/json"}, method="POST")

@@ -12,7 +12,7 @@ runbook + the final box configs). The drain window is the one place a paid depos
 
 **Rollback ladder** — each step's true undo (it is NOT "one env flip" throughout):
 - steps 1–3: restart the app box's local bitcoind; nothing else was touched.
-- step 4 (drained): re-add `bitcoin` to `PAY_RAILS` + restart nullsink.
+- step 4 (drained): re-add `bitcoin` to `PAY_RAILS` + restart nullsink-payments.
 - step 5 (password rotated): restore the saved `BITCOIN_RPC_PASSWORD=` line + flip `BITCOIN_RPC_URL`
   back to localhost (or re-pair locally with `regen-bitcoin-rpcauth.sh`).
 - after step 6 (node live, new orders keyed on it): a bare env flip is FORBIDDEN — the local wallet is
@@ -60,7 +60,7 @@ runbook + the final box configs). The drain window is the one place a paid depos
    older than ~18h — the 24h order backstop reaps on age regardless of deposits seen, so a buyer paying
    late in the drain on an old order is the kill zone. Run `systemctl start backup.service` NOW: the fresh
    artifact's pending.db + wallet-label export is the recovery sheet for every open order.
-   Drain: remove `bitcoin` from `PAY_RAILS` in `/etc/nullsink.env` + `systemctl restart nullsink`. The
+   Drain: remove `bitcoin` from `PAY_RAILS` in `/etc/nullsink.env` + `systemctl restart nullsink-payments`. The
    drain is the sole defense against a paid-but-uncredited deposit: a `/buy` served after the snapshot
    derives an address the migrated wallet never recorded (recovery = manual re-`setlabel` from pending.db).
    Migrate: `backupwallet /var/lib/bitcoind/nullsink.bak` on the app box — inside the datadir; the unit's
@@ -87,7 +87,7 @@ runbook + the final box configs). The drain window is the one place a paid depos
 6. **Re-enable + verify.** Gate: the node reports `blocks`==`headers`, `initialblockdownload:false`, AND
    `getwalletinfo` shows `scanning:false` — "restorewallet returned" is not "synced". Re-add `bitcoin` to
    `PAY_RAILS` **in its original position** (the first rail is the `/buy` default) + `systemctl restart
-   nullsink`. Verify immediately: `systemctl start status-check.service && journalctl -u
+   nullsink-payments`. Verify immediately: `systemctl start status-check.service && journalctl -u
    status-check.service -n 30`. Trust ONLY that probe and a real deposit — the app box's `bitcoin-cli`
    still cookie-auths against the old local node and proves nothing about the live path. End-to-end gate:
    a real BTC deposit credits at 3 confirmations; clearnet `:8332` on the node box TIMES OUT from a third

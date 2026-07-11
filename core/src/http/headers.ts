@@ -11,7 +11,7 @@ import type { Provider } from "../providers";
 // caller-page fingerprint `origin`/`referer` — no LLM API gates on them, and the Tinfoil verifying proxy's
 // loopback guard rejects any forwarded `origin`. NOTE: not a full RFC hop-by-hop strip
 // (transfer-encoding/te/trailer/upgrade/keep-alive aren't listed); add if needed.
-export const STRIP = new Set([
+const STRIP = new Set([
   "host",
   "connection",
   "content-length",

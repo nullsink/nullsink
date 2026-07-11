@@ -29,7 +29,7 @@ export function parseCoinGecko(body: any): number {
 
 // CoinGecko simple-price parser for any coin id: { "<id>": { "usd": <number> } }. parseCoinGecko above is
 // the monero-specific instance (kept for the rate tests); other rails build their source via this factory.
-export function coinGeckoParser(id: string): (body: any) => number {
+function coinGeckoParser(id: string): (body: any) => number {
   return (body: any) => {
     const usd = Number(body?.[id]?.usd);
     if (Number.isFinite(usd) && usd > 0) return usd;

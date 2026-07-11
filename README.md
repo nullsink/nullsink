@@ -165,7 +165,7 @@ Requires [Bun](https://bun.sh) 1.3.14 (the version CI builds and tests with).
 ```sh
 bun install        # one hoisted node_modules + one root bun.lock for both packages
 
-bun run dev        # run core (watch) and the client (vite) together
+bun run dev        # run the client (vite); core watchers are per-process: cd core && bun run dev:proxy / dev:payments
 bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
 bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
@@ -188,16 +188,18 @@ Boxes run only verified release artifacts — no source, no Bun on the box. A gi
 (`vX.Y.Z`) triggers `.github/workflows/release.yml`, which builds the self-contained linux-x64
 artifacts and publishes them as a GitHub Release:
 
-- **`nullsink-linux-x64`** — the proxy server: the metered `/v1` proxy and the payment-settlement poller.
+- **`nullsink-proxy-linux-x64`** — the prompt world: the metered `/v1` proxy and the balance ledger.
+- **`nullsink-payments-linux-x64`** — the payment world: `/buy`, the pay rails, and the settlement poller.
 - **`nsk-linux-x64`** — the operator CLI (`issue` / `topup` / `balance` / `financials`).
 - **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the four artifacts; the box verifies with `sha256sum -c` before installing.
+- **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
 
 On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
-atomically swaps the binary and UI symlinks, refreshes the systemd units and Caddy
-config, restarts, and health-gates on `/healthz` — rolling **both** symlinks back to the
-previous release if the new one is unhealthy. First-time bootstrap is `core/deploy/setup.sh`.
+atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
+systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
+rolling the symlinks back to the previous release if either service is unhealthy.
+First-time bootstrap is `core/deploy/setup.sh`.
 
 ## License
 

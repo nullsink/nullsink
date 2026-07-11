@@ -169,7 +169,7 @@ export function isOffCardModel(model: string): boolean {
 // upper bound — reasoning can fill it). Anthropic extended-thinking is NOT here: its scanner reads the
 // cumulative output_tokens (thinking included) off each delta, so its disconnect bill is already
 // reasoning-aware. Prefix-matched and curated — maintain as OpenAI ships new reasoning families.
-export const REASONING_MARKERS = ["o1", "o3", "o4", "gpt-5"];
+const REASONING_MARKERS = ["o1", "o3", "o4", "gpt-5"];
 export function isReasoningModel(model: string): boolean {
   // The -chat variants (gpt-5-chat-latest, gpt-5.x-chat-latest) are the NON-reasoning, chat-tuned members
   // of an otherwise reasoning family: all their output is visible streamed text, so the disconnect char

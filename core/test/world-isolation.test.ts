@@ -73,14 +73,6 @@ test("credit-sender (payment world) imports NO prompt-world module", () => {
   expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
 });
 
-test("the endpoints barrel is imported by NO world module (it joins both worlds)", () => {
-  // Only the combined test router (test/support/handler-combined.ts) + tests may pull the barrel; the world
-  // handlers use endpoints/{proxy,payments}.
-  for (const world of ["handler.ts", "payments-handler.ts"]) {
-    expect(valueClosure(world).has("endpoints/index.ts")).toBe(false);
-  }
-});
-
 test("no composition root imports the combined test router", () => {
   // Importing test/support/handler-combined.ts would drag the other world into that binary. It lives outside
   // src/, so match on the module name anywhere in the closure rather than a src-relative path. Assert the

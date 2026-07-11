@@ -33,7 +33,7 @@ test/     bun test (mostly fast-check property tests)
 | --- | --- |
 | `bun test` | run the test suite |
 | `bun run typecheck` | `tsc --noEmit` |
-| `bun run build` | compile the server binary (`nullsink-linux-x64`) |
+| `bun run build` | compile both service binaries (`nullsink-{proxy,payments}-linux-x64`) + assert world isolation |
 | `bun run build:nsk` | compile the `nsk` CLI binary |
 | `bun run e2e:capture` | real-spend end-to-end + golden-fixture capture (operator-run) |
 | `bun run e2e:hold` | live hold-soundness check against real upstreams (operator-run) |
@@ -69,5 +69,5 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 
 ```sh
 cp .env.example .env   # set at least one provider key (ANTHROPIC_API_KEY or OPENAI_API_KEY)
-bun run dev
+bun run dev:proxy      # the metered /v1 world on :8080; dev:payments runs the pay world on :8081
 ```

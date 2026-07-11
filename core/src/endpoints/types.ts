@@ -1,6 +1,6 @@
-// Shared dependency bag for nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance.
-// createHandler builds this once (from HandlerDeps) and passes it to makeEndpoints (endpoints/index.ts).
-// Each endpoint factory destructures only what it needs. Kept narrow on purpose (ISP): the endpoints see
+// Shared dependency bags for nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance.
+// handler.ts and payments-handler.ts each build their world's bag and pass it to that world's endpoint
+// factories (endpoints/proxy.ts, endpoints/payments.ts). Each endpoint factory destructures only what it needs. Kept narrow on purpose (ISP): the endpoints see
 // the rail registry + the order/balance store methods + the limits, never the full handler internals.
 import type { RailView } from "../rails/types";
 import type { BalanceStore } from "../ledger/db";

@@ -13,9 +13,9 @@
 //     a mistyped/garbled paste before the token is hashed + funded (a wrong token funds an unspendable hash,
 //     unrecoverable by design). The server hashes the whole string and never inspects it.
 
-export const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; // base64url order
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; // base64url order
 
-export const TOKEN_RE = /^0sink_[A-Za-z0-9_-]{47}$/; // "0sink_" + 43 random chars + 4 checksum chars
+const TOKEN_RE = /^0sink_[A-Za-z0-9_-]{47}$/; // "0sink_" + 43 random chars + 4 checksum chars
 
 // FNV-1a (32-bit) over the chars, low 24 bits -> 4 base64url chars. Math.imul keeps the 32-bit multiply
 // exact and identical across JS engines (browser + Bun) — that cross-engine identity is the whole contract.

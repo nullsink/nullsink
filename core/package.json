@@ -22,7 +22,6 @@
     "assert:worlds": "bun run scripts/assert-worlds.ts",
     "build": "bun run build:proxy && bun run build:payments && bun run assert:worlds",
     "build:nsk": "bun build --compile --target=bun-linux-x64 cli/index.ts --outfile nsk-linux-x64",
-    "build:all": "bun run build && bun run build:nsk",
     "e2e:capture": "bun run scripts/e2e-capture.ts",
     "e2e:hold": "bun run scripts/e2e-hold.ts"
   },
