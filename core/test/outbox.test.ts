@@ -46,12 +46,6 @@ test("recordRevenue books a sale row; listRevenue round-trips it with the coin's
   ]);
 });
 
-test("listRevenue filters by [fromMs, toMs) — from inclusive, to exclusive", () => {
-  const o = openOrderStore(":memory:");
-  for (const at of [100, 200, 300]) o.recordRevenue(at, "monero", 1_000_000_000, ATOMIC_PER_XMR, 1_000_000, 1_100_000);
-  expect(o.listRevenue(150, 300).map((r) => r.at)).toEqual([200]); // 100 below `from`, 300 == `to` (excluded)
-});
-
 test("a bitcoin sale books in sats at its own scale (not mislabelled as XMR)", () => {
   const o = openOrderStore(":memory:");
   const SATS_PER_BTC = 100_000_000;

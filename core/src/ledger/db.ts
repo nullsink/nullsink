@@ -118,7 +118,7 @@ export function openDb(path: string) {
   // WAL), so the journal row is durable iff the debit happened. Returns true if the balance covered it
   // (debited + journaled); false (and nothing written) if the token is unknown or short. The row lets
   // recoverHolds() refund a hold whose request died before settling. Replaces the bare hold() on the metered
-  // path; hold() stays for the issuance CLIs and tests that gate without journaling.
+  // path; hold() itself survives only for the balance property tests, which gate without journaling.
   function openHold(hash: string, micros: number, holdId: string): boolean {
     const apply = db.transaction(() => {
       if (holdStmt.run(micros, hash, micros).changes === 0) return false; // unknown token / insufficient

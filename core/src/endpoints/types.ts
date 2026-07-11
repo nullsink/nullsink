@@ -37,10 +37,6 @@ export type PaymentsEndpointDeps = {
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined; // live payment progress
 };
 
-// The combined bag: the test router (test/support/handler-combined.ts) wires BOTH worlds. The two
-// composition roots each pass only their world's half (ProxyEndpointDeps / PaymentsEndpointDeps).
-export type EndpointDeps = ProxyEndpointDeps & PaymentsEndpointDeps;
-
 // Render an atomic coin amount at its scale (a power of ten → decimals = digits of the scale minus 1).
 // Each rail carries its own precision (e.g. 12 or 8 decimals). Shared by /buy + /order-status.
 export const decimalsOf = (scale: number) => String(scale).length - 1;
