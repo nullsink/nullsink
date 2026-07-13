@@ -2,22 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { qrSvg } from "./lib/qr.ts";
 import { BUILD_VERSION } from "./version.ts";
 
-// The sink mark — pixels funnel to a point, then fall into a void bar. currentColor
-// so it recolors via `color`. Inlined (not <img>) to keep it on a self-origin page.
-export function Mark({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 350 350" role="img" aria-label="nullsink mark" fill="currentColor">
-      <rect x="0" y="0" width="70" height="70" />
-      <rect x="140" y="0" width="70" height="70" />
-      <rect x="280" y="0" width="70" height="70" />
-      <rect x="70" y="70" width="70" height="70" />
-      <rect x="210" y="70" width="70" height="70" />
-      <rect x="140" y="140" width="70" height="70" />
-      <rect x="0" y="280" width="350" height="70" />
-    </svg>
-  );
-}
-
 // The sink mark with the "alive" pulse: seven squares fade on a shared 2.2s loop, each phase-offset by a
 // per-square animation-delay so the funnel breathes. The offsets live in app.css (.pulse-mark rect:nth-child)
 // as static CSS, so they survive the strict production CSP, which drops inline style attributes. Decorative

@@ -10,7 +10,8 @@
 //      systemd (INVOCATION_ID set by the unit), omitting it in local dev so you don't read literal `<3>`.
 //      warn/error → stderr, info → stdout.
 //
-// Categories are a small, stable, greppable set: [boot] [buy] [bill] [upstream] [poll] [wallet] [metrics]. Watch
+// Categories are a small, stable, greppable set: [boot] [buy] [bill] [upstream] [poll] [wallet] [credit]
+// [shutdown] [metrics]. Watch
 // `[bill] … refunded in full` — the ONLY signal we served real usage and billed nothing for it (no
 // per-request record to reconcile against), so it's logged at ERROR with an unmistakable shape. Alert on
 // that line specifically.

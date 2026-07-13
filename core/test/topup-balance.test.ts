@@ -4,7 +4,7 @@
 // subprocess is the only honest way to exercise the exit codes + the singleton together. The hash is
 // computed inline (same sha256 as db.ts hashToken / gen-token.ts) so the test never opens a prod ledger.
 import { test, expect, afterEach } from "bun:test";
-import { existsSync, unlinkSync } from "node:fs";
+import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const DBP = "/tmp/nullsink-topup-cli.db";

@@ -11,7 +11,8 @@
 # If BACKUP_PUSH_CMD is set, it's run as a shell snippet with $ARTIFACT = the finished artifact path, to
 # ship it off-box (scp/rsync/rclone — your choice; destination-agnostic). Prunes to BACKUP_KEEP newest.
 #
-# Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD, BACKUP_KEEP.
+# Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD,
+# BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP.
 set -euo pipefail
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqlite3)" >&2; exit 1; }

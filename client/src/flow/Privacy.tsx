@@ -5,8 +5,8 @@ import { EXT } from "../lib/links.ts";
 // The privacy policy. A formal, prose policy (numbered sections) rendered in the legal-page style. The
 // claims here are NOT marketing — they are what the system actually does, so every statement must stay true
 // to the code: token hashed in-browser (lib/token.ts), only the hash stored (core/src/ledger/db.ts), no IP at the edge
-// or app (Caddyfile strips X-Forwarded-For, keeps no access log), no request logs (core/log.ts privacy
-// invariant), prompts forwarded to the upstream provider (core/handler.ts). If the behaviour changes, change
+// or app (Caddyfile strips X-Forwarded-For, keeps no access log), no request logs (core/src/log.ts privacy
+// invariant), prompts forwarded to the upstream provider (core/src/handler.ts). If the behaviour changes, change
 // this. Static content: prerenders to plain HTML, reads with JS off, no third-party origin (CSP-clean).
 export function Privacy() {
   return (

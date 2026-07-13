@@ -24,7 +24,7 @@ export function openDb(path: string) {
   // outbox re-delivery (a sender retry after a crash before ack) or a poller re-scan can't double-credit. Holds
   // ONLY that key + timestamp (no token hash, no amount), so a balances.db leak reveals no payment↔token
   // linkage. NOT auto-purged: dropping a marker while a retry is still in flight would double-credit;
-  // purgeApplied() stays for a future payments-side safe-point prune. ~50 bytes/marker.
+  // markers are kept forever — at ~50 bytes/marker that is cheap at any plausible volume.
   db.run(`CREATE TABLE IF NOT EXISTS applied_orders (
   order_id   TEXT PRIMARY KEY,
   applied_at INTEGER NOT NULL
@@ -63,7 +63,6 @@ export function openDb(path: string) {
   const insertAppliedStmt = db.query(
     "INSERT OR IGNORE INTO applied_orders (order_id, applied_at) VALUES (?, ?)",
   );
-  const purgeAppliedStmt = db.query("DELETE FROM applied_orders WHERE applied_at < ?");
   // CAST the SUM to TEXT so it returns as an exact decimal string, not a JS number: a going concern's lifetime
   // outstanding total crosses Number.MAX_SAFE_INTEGER at ~$9B of credit-micros, past which a number SUM
   // silently drops low digits — unacceptable for a money figure (cli/financials.ts renders this exactly).
@@ -85,12 +84,6 @@ export function openDb(path: string) {
 
   function getBalance(hash: string): number | null {
     return getStmt.get(hash)?.balance ?? null;
-  }
-
-  // Try to debit `micros`. Returns true if the balance covered it (and was
-  // debited), false if the token is unknown or had insufficient balance.
-  function hold(hash: string, micros: number): boolean {
-    return holdStmt.run(micros, hash, micros).changes > 0;
   }
 
   // Add micros back: refunds the unused hold, funds tokens (issue.ts / topup.ts). No caller passes a
@@ -117,8 +110,7 @@ export function openDb(path: string) {
   // Open a hold: debit `micros` AND journal it under `holdId`, in ONE transaction (same DB, atomic under
   // WAL), so the journal row is durable iff the debit happened. Returns true if the balance covered it
   // (debited + journaled); false (and nothing written) if the token is unknown or short. The row lets
-  // recoverHolds() refund a hold whose request died before settling. Replaces the bare hold() on the metered
-  // path; hold() stays for the issuance CLIs and tests that gate without journaling.
+  // recoverHolds() refund a hold whose request died before settling.
   function openHold(hash: string, micros: number, holdId: string): boolean {
     const apply = db.transaction(() => {
       if (holdStmt.run(micros, hash, micros).changes === 0) return false; // unknown token / insufficient
@@ -161,12 +153,6 @@ export function openDb(path: string) {
     return apply();
   }
 
-  // Drop applied markers older than `beforeMs`. Pending orders are reaped at the same backstop horizon
-  // and can't be re-polled after, so their idempotency markers are then safe to forget.
-  function purgeApplied(beforeMs: number): void {
-    purgeAppliedStmt.run(beforeMs);
-  }
-
   // Outstanding prepaid credit across all tokens = the deferred-revenue liability (money owed in service).
   // `micros` is exact BigInt (the SUM is CAST to TEXT to dodge the number ceiling; see liabilityStmt);
   // `tokens` is a plain count. COUNT always returns a row, so the ?? is just a total-safety floor.
@@ -184,7 +170,7 @@ export function openDb(path: string) {
     return listBalancesStmt.all();
   }
 
-  return { db, getBalance, hold, credit, creditOnce, openHold, settleHold, recoverHolds, purgeApplied, liabilityTotal, listBalances };
+  return { db, getBalance, credit, creditOnce, openHold, settleHold, recoverHolds, liabilityTotal, listBalances };
 }
 
 export type BalanceStore = ReturnType<typeof openDb>;

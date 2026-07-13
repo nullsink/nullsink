@@ -1,5 +1,5 @@
-// Per-model upstream pricing. The proxy bills exactly what Anthropic charges us; margin is applied
-// separately at issuance time, never here.
+// Per-model upstream pricing. The proxy bills exactly what the upstream provider charges us; the margin
+// is applied where credit is bought (/buy quotes credit × MARGIN), never here.
 //
 // Rates come from prices.json, generated from models.dev (USD per million tokens). Refresh with `bun run
 // cli/sync-prices.ts` and commit the diff — do NOT hand-edit (a hand-maintained table silently drifts).
@@ -81,7 +81,7 @@ const RATES: [id: string, m: PricedModel][] = RAW_PRICES
   ])
   .sort((a, b) => b[0].length - a[0].length);
 
-// Fields we read out of an Anthropic `usage` object. output_tokens is the only one guaranteed present;
+// Fields we read out of a provider `usage` object (the canonical cross-provider shape — see usage/). output_tokens is the only one guaranteed present;
 // the rest default to 0.
 export type Usage = {
   input_tokens?: number;
@@ -169,7 +169,7 @@ export function isOffCardModel(model: string): boolean {
 // upper bound — reasoning can fill it). Anthropic extended-thinking is NOT here: its scanner reads the
 // cumulative output_tokens (thinking included) off each delta, so its disconnect bill is already
 // reasoning-aware. Prefix-matched and curated — maintain as OpenAI ships new reasoning families.
-export const REASONING_MARKERS = ["o1", "o3", "o4", "gpt-5"];
+const REASONING_MARKERS = ["o1", "o3", "o4", "gpt-5"];
 export function isReasoningModel(model: string): boolean {
   // The -chat variants (gpt-5-chat-latest, gpt-5.x-chat-latest) are the NON-reasoning, chat-tuned members
   // of an otherwise reasoning family: all their output is visible streamed text, so the disconnect char

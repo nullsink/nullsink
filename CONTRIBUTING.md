@@ -18,10 +18,10 @@ Requires [Bun](https://bun.sh) 1.3.14 (pinned — it matches the box runtime and
 
 ```sh
 bun install        # one hoisted node_modules + one root bun.lock for both packages
-bun run dev        # run core (watch) and the client (vite) together
+bun run dev        # run the client (vite); core watchers are per-process: cd core && bun run dev:proxy / dev:payments
 bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
-bun run build      # core single-binary + client static bundle
+bun run build      # core service binaries (proxy + payments) + client static bundle
 ```
 
 Target one package with `bun --filter`, e.g. `bun --filter './core' test` or `bun --filter './client' dev`.

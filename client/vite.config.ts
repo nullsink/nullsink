@@ -7,12 +7,14 @@ import react from "@vitejs/plugin-react";
 // Every dependency is bundled in — no CDN, no external origin — so the page satisfies
 // the launch CSP `default-src 'self'`. Fonts ship via @fontsource (self-hosted woff2).
 //
-// Dev has two modes for the /buy + /order-status + /balance API:
-//   bun run dev        -> proxy those paths to the local app (127.0.0.1:8080)
+// Dev has two modes for the /buy + /order-status + /rails + /balance API:
+//   bun run dev        -> proxy each path to the local process that owns it: payment routes to
+//                         dev:payments (:8081), prompt routes to dev:proxy (:8080) — run both.
 //   bun run dev:mock   -> a built-in mock (MOCK=1) that walks the whole flow with no backend over a
 //                         ~30s wall-clock timeline; see dev-mock.ts for the timing constants and the
 //                         error/expiry knobs.
-const API = "http://127.0.0.1:8080";
+const PROXY_API = "http://127.0.0.1:8080";
+const PAYMENTS_API = "http://127.0.0.1:8081";
 const MOCK = process.env.MOCK === "1";
 
 // Load the dev-only mock ONLY under MOCK=1, via dynamic import — so neither the mock nor its node:crypto
@@ -32,5 +34,5 @@ export default defineConfig({
   },
   server: MOCK
     ? undefined
-    : { proxy: { "/buy": API, "/order-status": API, "/balance": API, "/v1": API } },
+    : { proxy: { "/buy": PAYMENTS_API, "/order-status": PAYMENTS_API, "/rails": PAYMENTS_API, "/balance": PROXY_API, "/v1": PROXY_API } },
 });

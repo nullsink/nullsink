@@ -1,6 +1,6 @@
-// Shared dependency bag for nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance.
-// createHandler builds this once (from HandlerDeps) and passes it to makeEndpoints (endpoints/index.ts).
-// Each endpoint factory destructures only what it needs. Kept narrow on purpose (ISP): the endpoints see
+// Shared dependency bags for nullsink's own (non-metered) endpoints — /buy, /order-status, /rails, /balance.
+// handler.ts and payments-handler.ts each build their world's bag and pass it to that world's endpoint
+// factories (endpoints/proxy.ts, endpoints/payments.ts). Each endpoint factory destructures only what it needs. Kept narrow on purpose (ISP): the endpoints see
 // the rail registry + the order/balance store methods + the limits, never the full handler internals.
 import type { RailView } from "../rails/types";
 import type { BalanceStore } from "../ledger/db";
@@ -36,10 +36,6 @@ export type PaymentsEndpointDeps = {
   readRateLimit?: TokenBucket; // global read throttle for /order-status + /rails; omitted = no limit. Its own bucket per world.
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined; // live payment progress
 };
-
-// The combined bag: the test router (test/support/handler-combined.ts) wires BOTH worlds. The two
-// composition roots each pass only their world's half (ProxyEndpointDeps / PaymentsEndpointDeps).
-export type EndpointDeps = ProxyEndpointDeps & PaymentsEndpointDeps;
 
 // Render an atomic coin amount at its scale (a power of ten → decimals = digits of the scale minus 1).
 // Each rail carries its own precision (e.g. 12 or 8 decimals). Shared by /buy + /order-status.

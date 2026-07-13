@@ -47,7 +47,7 @@ install_verified_bitcoind
 
 step "Installing the bitcoind systemd unit"
 # ONLY bitcoind.service — deliberately NOT lib.sh's install_units, which globs EVERY deploy/*.service (incl.
-# the app's nullsink.service, backup.timer, …). This box runs no app; installing those here would be drift.
+# the app's nullsink-proxy.service, backup.timer, …). This box runs no app; installing those here would be drift.
 install -m644 "$(dirname "$0")/bitcoind.service" /etc/systemd/system/bitcoind.service
 systemctl daemon-reload
 

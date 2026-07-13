@@ -91,7 +91,7 @@ function expectedUsage(meta: Meta, ru: any): Required<Usage> {
   return { input_tokens: Math.max(0, total - cached), cache_read_input_tokens: cached, cache_creation_input_tokens: 0, cache_creation_1h_input_tokens: 0, output_tokens: output };
 }
 
-function reasoningOf(meta: Meta, ru: any): number {
+function reasoningOf(ru: any): number {
   return num(ru?.completion_tokens_details?.reasoning_tokens) || num(ru?.output_tokens_details?.reasoning_tokens);
 }
 
@@ -128,7 +128,7 @@ if (files.length === 0) {
 
       // Reasoning fixtures: output must INCLUDE the reasoning tokens (not dropped, not added on top).
       if (meta.expectReasoning) {
-        const r = reasoningOf(meta, ru);
+        const r = reasoningOf(ru);
         expect(r, "fixture marked reasoning but the upstream reported none").toBeGreaterThan(0);
         expect(num(u.output_tokens)).toBeGreaterThanOrEqual(r);
       }

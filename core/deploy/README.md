@@ -16,7 +16,7 @@ the payment→token link. The only channel between them is a unix socket at `/ru
 which payments delivers credits in one direction. They share one service user today; splitting the uids
 waits on the admin-plane redesign (see `nullsink-proxy.service` for why).
 
-See the install docs to stand up a box and the operations docs for day-2 work (redeploys, backups,
+See setup.sh to stand up a box, and deploy.sh / backup.sh / node-box-runbook.md for day-2 work (redeploys, backups,
 alerts, troubleshooting). This file is just the map.
 
 ## What's here, by concern

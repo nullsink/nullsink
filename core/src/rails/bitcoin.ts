@@ -119,7 +119,8 @@ const RPC_URL = process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:8332/wallet/nul
 const RPC_USER = process.env.BITCOIN_RPC_USER;
 const RPC_PASSWORD = process.env.BITCOIN_RPC_PASSWORD;
 const TIMEOUT_MS = numEnv("BITCOIN_TIMEOUT_MS", 30_000, 100, 600_000);
-// Finality depth (also shown to buyers as confirmations_required). 3 is ample for the $2–$50 band; a deeper
+// Finality depth (also shown to buyers as confirmations_required). 3 suits small buys; revisit toward the
+// top of the band (BUY_MAX_USD defaults to $2000) if large BTC orders become common. A deeper
 // reorg is vanishingly rare. Per-rail env (BITCOIN_CONFIRMATIONS) with NO shared fallback — a generic
 // CONFIRMATIONS both rails read would let one value govern both at once. Routed through numEnv (range
 // [0,720]) so a typo fails fast at boot rather than silently reverting to the default.

@@ -1,5 +1,6 @@
-// XMR/USD price for quoting /buy. Balances are USD micro-dollars, so /buy converts "$X of credit" into an
-// XMR amount at order time. Cached briefly; sources pluggable via RATE_URL. This fetch goes over clearnet:
+// Coin/USD prices for quoting /buy (xmrUsd + btcUsd). Balances are USD micro-dollars, so /buy converts
+// "$X of credit" into a coin amount at order time. Cached briefly; venues live in RATE_SOURCES (URLs
+// overridable per source via env). This fetch goes over clearnet:
 // a public price lookup reveals nothing new beyond that the service is running.
 import { numEnv } from "../env";
 
@@ -29,7 +30,7 @@ export function parseCoinGecko(body: any): number {
 
 // CoinGecko simple-price parser for any coin id: { "<id>": { "usd": <number> } }. parseCoinGecko above is
 // the monero-specific instance (kept for the rate tests); other rails build their source via this factory.
-export function coinGeckoParser(id: string): (body: any) => number {
+function coinGeckoParser(id: string): (body: any) => number {
   return (body: any) => {
     const usd = Number(body?.[id]?.usd);
     if (Number.isFinite(usd) && usd > 0) return usd;

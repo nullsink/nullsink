@@ -1,5 +1,5 @@
 // Model-based (stateful) property test for the balance store. fast-check generates random sequences
-// of credit / hold / creditOnce / openHold / settleHold / recoverHolds / purgeApplied / getBalance and runs
+// of credit / creditOnce / openHold / settleHold / recoverHolds / getBalance and runs
 // each against BOTH the real SQLite store (a fresh :memory: db per sequence) and a pure in-memory reference
 // model. After every command we assert the two agree, so any divergence — a botched atomic debit, a
 // double-credit, a purge that forgets too much, a hold refunded twice — surfaces as a shrunk, minimal
@@ -11,8 +11,6 @@
 //   - settleHold() closes a hold AT MOST once — a repeat finds no row and refunds nothing (drain race)
 //   - recoverHolds() refunds every open hold IN FULL and clears the journal (crash recovery), then no-ops
 //   - creditOnce() applies exactly once per orderId — repeats are no-ops (poller re-scan idempotency)
-//   - purgeApplied() drops only markers strictly older than the cutoff, after which that orderId can
-//     legitimately credit again (the backstop-horizon re-credit path)
 //   - credit() with a negative amount claws back and may drive a balance negative (hold under-estimate)
 import { test, expect } from "bun:test";
 import fc from "fast-check";
@@ -46,19 +44,6 @@ class CreditCmd implements fc.Command<Model, BalanceStore> {
   toString = () => `credit(${this.hash}, ${this.micros})`;
 }
 
-class HoldCmd implements fc.Command<Model, BalanceStore> {
-  constructor(readonly hash: string, readonly micros: number) {}
-  check = () => true;
-  run(m: Model, r: BalanceStore): void {
-    const known = m.balances.has(this.hash);
-    const bal = m.balances.get(this.hash) ?? 0;
-    const expected = known && bal >= this.micros; // debit only when the (known) balance covers it
-    expect(r.hold(this.hash, this.micros)).toBe(expected);
-    if (expected) m.balances.set(this.hash, bal - this.micros);
-  }
-  toString = () => `hold(${this.hash}, ${this.micros})`;
-}
-
 class CreditOnceCmd implements fc.Command<Model, BalanceStore> {
   constructor(
     readonly hash: string,
@@ -77,16 +62,6 @@ class CreditOnceCmd implements fc.Command<Model, BalanceStore> {
     expect(r.getBalance(this.hash)).toBe(m.balances.get(this.hash) ?? null);
   }
   toString = () => `creditOnce(${this.hash}, ${this.micros}, ${this.orderId}, ${this.atMs})`;
-}
-
-class PurgeAppliedCmd implements fc.Command<Model, BalanceStore> {
-  constructor(readonly beforeMs: number) {}
-  check = () => true;
-  run(m: Model, r: BalanceStore): void {
-    r.purgeApplied(this.beforeMs);
-    for (const [id, at] of m.applied) if (at < this.beforeMs) m.applied.delete(id);
-  }
-  toString = () => `purgeApplied(${this.beforeMs})`;
 }
 
 class GetBalanceCmd implements fc.Command<Model, BalanceStore> {
@@ -157,14 +132,12 @@ class RecoverHoldsCmd implements fc.Command<Model, BalanceStore> {
 
 const commands = [
   fc.tuple(hashArb, microsArb).map(([h, v]) => new CreditCmd(h, v)),
-  fc.tuple(hashArb, holdArb).map(([h, v]) => new HoldCmd(h, v)),
   fc
     .tuple(hashArb, microsArb, orderArb, atMsArb)
     .map(([h, v, o, t]) => new CreditOnceCmd(h, v, o, t)),
   fc.tuple(hashArb, holdArb, holdIdArb).map(([h, v, k]) => new OpenHoldCmd(h, v, k)),
   fc.tuple(holdIdArb, microsArb).map(([k, v]) => new SettleHoldCmd(k, v)),
   fc.constant(null).map(() => new RecoverHoldsCmd()),
-  atMsArb.map((t) => new PurgeAppliedCmd(t)),
   hashArb.map((h) => new GetBalanceCmd(h)),
 ];
 

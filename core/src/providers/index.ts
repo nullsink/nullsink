@@ -1,7 +1,7 @@
 // Provider registry + selection — the upstream LLM seam, mirror of rails/index.ts. The composition root
 // (src/handler.ts createHandler) builds the active set from its deps and routes metered requests by EXACT
 // upstreamPath, then by model where providers share a path. Each provider is registered iff its config is
-// given (its key set in index.ts): Anthropic's /v1/messages, OpenAI's pair (/v1/chat/completions,
+// given (its key set in proxy.ts): Anthropic's /v1/messages, OpenAI's pair (/v1/chat/completions,
 // /v1/responses), and Tinfoil on /v1/chat/completions (shared with OpenAI, routed by model). A disabled
 // provider's endpoints 404.
 // At least one must be configured — selectProviders throws on an all-absent set, mirroring selectRails'
@@ -15,7 +15,7 @@ import type { HoldEstimator } from "../hold";
 export type { Provider } from "./types";
 
 export type ProvidersConfig = {
-  // Each present iff its key is configured (index.ts); absent → that provider's endpoints are not registered
+  // Each present iff its key is configured (proxy.ts); absent → that provider's endpoints are not registered
   // (404). At least one is required — selectProviders throws on an all-absent config.
   anthropic?: { apiKey: string; baseUrl: string; version: string; estimateHold: HoldEstimator };
   openai?: { apiKey: string; baseUrl: string; estimateHold: HoldEstimator };
@@ -43,7 +43,7 @@ export function selectProviders(cfg: ProvidersConfig): Map<string, Provider[]> {
   }
   if (cfg.tinfoil) register(makeTinfoilProvider(cfg.tinfoil)); // /v1/chat/completions (shared with OpenAI — routed by model)
   // At least one provider must be configured — an empty set would 404 every metered path, serving no LLM at
-  // all. Mirrors selectRails' empty-PAY_RAILS guard; the composition root (index.ts) fails fast on it at boot.
+  // all. Mirrors selectRails' empty-PAY_RAILS guard; the composition root (proxy.ts) fails fast on it at boot.
   if (m.size === 0) throw new Error("no providers configured (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY)");
   return m;
 }
