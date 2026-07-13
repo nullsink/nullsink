@@ -86,6 +86,39 @@ export interface BuyError {
   status: number;
 }
 
+// Failure shape for the browser's own non-metered reads. This is intentionally small: callers need to
+// distinguish "try later", "check your connection", and "the service answered but is unavailable" — not
+// duplicate server prose or infer token validity from a transport failure.
+export type ReadFailure = {
+  kind: "network" | "rate_limited" | "server";
+  status: number;
+  retryAfterSec?: number;
+};
+
+function retryAfterSec(res: Response): number | undefined {
+  const value = Number(res.headers.get("retry-after"));
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function readFailure(res: Response): ReadFailure {
+  return {
+    kind: res.status === 429 ? "rate_limited" : "server",
+    status: res.status,
+    retryAfterSec: retryAfterSec(res),
+  };
+}
+
+export function balanceErrorMessage(error: ReadFailure): string {
+  switch (error.kind) {
+    case "rate_limited":
+      return "Balance checks are busy right now. Try again in a moment.";
+    case "network":
+      return "Couldn't reach nullsink. Check your connection and try again.";
+    case "server":
+      return "The balance service is temporarily unavailable. Try again shortly.";
+  }
+}
+
 // Map a /buy error code to calm, user-facing copy.
 export function buyErrorMessage(code: string): string {
   switch (code) {
@@ -128,16 +161,13 @@ export interface Rails {
   rails: Rail[];
 }
 
-// Last-resort fallback if /rails can't be reached, so the buy flow NEVER blocks on it. One rail → the picker
-// hides and the flow is single-coin, exactly as before multi-rail.
-const RAILS_FALLBACK: Rails = { default: "monero", rails: [{ name: "monero", unit: "XMR", confirmations: 10 }] };
-
 // The picker's OPTIMISTIC first-paint set — seeded into KeyFlow's initial state so the coin picker is present
 // in the prerendered HTML (and at first client paint) instead of popping in after getRails() resolves. This is
 // only the opening guess: getRails() reconciles it against the server's authoritative set (the same map /buy
 // validates against), so a deployment whose rails differ self-corrects on the /rails response. The JS-off page
-// is the one place this set stays final, so seed it to match PRODUCTION (Monero + Bitcoin). Distinct from
-// RAILS_FALLBACK, the conservative single-rail value shown only when /rails never answers.
+// is the one place this set stays final, so seed it to match PRODUCTION (Monero + Bitcoin). If the refresh
+// fails, KeyFlow deliberately keeps this set stable and lets the authoritative /buy request reject a paused
+// coin with an actionable error; changing the picker would be a misleading, visible failure mode.
 export const RAILS_OPTIMISTIC: Rails = {
   default: "monero",
   rails: [
@@ -146,14 +176,17 @@ export const RAILS_OPTIMISTIC: Rails = {
   ],
 };
 
-export async function getRails(): Promise<Rails> {
+// `null` means the read could not establish an authoritative set. It is deliberately not converted into a
+// guessed single-rail configuration: the optimistic picker remains usable, and /buy is the authority when
+// the visitor actually asks for a quote.
+export async function getRails(): Promise<Rails | null> {
   try {
     const res = await fetch("/rails");
-    if (!res.ok) return RAILS_FALLBACK;
+    if (!res.ok) return null;
     const body = (await res.json()) as Rails;
-    return body?.rails?.length ? body : RAILS_FALLBACK;
+    return body?.rails?.length ? body : null;
   } catch {
-    return RAILS_FALLBACK;
+    return null;
   }
 }
 
@@ -185,9 +218,14 @@ export async function requestQuote(hash: string, creditUsd: number, rail?: strin
 // We hold no list of tokens, so a 401 is genuinely ambiguous: wrong token, or right
 // token whose deposit hasn't confirmed yet.
 export async function checkBalance(rawToken: string): Promise<number | null> {
-  const res = await fetch("/balance", { headers: { "x-api-key": rawToken } });
+  let res: Response;
+  try {
+    res = await fetch("/balance", { headers: { "x-api-key": rawToken } });
+  } catch {
+    throw { kind: "network", status: 0 } as ReadFailure;
+  }
   if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`balance_${res.status}`);
+  if (!res.ok) throw readFailure(res);
   const body = (await res.json()) as { balance_usd: number };
   return body.balance_usd;
 }
@@ -215,11 +253,16 @@ export interface OrderStatus {
 // THIS order — a hash can have several open at once, and the newest empty one must not shadow a paid older
 // one. Omitted callers (an older cached bundle) still get the server's seen-preferring fallback.
 export async function fetchOrderStatus(hash: string, address?: string): Promise<OrderStatus> {
-  const res = await fetch("/order-status", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(address ? { hash, address } : { hash }),
-  });
-  if (!res.ok) throw new Error(`order_status_${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch("/order-status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(address ? { hash, address } : { hash }),
+    });
+  } catch {
+    throw { kind: "network", status: 0 } as ReadFailure;
+  }
+  if (!res.ok) throw readFailure(res);
   return (await res.json()) as OrderStatus;
 }

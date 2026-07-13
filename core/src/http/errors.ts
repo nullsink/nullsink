@@ -4,7 +4,28 @@
 // reject correctly. The upstream relay/mask POLICY (relayOrMaskUpstream / isBillingError) stays with the
 // metering engine in handler.ts and imports apiErrorBody from here — it's billing policy, not plumbing.
 
-export const deny = (status: number, error: string) =>
+// The public, nullsink-owned endpoint codes. Keep this list small and stable: browser/UI copy belongs in
+// the client, while API callers can safely branch on these codes. Provider-native errors deliberately do
+// NOT use this type — their wire formats are part of the upstream SDK contracts below.
+export const OWN_API_ERROR_CODES = [
+  "unsupported_endpoint",
+  "rate_limited",
+  "payload_too_large",
+  "invalid_json",
+  "invalid_hash",
+  "invalid_address",
+  "invalid_amount",
+  "unknown_rail",
+  "busy_try_later",
+  "rate_unavailable",
+  "wallet_unavailable",
+  "invalid_token",
+  "proxy_error",
+  "payments_error",
+] as const;
+export type OwnApiErrorCode = (typeof OWN_API_ERROR_CODES)[number];
+
+export const deny = (status: number, error: OwnApiErrorCode) =>
   new Response(JSON.stringify({ error }), {
     status,
     headers: { "content-type": "application/json" },

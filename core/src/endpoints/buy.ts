@@ -1,7 +1,7 @@
 // POST /buy: quote a crypto payment for a token. The client generates its token locally and sends only the
 // hash; the poller credits it once the deposit confirms. Self-serve and public: the billing hold is a sound
 // upper bound (hold.ts), so /buy yields no free usage. Extracted from handler.ts.
-import { deny, readJsonBody } from "../http";
+import { deny, denyThrottled, readJsonBody } from "../http";
 import * as log from "../log";
 import * as metrics from "../metrics";
 import { decimalsOf, type PaymentsEndpointDeps } from "./types";
@@ -30,7 +30,8 @@ export function makeBuy(d: PaymentsEndpointDeps) {
     // (cap bounds concurrent total, reaper bounds duration); none alone stops a determined attacker.
     if (buyRateLimit && !buyRateLimit.tryConsume()) {
       metrics.recordReject("buy"); // /buy local rate-limit shed
-      return deny(429, "rate_limited");
+      // Match the free-read throttle: a real 429 carries a concrete backoff hint, not just a code.
+      return denyThrottled(1);
     }
     const parsed = await readJsonBody(req, MAX_BUY_BODY_BYTES);
     if ("rejection" in parsed) return parsed.rejection;

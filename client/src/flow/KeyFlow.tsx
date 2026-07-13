@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
-import { buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, usd } from "../lib/api.ts";
+import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, usd, type ReadFailure } from "../lib/api.ts";
 import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
@@ -55,12 +55,13 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     prevPhase.current = phase;
   }, [phase]);
 
-  // Reconcile the optimistic seed against the server's authoritative set once on mount. Read-only +
-  // privacy-neutral; getRails() falls back to a one-rail default on any failure, so this never blocks the form.
-  // Keep the user's current coin if it survived into the reconciled set (they may have picked one before /rails
-  // resolved); otherwise take the server default. Picker shows only when ≥2 rails.
+  // Reconcile the optimistic seed against the server's authoritative set once on mount. A failed /rails read
+  // intentionally leaves the first-paint picker untouched: no flicker, no silent single-coin downgrade, and
+  // no invented configuration. /buy is authoritative when the visitor requests a quote. Keep their current
+  // coin if it survived a successful reconciliation; otherwise take the server default.
   useEffect(() => {
     getRails().then((r) => {
+      if (!r) return;
       setRails(r.rails);
       setRail((cur) => (r.rails.some((x) => x.name === cur) ? cur : r.default));
     });
@@ -78,7 +79,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // A transient /balance read failure (server read-throttle 429, network, or 5xx) is distinct from a
   // genuine "no balance" (the null RETURN, i.e. the 401 path). Without this we'd render "no balance" on a
   // throttle and tell someone with a funded key it's empty.
-  const [checkError, setCheckError] = useState(false);
+  const [checkError, setCheckError] = useState<ReadFailure | null>(null);
 
   // The save-gate for a freshly-minted key: payment details stay hidden until the user affirms the
   // key is saved. A minted key exists only in this tab's memory — if the tab dies during the ~30
@@ -152,14 +153,18 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   async function check() {
     if (!keyState.willTopUp) return;
     setChecking(true);
-    setCheckError(false);
+    setCheckError(null);
     try {
       setCheckedBalance(await checkBalance(paste));
-    } catch {
+    } catch (error) {
       // A THROWN error is transient (read-throttle 429 / network / 5xx), not "no balance" — that's the
       // null RETURN (401). Flag it so we show "try again" rather than implying the key is empty.
       setCheckedBalance(null);
-      setCheckError(true);
+      setCheckError(
+        error && typeof error === "object" && "kind" in error
+          ? (error as ReadFailure)
+          : { kind: "network", status: 0 },
+      );
     } finally {
       setDidCheck(true);
       setChecking(false);
@@ -218,7 +223,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     setPaste("");
     setDidCheck(false);
     setCheckedBalance(null);
-    setCheckError(false);
+    setCheckError(null);
     setQuote(null);
     setErrorCode(null);
     setAgreed(false); // each purchase re-acknowledges the terms (separate contract)
@@ -257,7 +262,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
             onChange={(e) => {
               setPaste(e.target.value.trim());
               setDidCheck(false);
-              setCheckError(false);
+              setCheckError(null);
             }}
             aria-label="your 0sink_ token — leave blank to mint a new key"
             aria-invalid={keyState.malformed}
@@ -273,7 +278,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
               {keyState.willTopUp &&
                 didCheck &&
                 (checkError ? (
-                  <span className="check-line none">couldn't check, try again in a moment</span>
+                  <span className="check-line none">{balanceErrorMessage(checkError)}</span>
                 ) : (
                   <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
                     {checkedBalance !== null

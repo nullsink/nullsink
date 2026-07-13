@@ -122,3 +122,15 @@ test("`detected` tells the payer we have their payment, and does not spend the t
   expect(funded).toBe(false);
   expect(checkBalance).not.toHaveBeenCalled(); // `detected` is not `finalizing` — no premature token spend
 });
+
+test("a transient status failure warns the payer not to send again and keeps the check usable", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.reject({ kind: "rate_limited", status: 429, retryAfterSec: 1 }));
+  renderPay(() => {});
+
+  const button = screen.getByRole("button", { name: "check" });
+  fireEvent.click(button);
+
+  expect(await screen.findByText(/don't resend/i)).toBeInTheDocument();
+  await waitFor(() => expect(button).not.toBeDisabled());
+  expect(checkBalance).not.toHaveBeenCalled();
+});

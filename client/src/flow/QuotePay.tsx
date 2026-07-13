@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { OrderStatus, Quote } from "../lib/api.ts";
+import type { OrderStatus, Quote, ReadFailure } from "../lib/api.ts";
 import { buyErrorMessage, checkBalance, fetchOrderStatus, trocadorSwapUrl } from "../lib/api.ts";
 import { hashToken } from "../lib/token.ts";
 import { Copy, Qr, RateSource } from "../ui.tsx";
@@ -50,6 +50,7 @@ export function QuotePay({
 }) {
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<OrderStatus | null>(null);
+  const [statusError, setStatusError] = useState<ReadFailure | null>(null);
   const [, forceTick] = useState(0); // bump to re-render so `expired` + the countdown re-read the wall clock
   const inFlight = useRef(false); // collapses overlapping cycles (auto-poll firing during a manual check)
 
@@ -105,6 +106,7 @@ export function QuotePay({
     if (inFlight.current) return;
     inFlight.current = true;
     setChecking(true);
+    setStatusError(null);
     try {
       const st = await fetchOrderStatus(await hashToken(token), quote?.pay_to);
       setStatus(st);
@@ -117,8 +119,14 @@ export function QuotePay({
           return;
         }
       }
-    } catch {
-      /* transient; let the user try again */
+    } catch (error) {
+      // Never let a transient status-read failure imply that payment was not received. Keep the last
+      // settled status visible, and explicitly tell the payer NOT to send a second payment.
+      setStatusError(
+        error && typeof error === "object" && "kind" in error
+          ? (error as ReadFailure)
+          : { kind: "network", status: 0 },
+      );
     } finally {
       // Always clear the spinner — including the funded `return` above. Today the parent unmounts this
       // component on onFunded so a stuck flag was invisible; finally makes it correct regardless of
@@ -242,6 +250,7 @@ export function QuotePay({
           choice is a feature, so say it. */}
       <div className="status">
         <span className="watch">{statusText}</span>
+        {statusError && <span className="watch">couldn't refresh payment status. don't resend; check again shortly.</span>}
         {/* announce only the settled status — the visible "checking…" pulse must not re-announce each poll */}
         <span className="sr-only" role="status">{settledStatus}</span>
         <button className="copy acid" type="button" disabled={checking} onClick={checkNow}>

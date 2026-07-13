@@ -1125,6 +1125,7 @@ test("/buy global rate limit sheds excess with 429 before any work (identity-fre
   const second = await handler(buyReq({ hash: "b".repeat(64), credit_usd: 10 }));
   expect(second.status).toBe(429);
   expect(((await second.json()) as { error: string }).error).toBe("rate_limited");
+  expect(second.headers.get("retry-after")).toBe("1"); // callers can back off instead of hot-looping
   expect(orders.openCount()).toBe(1); // the shed request created no order
 });
 

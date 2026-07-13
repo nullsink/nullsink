@@ -9,6 +9,7 @@
 // test/world-isolation.test.ts at the module level and by scripts/assert-worlds.ts on the compiled binary.
 import { openOrderStore, PENDING_DB_PATH } from "./ledger/orders";
 import { createPaymentsHandler, type RailView } from "./payments-handler";
+import { deny } from "./http";
 import { makeOrderStatus } from "./ledger/orderstatus";
 import { settle } from "./ledger/settle";
 import { makeSocketSender, drainCreditOutboxOverSocket, oldestUnackedAgeMs } from "./credit-sender";
@@ -107,7 +108,10 @@ const server = Bun.serve({
   maxRequestBodySize: MAX_BUY_BODY_BYTES * 16, // /buy + /order-status bodies are tiny; the handler caps them exactly
   fetch: handler,
   error() {
-    return new Response(JSON.stringify({ error: "payments_error" }), { status: 500, headers: { "content-type": "application/json" } });
+    // Last-resort only; see proxy.ts. The error object itself may contain request data, so the alertable
+    // journal line intentionally carries no interpolated detail.
+    log.error("http", "unhandled payments request error");
+    return deny(500, "payments_error");
   },
 });
 log.info("boot", `nullsink-payments ${BUILD_VERSION} listening on ${HOST}:${server.port} (credit socket ${CREDIT_SOCK})`);
