@@ -119,6 +119,45 @@ export function balanceErrorMessage(error: ReadFailure): string {
   }
 }
 
+// Turn an unknown caught value back into the small read-failure vocabulary. Fetch helpers above are the only
+// expected producers, but UI boundaries must stay fail-safe if a future refactor throws something else.
+export function toReadFailure(error: unknown): ReadFailure {
+  if (
+    error &&
+    typeof error === "object" &&
+    "kind" in error &&
+    ((error as ReadFailure).kind === "network" || (error as ReadFailure).kind === "rate_limited" || (error as ReadFailure).kind === "server")
+  )
+    return error as ReadFailure;
+  return { kind: "network", status: 0 };
+}
+
+// A payment status read never establishes that no payment landed. The instruction is deliberately stable
+// across failure kinds: never pay a single-use address again; check the existing order later.
+export function paymentStatusErrorMessage(error: ReadFailure): string {
+  switch (error.kind) {
+    case "rate_limited":
+      return "Payment checks are busy right now. Don't resend; check again in a moment.";
+    case "network":
+      return "Couldn't reach nullsink to check payment status. Don't resend; check again shortly.";
+    case "server":
+      return "Payment status is temporarily unavailable. Don't resend; check again shortly.";
+  }
+}
+
+// This is reached only after /order-status says finalizing or closed, when the UI spends the raw token on
+// /balance to settle the outcome. It must name THAT failed step rather than claim status itself failed.
+export function creditVerificationErrorMessage(error: ReadFailure): string {
+  switch (error.kind) {
+    case "rate_limited":
+      return "Couldn't verify your credit yet: balance checks are busy. Don't resend; check again in a moment.";
+    case "network":
+      return "Couldn't verify your credit yet: couldn't reach nullsink. Don't resend; check again shortly.";
+    case "server":
+      return "Couldn't verify your credit yet: the balance service is temporarily unavailable. Don't resend; check again shortly.";
+  }
+}
+
 // Map a /buy error code to calm, user-facing copy.
 export function buyErrorMessage(code: string): string {
   switch (code) {

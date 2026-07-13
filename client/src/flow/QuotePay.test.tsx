@@ -18,6 +18,9 @@ mock.module("../lib/api.ts", () => ({
   fetchOrderStatus,
   checkBalance,
   buyErrorMessage: (code: string) => code,
+  paymentStatusErrorMessage: (error: { kind: string }) => `status failure: ${error.kind}`,
+  creditVerificationErrorMessage: (error: { kind: string }) => `credit failure: ${error.kind}`,
+  toReadFailure: (error: unknown) => error as { kind: string; status: number },
   trocadorSwapUrl: (_q: Quote) => "https://trocador.app/anonpay/?stub=1",
 }));
 // Make hashToken deterministic and crypto-free so the test doesn't depend on a WebCrypto impl.
@@ -130,7 +133,20 @@ test("a transient status failure warns the payer not to send again and keeps the
   const button = screen.getByRole("button", { name: "check" });
   fireEvent.click(button);
 
-  expect(await screen.findByText(/don't resend/i)).toBeInTheDocument();
+  expect(await screen.findByText("status failure: rate_limited")).toBeInTheDocument();
   await waitFor(() => expect(button).not.toBeDisabled());
   expect(checkBalance).not.toHaveBeenCalled();
+});
+
+test("a failed final balance verification names that step, not payment status", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "finalizing", confirmations: 3, required: 3 }));
+  checkBalance.mockImplementation(() => Promise.reject({ kind: "server", status: 503 }));
+  renderPay(() => {});
+
+  const button = screen.getByRole("button", { name: "check" });
+  fireEvent.click(button);
+
+  expect(await screen.findByText("credit failure: server")).toBeInTheDocument();
+  expect(screen.queryByText(/status failure/i)).not.toBeInTheDocument();
+  await waitFor(() => expect(button).not.toBeDisabled());
 });
