@@ -42,16 +42,16 @@ RELEASE_TAG="${RELEASE_TAG:-v1.8.2}" # x-release-please-version
 # Monero + tinfoil-proxy pins stay here — they're app-box-only (the node box installs only bitcoind).
 # Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
 # binaryFate-signed hashes.txt (gpg-verified at authoring; key 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92).
-MONERO_VERSION="0.18.5.0"
-MONERO_SHA256_X64="166ad93036f95f5abeba24c8670061be022c9238dba2e6a7587611a1d759e294"
+MONERO_VERSION="0.18.5.1"
+MONERO_SHA256_X64="22a7dda7b0cb699fdd6b7674c3b4a4465b337cc98a54983523b759e1e7cc9958"
 # tinfoil-proxy: the local verifying proxy for the Tinfoil provider (enclave attestation). Pinned version + the
 # SHA-256 of the linux-amd64 binary. PROVENANCE is weaker than the Bitcoin/Monero pins above: those verify a
 # maintainer-GPG-signed hashes file, whereas tinfoil-proxy's SHA256SUMS is an unsigned CI artifact — so this is
 # trust-on-first-use (checked once at authoring) then pinned by SHA. NOTE: only the verifier BINARY is pinned;
 # the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated) and the proxy CLI gives
 # no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil rail is active.
-TINFOIL_PROXY_VERSION="v0.1.5"
-TINFOIL_PROXY_SHA256_X64="f5bdeee2eeb678d21b1bcb4491de302cda99a2e1941ee1ebec355d2b480ab705"
+TINFOIL_PROXY_VERSION="v0.1.6"
+TINFOIL_PROXY_SHA256_X64="0efa144e09bcc4d68ed8b167f14e07ca46d0459158b839789ba452d6da4144cf"
 
 # --- Env/rail helpers. fetch_verified / require_x86_64 / install_verified_bitcoind (+ the Bitcoin pin) moved
 # to lib.sh, shared with setup-nodes.sh so the pin can't drift; the Monero/tinfoil installers below stay here. ---
