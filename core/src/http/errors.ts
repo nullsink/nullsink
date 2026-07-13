@@ -13,6 +13,7 @@ export const OWN_API_ERROR_CODES = [
   "payload_too_large",
   "invalid_json",
   "invalid_hash",
+  "invalid_address",
   "invalid_amount",
   "unknown_rail",
   "busy_try_later",
