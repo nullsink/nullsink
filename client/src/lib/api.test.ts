@@ -2,7 +2,7 @@
 // test (QuotePay.test mocks the whole module away). Each request's body/headers and each status/error branch
 // is exercised against a stubbed global fetch. Privacy-critical: the raw token may appear ONLY in /balance.
 import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
+import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, creditVerificationErrorMessage, paymentStatusErrorMessage, toReadFailure, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
 
 type Call = { url: string; init?: RequestInit };
 let calls: Call[] = [];
@@ -85,6 +85,10 @@ test("checkBalance distinguishes rate limit, network, and server failures withou
   expect(balanceErrorMessage({ kind: "rate_limited", status: 429 })).toMatch(/busy/i);
   expect(balanceErrorMessage({ kind: "network", status: 0 })).toMatch(/connection/i);
   expect(balanceErrorMessage({ kind: "server", status: 500 })).toMatch(/temporarily unavailable/i);
+  expect(toReadFailure({ kind: "rate_limited", status: 429 })).toEqual({ kind: "rate_limited", status: 429 });
+  expect(toReadFailure(new Error("unexpected"))).toEqual({ kind: "network", status: 0 });
+  expect(paymentStatusErrorMessage({ kind: "network", status: 0 })).toMatch(/payment status/i);
+  expect(creditVerificationErrorMessage({ kind: "server", status: 503 })).toMatch(/verify your credit/i);
 });
 
 // --- getRails ---------------------------------------------------------------

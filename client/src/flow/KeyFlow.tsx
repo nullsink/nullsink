@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
-import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, usd, type ReadFailure } from "../lib/api.ts";
+import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, toReadFailure, usd, type ReadFailure } from "../lib/api.ts";
 import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
@@ -160,11 +160,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
       // A THROWN error is transient (read-throttle 429 / network / 5xx), not "no balance" — that's the
       // null RETURN (401). Flag it so we show "try again" rather than implying the key is empty.
       setCheckedBalance(null);
-      setCheckError(
-        error && typeof error === "object" && "kind" in error
-          ? (error as ReadFailure)
-          : { kind: "network", status: 0 },
-      );
+      setCheckError(toReadFailure(error));
     } finally {
       setDidCheck(true);
       setChecking(false);
