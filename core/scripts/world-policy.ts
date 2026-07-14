@@ -5,7 +5,7 @@
 import { readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runtimeModuleGraph, type UnresolvedLocalImport } from "./world-graph";
+import { runtimeModuleGraph, type OpaqueRuntimeImport, type UnresolvedLocalImport } from "./world-graph";
 
 export const CORE_DIR = fileURLToPath(new URL("../", import.meta.url));
 export const SRC_DIR = resolve(CORE_DIR, "src");
@@ -27,6 +27,52 @@ export const INTENTIONAL_SHARED_RUNTIME = new Set([
   "metrics.ts",
   "ratelimit.ts",
   "version.ts",
+]);
+
+// Exact exclusive ownership. Merely proving that a module is not shared is insufficient: a sensitive
+// payment module could otherwise move wholesale into the proxy closure (or vice versa) and still pass.
+export const INTENTIONAL_PROXY_ONLY_RUNTIME = new Set([
+  "cost/index.ts",
+  "cost/prices.json",
+  "cost/pricing.ts",
+  "cost/usage/anthropic.ts",
+  "cost/usage/index.ts",
+  "cost/usage/openai.ts",
+  "cost/usage/types.ts",
+  "credit-server.ts",
+  "endpoints/proxy.ts",
+  "endpoints/reads.ts",
+  "handler.ts",
+  "hold.ts",
+  "ledger/db.ts",
+  "ledger/hash.ts",
+  "providers/anthropic.ts",
+  "providers/index.ts",
+  "providers/openai.ts",
+  "providers/tinfoil.ts",
+  "proxy.ts",
+  "shutdown.ts",
+]);
+
+export const INTENTIONAL_PAYMENTS_ONLY_RUNTIME = new Set([
+  "credit-sender.ts",
+  "endpoints/buy.ts",
+  "endpoints/payment-reads.ts",
+  "endpoints/payments.ts",
+  "endpoints/types.ts",
+  "ledger/orders.ts",
+  "ledger/orderstatus.ts",
+  "ledger/poll.ts",
+  "ledger/settle.ts",
+  "payments-handler.ts",
+  "payments.ts",
+  "pricing-config.ts",
+  "rails/bitcoin.ts",
+  "rails/catalog.ts",
+  "rails/index.ts",
+  "rails/monero.ts",
+  "rails/rate.ts",
+  "rails/units.ts",
 ]);
 
 // Source modules intentionally absent from both service binaries. The first two are erased type contracts;
@@ -87,11 +133,16 @@ export type WorldInspection = {
   paymentsOnly: Set<string>;
   unexpectedShared: Set<string>;
   staleSharedAllowances: Set<string>;
+  unexpectedProxyOnly: Set<string>;
+  staleProxyOnlyAllowances: Set<string>;
+  unexpectedPaymentsOnly: Set<string>;
+  stalePaymentsOnlyAllowances: Set<string>;
   reachedNonService: Set<string>;
   unclassifiedSource: Set<string>;
   staleNonServiceAllowances: Set<string>;
   outsideSource: Set<string>;
   unresolved: UnresolvedLocalImport[];
+  opaque: OpaqueRuntimeImport[];
 };
 
 export function inspectServiceWorlds(coreDir = CORE_DIR): WorldInspection {
@@ -117,11 +168,16 @@ export function inspectServiceWorlds(coreDir = CORE_DIR): WorldInspection {
     paymentsOnly: difference(payments, proxy),
     unexpectedShared: difference(shared, INTENTIONAL_SHARED_RUNTIME),
     staleSharedAllowances: difference(INTENTIONAL_SHARED_RUNTIME, shared),
+    unexpectedProxyOnly: difference(difference(proxy, payments), INTENTIONAL_PROXY_ONLY_RUNTIME),
+    staleProxyOnlyAllowances: difference(INTENTIONAL_PROXY_ONLY_RUNTIME, difference(proxy, payments)),
+    unexpectedPaymentsOnly: difference(difference(payments, proxy), INTENTIONAL_PAYMENTS_ONLY_RUNTIME),
+    stalePaymentsOnlyAllowances: difference(INTENTIONAL_PAYMENTS_ONLY_RUNTIME, difference(payments, proxy)),
     reachedNonService: intersection(serviceModules, INTENTIONAL_NON_SERVICE_MODULES),
     unclassifiedSource: difference(difference(sourceModules, serviceModules), INTENTIONAL_NON_SERVICE_MODULES),
     staleNonServiceAllowances: difference(INTENTIONAL_NON_SERVICE_MODULES, sourceModules),
     outsideSource,
     unresolved: [...proxyGraph.unresolved, ...paymentsGraph.unresolved],
+    opaque: [...proxyGraph.opaque, ...paymentsGraph.opaque],
   };
 }
 

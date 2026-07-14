@@ -42,9 +42,14 @@ function difference(left: Set<string>, right: Set<string>): Set<string> {
 
 const worlds = inspectServiceWorlds();
 fail("unresolved local runtime imports", worlds.unresolved.map(({ importer, specifier }) => `${importer} -> ${specifier}`));
+fail("opaque runtime imports are forbidden", worlds.opaque.map(({ importer, expression }) => `${importer} -> ${expression}`));
 fail("service roots reach local modules outside src", worlds.outsideSource);
 fail("unreviewed modules are shared by proxy + payments", worlds.unexpectedShared);
 fail("shared-module allowances are stale", worlds.staleSharedAllowances);
+fail("unreviewed modules are proxy-only", worlds.unexpectedProxyOnly);
+fail("proxy-only allowances are stale or misowned", worlds.staleProxyOnlyAllowances);
+fail("unreviewed modules are payments-only", worlds.unexpectedPaymentsOnly);
+fail("payments-only allowances are stale or misowned", worlds.stalePaymentsOnlyAllowances);
 fail("non-service modules are reachable by a service", worlds.reachedNonService);
 fail("src modules lack an owner", worlds.unclassifiedSource);
 fail("non-service module allowances are stale", worlds.staleNonServiceAllowances);

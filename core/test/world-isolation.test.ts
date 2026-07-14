@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import { runtimeModuleGraph } from "../scripts/world-graph";
 import {
+  INTENTIONAL_PAYMENTS_ONLY_RUNTIME,
+  INTENTIONAL_PROXY_ONLY_RUNTIME,
   INTENTIONAL_SHARED_RUNTIME,
   inspectServiceWorlds,
   sorted,
@@ -44,6 +46,8 @@ function fixtureIntersection(paymentsSource: string): string[] {
     const payments = runtimeModuleGraph([resolve(dir, "payments.ts")]);
     expect(proxy.unresolved).toEqual([]);
     expect(payments.unresolved).toEqual([]);
+    expect(proxy.opaque).toEqual([]);
+    expect(payments.opaque).toEqual([]);
     return [...proxy.modules]
       .filter((module) => payments.modules.has(module))
       .map((module) => relative(dir, module))
@@ -72,12 +76,38 @@ test("world graph excludes imports and re-exports that TypeScript erases", () =>
   expect(fixtureIntersection(typeOnly)).toEqual([]);
 });
 
+test("world graph reports computed dynamic imports and requires instead of silently dropping them", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-world-opaque-"));
+  try {
+    const entry = resolve(dir, "entry.ts");
+    writeFileSync(
+      entry,
+      `const target = './owned'; import(target); require('./' + 'owned'); module.require(target);\n`,
+    );
+    const graph = runtimeModuleGraph([entry]);
+    expect(graph.opaque.map(({ expression }) => expression)).toEqual(["target", "'./' + 'owned'"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the composition-root graphs resolve every local runtime import and stay inside src", () => {
   const worlds = inspectServiceWorlds();
   expect(worlds.unresolved).toEqual([]);
+  expect(worlds.opaque).toEqual([]);
   expect(sorted(worlds.outsideSource)).toEqual([]);
   expect(worlds.proxy.has("proxy.ts")).toBe(true);
   expect(worlds.payments.has("payments.ts")).toBe(true);
+});
+
+test("every exclusive module remains in its reviewed service world", () => {
+  const worlds = inspectServiceWorlds();
+  expect(sorted(worlds.unexpectedProxyOnly)).toEqual([]);
+  expect(sorted(worlds.staleProxyOnlyAllowances)).toEqual([]);
+  expect(sorted(worlds.proxyOnly)).toEqual(sorted(INTENTIONAL_PROXY_ONLY_RUNTIME));
+  expect(sorted(worlds.unexpectedPaymentsOnly)).toEqual([]);
+  expect(sorted(worlds.stalePaymentsOnlyAllowances)).toEqual([]);
+  expect(sorted(worlds.paymentsOnly)).toEqual(sorted(INTENTIONAL_PAYMENTS_ONLY_RUNTIME));
 });
 
 test("only the exhaustively reviewed infrastructure set is shared by both services", () => {

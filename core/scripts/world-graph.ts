@@ -3,9 +3,9 @@
 // privacy boundary must not depend on quote style or miss a re-export/dynamic import/require().
 //
 // Only literal local specifiers are followed. Package/builtin imports are outside this repository; opaque
-// dynamic specifiers cannot name a statically knowable local module and are left to Bun's build-time graph.
-// Type-only imports/re-exports are excluded because TypeScript erases them and they contribute no runtime
-// code to the attested binary.
+// dynamic import/require expressions are recorded as policy failures because neither this graph nor a Bun
+// metafile can prove their runtime target. Type-only imports/re-exports are excluded because TypeScript
+// erases them and they contribute no runtime code to the attested binary.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, isAbsolute, resolve } from "node:path";
 import ts from "typescript";
@@ -24,9 +24,15 @@ export type UnresolvedLocalImport = {
   specifier: string;
 };
 
+export type OpaqueRuntimeImport = {
+  importer: string;
+  expression: string;
+};
+
 export type RuntimeModuleGraph = {
   modules: Set<string>;
   unresolved: UnresolvedLocalImport[];
+  opaque: OpaqueRuntimeImport[];
 };
 
 function literalText(node: ts.Node | undefined): string | null {
@@ -56,11 +62,14 @@ function exportDeclarationHasRuntimeValue(decl: ts.ExportDeclaration): boolean {
   return decl.exportClause.elements.length === 0 || decl.exportClause.elements.some((element) => !element.isTypeOnly);
 }
 
-/** Return every statically knowable runtime module specifier in one TS/JS source file. */
-export function runtimeModuleSpecifiers(sourceText: string, fileName = "source.ts"): string[] {
+type RuntimeImportScan = { specifiers: string[]; opaque: string[] };
+
+/** Return every runtime import in one TS/JS source file, separating literal targets from forbidden opaque ones. */
+export function runtimeModuleSpecifiers(sourceText: string, fileName = "source.ts"): RuntimeImportScan {
   const kind = fileName.endsWith("x") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
   const source = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true, kind);
   const found: string[] = [];
+  const opaque: string[] = [];
 
   const add = (node: ts.Node | undefined): void => {
     const text = literalText(node);
@@ -84,13 +93,22 @@ export function runtimeModuleSpecifiers(sourceText: string, fileName = "source.t
     }
     if (ts.isCallExpression(node)) {
       const isDynamicImport = node.expression.kind === ts.SyntaxKind.ImportKeyword;
-      const isRequire = ts.isIdentifier(node.expression) && node.expression.text === "require";
-      if (isDynamicImport || isRequire) add(node.arguments[0]);
+      const isRequire =
+        (ts.isIdentifier(node.expression) && node.expression.text === "require") ||
+        (ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "module" &&
+          node.expression.name.text === "require");
+      if (isDynamicImport || isRequire) {
+        const argument = node.arguments[0];
+        if (literalText(argument) == null) opaque.push(argument?.getText(source) ?? "<missing>");
+        else add(argument);
+      }
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
-  return [...new Set(found)];
+  return { specifiers: [...new Set(found)], opaque: [...new Set(opaque)] };
 }
 
 function isFile(path: string): boolean {
@@ -122,6 +140,7 @@ export function resolveLocalModule(importer: string, specifier: string): string 
 export function runtimeModuleGraph(entries: string[]): RuntimeModuleGraph {
   const modules = new Set<string>();
   const unresolved: UnresolvedLocalImport[] = [];
+  const opaque: OpaqueRuntimeImport[] = [];
   const stack = entries.map((entry) => resolve(entry));
 
   while (stack.length) {
@@ -131,7 +150,9 @@ export function runtimeModuleGraph(entries: string[]): RuntimeModuleGraph {
     modules.add(file);
     if (!PARSED_EXTENSIONS.has(extname(file))) continue;
 
-    for (const specifier of runtimeModuleSpecifiers(readFileSync(file, "utf8"), file)) {
+    const scan = runtimeModuleSpecifiers(readFileSync(file, "utf8"), file);
+    opaque.push(...scan.opaque.map((expression) => ({ importer: file, expression })));
+    for (const specifier of scan.specifiers) {
       if (!specifier.startsWith(".") && !isAbsolute(specifier)) continue;
       const target = resolveLocalModule(file, specifier);
       if (target) stack.push(target);
@@ -139,5 +160,5 @@ export function runtimeModuleGraph(entries: string[]): RuntimeModuleGraph {
     }
   }
 
-  return { modules, unresolved };
+  return { modules, unresolved, opaque };
 }
