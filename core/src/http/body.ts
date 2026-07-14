@@ -13,9 +13,13 @@ export type JsonBody = Record<string, unknown>;
 
 export async function readJsonBody(req: Request, maxBytes: number): Promise<{ body: JsonBody } | { rejection: Response }> {
   if (Number(req.headers.get("content-length") ?? 0) > maxBytes) return { rejection: deny(413, "payload_too_large") };
+  const bytes = await req.arrayBuffer();
+  // Content-Length is only an early shed: it can be absent (chunked) or dishonest. The buffered byte count
+  // is authoritative, while the server's larger hard backstop prevents this read from growing without bound.
+  if (bytes.byteLength > maxBytes) return { rejection: deny(413, "payload_too_large") };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await req.text());
+    parsed = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return { rejection: deny(400, "invalid_json") };
   }

@@ -152,15 +152,26 @@ async function waitForEdge(edge: ReturnType<typeof startEdge>): Promise<void> {
 async function exerciseHealthyEdge(): Promise<void> {
   const smallBody = "{}";
 
+  let got = await request("/definitely-missing");
+  expectResponse(got, 404, "not found\n", "static 404 page");
+
   // reverse_proxy treats an upstream HTTP response as a successful exchange regardless of status. Pin that
   // boundary so status-aware handle_errors matchers cannot accidentally mask application responses.
-  let got = await request("/v1/messages", {
+  got = await request("/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-stub-status": "418" },
     body: smallBody,
   });
   expectResponse(got, 418, '{"error":"upstream_418"}', "Anthropic upstream 4xx passthrough");
   expectHeaderAbsent(got, "x-should-retry", "Anthropic upstream 4xx passthrough");
+
+  got = await request("/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-stub-status": "413" },
+    body: smallBody,
+  });
+  expectResponse(got, 413, '{"error":"upstream_413"}', "Anthropic upstream 413 passthrough");
+  expectHeaderAbsent(got, "x-should-retry", "Anthropic upstream 413 passthrough");
 
   got = await request("/v1/chat/completions", {
     method: "POST",
@@ -169,6 +180,15 @@ async function exerciseHealthyEdge(): Promise<void> {
   });
   expectResponse(got, 500, '{"error":"upstream_500"}', "OpenAI upstream 5xx passthrough");
   expectHeaderAbsent(got, "x-should-retry", "OpenAI upstream 5xx passthrough");
+
+  got = await request("/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-stub-status": "429" },
+    body: smallBody,
+  });
+  expectResponse(got, 429, '{"error":"upstream_429"}', "OpenAI upstream 429 passthrough");
+  expectHeader(got, "retry-after", "7", "OpenAI upstream 429 passthrough");
+  expectHeaderAbsent(got, "x-should-retry", "OpenAI upstream 429 passthrough");
 
   got = await request("/buy", {
     method: "POST",

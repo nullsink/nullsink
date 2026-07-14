@@ -57,7 +57,15 @@ test("edge body caps and outages are disjoint, status-aware contracts", () => {
   for (const name of ["anthropic_too_large", "openai_too_large", "payments_too_large"])
     expect(namedMatcher(name), name).toContain("expression {err.status_code} == 413");
   for (const name of ["anthropic_outage", "openai_outage", "balance_outage", "proxy_outage", "payments_outage"])
-    expect(namedMatcher(name), name).toContain("expression {err.status_code} >= 500");
+    expect(namedMatcher(name), name).toContain("expression {err.status_code} >= 500 && {err.status_code} <600");
+
+  // These limits are one fixed contract, not independent operator knobs that can drift from Caddy.
+  expect(caddy).toContain("max_size 32MiB");
+  expect(caddy).toContain("max_size 4KiB");
+  expect(proxy).toContain("const MAX_MESSAGES_BODY_BYTES = 32 * 1024 * 1024;");
+  expect(payments).toContain("const MAX_BUY_BODY_BYTES = 4 * 1024;");
+  expect(proxy).not.toContain('numEnv("MAX_MESSAGES_BODY_BYTES"');
+  expect(payments).not.toContain('numEnv("MAX_BUY_BODY_BYTES"');
 
   expect(caddy).toMatch(/header x-should-retry "false"\n\t\t\trespond `\{"type":"error","error":\{"type":"request_too_large","message":"payload_too_large"\}\}` 413/);
   expect(caddy).toMatch(/header x-should-retry "false"\n\t\t\trespond `\{"error":\{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"\}\}` 413/);
