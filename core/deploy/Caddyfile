@@ -103,6 +103,9 @@
 
 	# --- Balance check (API clients + the UI poll this). ---
 	handle /balance {
+		# The response is keyed by a bearer-like secret in x-api-key. Never let a browser, CDN, or intermediary
+		# retain it: `>` defers the set until Caddy writes the response, so an upstream header cannot override it.
+		header >Cache-Control "no-store"
 		reverse_proxy 127.0.0.1:8080 {
 			header_up -X-Forwarded-For
 		}

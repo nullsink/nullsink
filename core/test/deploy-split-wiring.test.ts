@@ -51,3 +51,9 @@ test("edge outages preserve each public route's error envelope and retry contrac
   expect(caddy).toMatch(/@proxy_outage path \/v1\/models \/balance[\s\S]*?respond `\{"error":"proxy_error"\}` 503/);
   expect(caddy).toMatch(/@payments_outage path \/buy \/order-status \/rails[\s\S]*?respond `\{"error":"payments_error"\}` 503/);
 });
+
+test("balance responses are never stored by an intermediary", () => {
+  // /balance is a GET keyed by the bearer-like x-api-key header. Caddy's deferred set means an upstream
+  // response cannot overwrite no-store while its headers are copied to the client.
+  expect(caddy).toMatch(/handle \/balance \{[\s\S]*?header >Cache-Control "no-store"[\s\S]*?reverse_proxy 127\.0\.0\.1:8080/);
+});
