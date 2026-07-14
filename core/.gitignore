@@ -19,6 +19,8 @@ node_modules
 /nullsink-linux-x64
 /nullsink-proxy-linux-x64
 /nullsink-payments-linux-x64
+/nullsink-proxy.metafile.json
+/nullsink-payments.metafile.json
 /nsk-linux-x64
 /SHA256SUMS
 

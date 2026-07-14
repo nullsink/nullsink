@@ -1,85 +1,95 @@
-// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world
-// code (rails clients, the order store, settle, /buy); symmetrically the payments binary must not carry the
-// metered path or the balance store. That's a STRUCTURAL property, not a tree-shaking hope: we root the
-// closures at the COMPOSITION ROOTS (proxy.ts / payments.ts — the actual compiled binaries), not just their
-// handlers, so a root's non-handler imports (shutdown, ratelimit, the poller, settle) are covered too. The one
-// place the two worlds meet (test/support/handler-combined.ts) is imported by no root.
-//
-// We walk the transitive closure of VALUE imports (`import type` / `export type` are erased at compile time and
-// contribute no bundled code, so they're excluded). A stray cross-world import fails here loudly rather than
-// silently fattening the attested surface. The compiled-binary symbol check lands with the two roots.
+// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world code;
+// symmetrically, payments must not carry the prompt/balance world. These tests root the graph at the actual
+// composition roots and parse every runtime import with TypeScript's AST. Build-time verification separately
+// checks Bun's metafiles and compiled-binary symbols (scripts/assert-worlds.ts).
 import { test, expect } from "bun:test";
-import { readFileSync, existsSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { relative, resolve } from "node:path";
+import { runtimeModuleGraph } from "../scripts/world-graph";
+import {
+  INTENTIONAL_SHARED_RUNTIME,
+  inspectServiceWorlds,
+  sorted,
+} from "../scripts/world-policy";
 
-const SRC = fileURLToPath(new URL("../src/", import.meta.url));
+type RuntimeForm = { name: string; source: string };
 
-// Value imports only: skips `import type ...` / `export type ...`, which TypeScript erases.
-const VALUE_IMPORT = /^[ \t]*(?:import|export)[ \t]+(?!type[ \t])[^;]*?from[ \t]+"(\.[^"]+)"/gm;
-
-// `./x` → x.ts; `./dir` → dir/index.ts; an already-suffixed path → itself. Must check isFile(): existsSync is
-// true for a bare directory, which would then be read as a file.
-function resolveModule(spec: string): string | null {
-  for (const cand of [`${spec}.ts`, `${spec}/index.ts`, spec]) {
-    if (existsSync(cand) && statSync(cand).isFile()) return cand;
-  }
-  return null;
-}
-
-// Every src module reachable from `entry` through runtime (value) imports, as src-relative paths.
-function valueClosure(entry: string): Set<string> {
-  const seen = new Set<string>();
-  const stack = [resolve(SRC, entry)];
-  while (stack.length) {
-    const file = resolveModule(stack.pop()!);
-    if (!file || seen.has(file)) continue;
-    seen.add(file);
-    const code = readFileSync(file, "utf8");
-    for (const m of code.matchAll(VALUE_IMPORT)) stack.push(resolve(dirname(file), m[1]!));
-  }
-  return new Set([...seen].map((f) => f.slice(SRC.length)));
-}
-
-const PAYMENT_WORLD = [
-  "rails/index.ts", "rails/monero.ts", "rails/bitcoin.ts", "rails/rate.ts",
-  "ledger/orders.ts", "ledger/settle.ts", "ledger/orderstatus.ts", "ledger/poll.ts",
-  "endpoints/buy.ts", "endpoints/payments.ts", "endpoints/payment-reads.ts", "payments-handler.ts", "credit-sender.ts",
+// Each fixture makes one module prompt-owned (reachable from proxy.ts), then references it from payments.ts
+// using another legal runtime-import spelling. If the parser misses that spelling, `owned.ts` disappears from
+// the intersection and the test fails. These are graph tests, not regex unit tests: resolution + traversal are
+// exercised along with parsing.
+const RUNTIME_IMPORT_FORMS: RuntimeForm[] = [
+  { name: "single-quoted named import", source: `import { value } from './owned'; void value;` },
+  { name: "double-quoted default import", source: `import value from "./owned"; void value;` },
+  { name: "side-effect import", source: `import './owned';` },
+  { name: "empty named import", source: `import {} from './owned';` },
+  { name: "named re-export", source: `export { value } from './owned';` },
+  { name: "empty named re-export", source: `export {} from './owned';` },
+  { name: "star re-export", source: `export * from "./owned";` },
+  { name: "dynamic import", source: `export const load = () => import('./owned');` },
+  { name: "CommonJS require", source: `const owned = require("./owned"); void owned;` },
+  { name: "TypeScript import-equals require", source: `import owned = require('./owned'); void owned;` },
+  { name: "mixed value/type import", source: `import { type Shape, value } from './owned'; void value;` },
+  { name: "mixed value/type re-export", source: `export { type Shape, value } from "./owned";` },
 ];
-const PROMPT_WORLD = ["providers/index.ts", "ledger/db.ts", "hold.ts", "endpoints/proxy.ts", "endpoints/reads.ts", "handler.ts", "credit-server.ts"];
 
-// Root at the COMPOSITION ROOTS, not the handlers: the proxy binary is `bun build proxy.ts`, and it imports
-// modules the handler doesn't (shutdown, ratelimit, env, metrics, the credit server). Rooting at handler.ts
-// left those as a blind spot; rooting here covers the whole attested surface and subsumes the handler check.
-test("the proxy binary's closure (rooted at proxy.ts) contains NO payment-world module", () => {
-  const reachable = valueClosure("proxy.ts");
-  expect(PAYMENT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
-});
-
-test("the payments binary's closure (rooted at payments.ts) contains NO prompt-world module", () => {
-  const reachable = valueClosure("payments.ts");
-  expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
-});
-
-// The two halves of the credit crossing are world-owned too: the proxy runs the server, payments runs the sender,
-// and they share only credit-wire.ts (a pure contract with no store and no I/O).
-test("credit-server (prompt world) imports NO payment-world module", () => {
-  const reachable = valueClosure("credit-server.ts");
-  expect(PAYMENT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
-});
-
-test("credit-sender (payment world) imports NO prompt-world module", () => {
-  const reachable = valueClosure("credit-sender.ts");
-  expect(PROMPT_WORLD.filter((m) => reachable.has(m))).toEqual([]);
-});
-
-test("no composition root imports the combined test router", () => {
-  // Importing test/support/handler-combined.ts would drag the other world into that binary. It lives outside
-  // src/, so match on the module name anywhere in the closure rather than a src-relative path. Assert the
-  // roots EXIST before asserting what they don't import: a `continue`-on-missing would turn a renamed/deleted
-  // root into a silent pass, which is exactly the failure this guard is supposed to be incapable of.
-  for (const root of ["proxy.ts", "payments.ts"]) {
-    expect(existsSync(resolve(SRC, root))).toBe(true);
-    expect([...valueClosure(root)].filter((m) => m.includes("handler-combined"))).toEqual([]);
+function fixtureIntersection(paymentsSource: string): string[] {
+  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-world-graph-"));
+  try {
+    writeFileSync(resolve(dir, "owned.ts"), "export default 1; export const value = 1; export type Shape = number;\n");
+    writeFileSync(resolve(dir, "proxy.ts"), `import './owned';\n`);
+    writeFileSync(resolve(dir, "payments.ts"), `${paymentsSource}\n`);
+    const proxy = runtimeModuleGraph([resolve(dir, "proxy.ts")]);
+    const payments = runtimeModuleGraph([resolve(dir, "payments.ts")]);
+    expect(proxy.unresolved).toEqual([]);
+    expect(payments.unresolved).toEqual([]);
+    return [...proxy.modules]
+      .filter((module) => payments.modules.has(module))
+      .map((module) => relative(dir, module))
+      .sort();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
+}
+
+for (const fixture of RUNTIME_IMPORT_FORMS) {
+  test(`world graph detects a cross-world ${fixture.name}`, () => {
+    expect(fixtureIntersection(fixture.source)).toEqual(["owned.ts"]);
+  });
+}
+
+test("world graph excludes imports and re-exports that TypeScript erases", () => {
+  const typeOnly = `
+    import type { Shape } from './owned';
+    import { type Shape as InlineShape } from "./owned";
+    import type Owned = require('./owned');
+    export type { Shape as ExportedShape } from './owned';
+    export { type Shape as InlineExportedShape } from "./owned";
+    type LazyShape = import('./owned').Shape;
+    export type Combined = Shape | InlineShape | Owned.Shape | LazyShape;
+  `;
+  expect(fixtureIntersection(typeOnly)).toEqual([]);
+});
+
+test("the composition-root graphs resolve every local runtime import and stay inside src", () => {
+  const worlds = inspectServiceWorlds();
+  expect(worlds.unresolved).toEqual([]);
+  expect(sorted(worlds.outsideSource)).toEqual([]);
+  expect(worlds.proxy.has("proxy.ts")).toBe(true);
+  expect(worlds.payments.has("payments.ts")).toBe(true);
+});
+
+test("only the exhaustively reviewed infrastructure set is shared by both services", () => {
+  const worlds = inspectServiceWorlds();
+  expect(sorted(worlds.unexpectedShared)).toEqual([]);
+  expect(sorted(worlds.staleSharedAllowances)).toEqual([]);
+  expect(sorted(worlds.shared)).toEqual(sorted(INTENTIONAL_SHARED_RUNTIME));
+});
+
+test("every src module is service-owned or explicitly non-service", () => {
+  const worlds = inspectServiceWorlds();
+  expect(sorted(worlds.reachedNonService)).toEqual([]);
+  expect(sorted(worlds.unclassifiedSource)).toEqual([]);
+  expect(sorted(worlds.staleNonServiceAllowances)).toEqual([]);
 });

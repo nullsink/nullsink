@@ -5,8 +5,8 @@
 // LOAD-BEARING: neither composition root (proxy.ts / payments.ts) may import this module. It is the only
 // place the two worlds' code meets, so importing it from a root would drag the other world's code into that
 // binary — and the proxy binary is the unit the sealed tier attests, which must stay minimal and
-// payments-free. test/world-isolation.test.ts asserts no root reaches it, and scripts/assert-worlds.ts
-// asserts the compiled proxy carries no payments symbols.
+// payments-free. test/world-isolation.test.ts asserts no root reaches outside src, and
+// scripts/assert-worlds.ts cross-checks Bun's inputs plus the compiled binaries.
 import { buildProxyRoutes, type ProxyHandlerDeps } from "../../src/handler";
 import { buildPaymentsRoutes, type PaymentsHandlerDeps } from "../../src/payments-handler";
 import { deny } from "../../src/http";

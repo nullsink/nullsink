@@ -6,7 +6,7 @@
 // only through the credit socket — the single, one-directional crossing (payments → proxy).
 //
 // It must never import prompt-world code (no balance store, no providers, no metered path). Enforced by
-// test/world-isolation.test.ts at the module level and by scripts/assert-worlds.ts on the compiled binary.
+// test/world-isolation.test.ts in the source graph and by scripts/assert-worlds.ts in Bun metadata + binary.
 import { openOrderStore, PENDING_DB_PATH } from "./ledger/orders";
 import { createPaymentsHandler, type RailView } from "./payments-handler";
 import { deny } from "./http";

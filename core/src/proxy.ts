@@ -7,7 +7,7 @@
 // door the payment world may open into this one (payments → proxy, `credit`).
 //
 // It must never import payment-world code (no rails, no order store, no settle, no /buy). Enforced by
-// test/world-isolation.test.ts at the module level and by scripts/assert-worlds.ts on the compiled binary.
+// test/world-isolation.test.ts in the source graph and by scripts/assert-worlds.ts in Bun metadata + binary.
 import { openDb, DB_PATH } from "./ledger/db";
 import { createProxyHandler } from "./handler";
 import { deny } from "./http";

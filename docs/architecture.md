@@ -25,10 +25,11 @@ installs signal handlers.
 
 A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
 The two meet at exactly one place: a unix socket over which payments delivers credits to the
-proxy, in one direction, with one verb. Neither router imports the other's code, which
-`test/world-isolation.test.ts` enforces at the module level and `scripts/assert-worlds.ts` on
-the compiled binaries — the proxy binary is the unit the sealed tier attests, so it must stay
-payments-free structurally, not by hoping a bundler tree-shakes.
+proxy, in one direction, with one verb. Neither router imports the other's code.
+`test/world-isolation.test.ts` derives exhaustive runtime closures from the TypeScript AST;
+`scripts/assert-worlds.ts` cross-checks them against Bun's bundled-input metadata and distinctive
+symbols in the compiled executables. The proxy binary is the unit the sealed tier attests, so it
+must stay payments-free structurally, not by hoping a bundler tree-shakes.
 
 Everything both roots wire up — the handlers, settlement, pricing, the providers and endpoints —
 is pure factories and functions: import-safe and testable in isolation. Nothing opens a database
