@@ -41,3 +41,13 @@ test("both systemd units and both roots use the one owner-authenticated credit s
   expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
 });
+
+test("edge outages preserve each public route's error envelope and retry contract", () => {
+  // Caddy enters handle_errors only for its own failures (such as a refused loopback connection), not for
+  // an upstream's ordinary 4xx/5xx response. Keep the app-down boundary as deliberate as the port split.
+  expect(caddy).toContain("# --- Edge error contract.");
+  expect(caddy).toMatch(/@anthropic_outage path \/v1\/messages[\s\S]*?header x-should-retry "true"[\s\S]*?respond `\{"type":"error","error":\{"type":"api_error","message":"service_unavailable"\}\}` 503/);
+  expect(caddy).toMatch(/@openai_outage path \/v1\/chat\/completions \/v1\/responses[\s\S]*?header x-should-retry "true"[\s\S]*?respond `\{"error":\{"message":"service_unavailable","type":"server_error","code":"service_unavailable"\}\}` 503/);
+  expect(caddy).toMatch(/@proxy_outage path \/v1\/models \/balance[\s\S]*?respond `\{"error":"proxy_error"\}` 503/);
+  expect(caddy).toMatch(/@payments_outage path \/buy \/order-status \/rails[\s\S]*?respond `\{"error":"payments_error"\}` 503/);
+});

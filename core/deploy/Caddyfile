@@ -146,15 +146,34 @@
 		file_server
 	}
 
-	# --- Pretty 404. file_server (above) raises a 404 when an unknown path matches no static file; serve
-	#     the prerendered /404.html in its place but KEEP the 404 status (the file_server `status`
-	#     subdirective, Caddy v2.7+). A soft-404 (200 + not-found body) is an SEO anti-pattern and would
-	#     contradict the page's own noindex meta. Gated on @404 so other edge errors (e.g. a 502 if the app
-	#     is down) still get Caddy's default handling. This never touches the API's own 404s: a JSON 404
-	#     forwarded by reverse_proxy is a *successful* proxy of an upstream response, not a Caddy-raised
-	#     error, so handle_errors never sees it. The site-wide security headers (incl. CSP) above apply to
-	#     this response too, and the body is same-origin, so default-src 'self' stays satisfied. ---
+	# --- Edge error contract. reverse_proxy passes an upstream's 4xx/5xx response through unchanged; this
+	#     runs only when Caddy itself cannot reach a split service. SDK routes must keep their provider-native
+	#     envelope and say retryable, while site routes keep nullsink's small own-endpoint envelope. ---
 	handle_errors {
+		@anthropic_outage path /v1/messages
+		handle @anthropic_outage {
+			header x-should-retry "true"
+			respond `{"type":"error","error":{"type":"api_error","message":"service_unavailable"}}` 503
+		}
+
+		@openai_outage path /v1/chat/completions /v1/responses
+		handle @openai_outage {
+			header x-should-retry "true"
+			respond `{"error":{"message":"service_unavailable","type":"server_error","code":"service_unavailable"}}` 503
+		}
+
+		@proxy_outage path /v1/models /balance
+		handle @proxy_outage {
+			respond `{"error":"proxy_error"}` 503
+		}
+
+		@payments_outage path /buy /order-status /rails
+		handle @payments_outage {
+			respond `{"error":"payments_error"}` 503
+		}
+
+		# file_server raises a 404 for an unknown static path. Serve the prerendered page but KEEP its 404
+		# status. API 404s from an upstream are successful proxy responses and never arrive here.
 		@404 expression {err.status_code} == 404
 		handle @404 {
 			root * {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}
