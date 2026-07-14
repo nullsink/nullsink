@@ -171,6 +171,10 @@ export function buyErrorMessage(code: string): string {
       return "Busy right now. Try again in a moment.";
     case "wallet_unavailable":
       return "Temporarily unavailable. Try again shortly.";
+    case "payments_error":
+      // Caddy could not reach the isolated payments service. The request did not create an order, so this
+      // is safe to retry; name the temporary service failure rather than collapsing it into a generic error.
+      return "Payments are temporarily unavailable. Try again shortly.";
     case "unknown_rail":
       // The chosen coin isn't in the active rail set (e.g. it was paused between loading /rails and buying).
       return "That coin isn't available right now — pick another.";
@@ -180,7 +184,7 @@ export function buyErrorMessage(code: string): string {
       return "Couldn't reach the server. Check your connection and try again.";
     default:
       // The validation codes (invalid_json / invalid_hash / invalid_amount / payload_too_large) are
-      // unreachable if the client validates; a 500 (proxy_error) or any unexpected body lands here too.
+      // unreachable if the client validates; a proxy_error or any unexpected body lands here too.
       // Generic retry copy fits all of them — a server hiccup, nothing the user can act on but retry.
       return "Something went wrong. Try again.";
   }

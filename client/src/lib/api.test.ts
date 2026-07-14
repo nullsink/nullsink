@@ -152,7 +152,8 @@ test("buyErrorMessage maps known codes to calm copy and falls back for the rest"
   expect(buyErrorMessage("busy_try_later")).toMatch(/system is busy/i);
   expect(buyErrorMessage("rate_limited")).toMatch(/busy right now/i);
   expect(buyErrorMessage("wallet_unavailable")).toMatch(/temporarily unavailable/i);
-  // an unmapped code (a 500/proxy_error, or a validation code the client should never emit) → generic retry
+  expect(buyErrorMessage("payments_error")).toMatch(/payments are temporarily unavailable/i);
+  // an unmapped code (a proxy_error, or a validation code the client should never emit) → generic retry
   const fallback = buyErrorMessage("proxy_error");
   expect(fallback).toBe("Something went wrong. Try again.");
   expect(buyErrorMessage("invalid_hash")).toBe(fallback);
