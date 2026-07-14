@@ -30,10 +30,10 @@ verify_sums() {  # $1=dir containing SHA256SUMS + the fetched asset(s)
 
 # --- Pinned external toolchain + verified-install primitives, shared by setup.sh (app box) and
 # setup-nodes.sh (node box) so the pin + fetch/verify logic is ONE source of truth and can't drift. ---
-# Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the fanquake-signed
-# SHA256SUMS (gpg-verified at authoring; key E777299FC265DD04793070EB944D35F9AC3DB76A).
-BITCOIN_VERSION="31.0"
-BITCOIN_SHA256_X64="d3e4c58a35b1d0a97a457462c94f55501ad167c660c245cb1ffa565641c65074"
+# Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the maintainer-signed
+# SHA256SUMS (gpg-verified at authoring; key 152812300785C96444D3334D17565732E08E5E41).
+BITCOIN_VERSION="31.1"
+BITCOIN_SHA256_X64="b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e"
 
 fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; refuses on mismatch
   # Explicit `|| return 1` on the checksum, not a bare `set -e` gate: install_verified_tinfoil_proxy is called
