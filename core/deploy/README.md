@@ -25,7 +25,7 @@ alerts, troubleshooting). This file is just the map.
 | File | Role |
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
-| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. |
+| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
 | `lib.sh` | Shared "apply repo config" library `source`d by both of the above, so unit install, timer reconcile, and asset fetch live in one place and can't drift between bootstrap and redeploy. |
 | `install-nsk.sh` | Installs the optional `nsk` operator CLI on demand (not shipped by default). |
 | `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
@@ -53,6 +53,14 @@ alerts, troubleshooting). This file is just the map.
 `nftables-nodes.conf` (node box: default-deny inbound; only 22 / WireGuard, bitcoind RPC solely across `wg0`).
 
 ## Two things to know
+
+**App releases and pinned runtime dependencies have separate activation paths.** `deploy.sh <tag>` installs
+nullsink's two server binaries, optional `nsk`, client UI, and deploy configuration. Although that refreshed
+deploy tree contains the current Bitcoin Core, Monero, and `tinfoil-proxy` pins, `deploy.sh` never runs their
+installers. Pinned runtime dependency updates take effect only during a fresh setup or an applicable setup
+rerun: `setup.sh` updates dependencies for enabled app-box rails (and a local Bitcoin node), while
+`setup-nodes.sh` updates Bitcoin Core on a dedicated node box. This separation avoids silently restarting a
+rail daemon during an ordinary application deploy.
 
 **The flat layout is deliberate.** It looks like it wants subfolders, but the release tarball, the
 `install_units` glob (`deploy/*.service`/`*.timer`), every unit's `ExecStart=/opt/nullsink/deploy/...`
