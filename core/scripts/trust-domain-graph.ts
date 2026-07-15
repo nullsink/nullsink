@@ -146,7 +146,7 @@ export function runtimeModuleGraph(entries: string[]): RuntimeModuleGraph {
   while (stack.length) {
     const file = stack.pop()!;
     if (modules.has(file)) continue;
-    if (!isFile(file)) throw new Error(`world graph entry does not exist: ${file}`);
+    if (!isFile(file)) throw new Error(`runtime module graph entry does not exist: ${file}`);
     modules.add(file);
     if (!PARSED_EXTENSIONS.has(extname(file))) continue;
 

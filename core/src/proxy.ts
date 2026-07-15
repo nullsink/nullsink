@@ -1,13 +1,13 @@
-// Composition root for the PROXY service (prompt world). All side effects live here — env validation, the
+// Composition root for the PROXY service (proxy trust domain). All side effects live here — env validation, the
 // balance store, the HTTP port, the credit socket, timers, signal handlers. Request logic is in handler.ts,
 // which is pure/injectable and import-safe (importing it binds no port, starts no timer).
 //
 // Owns balances.db (tokens + holds journal + applied_orders) and the upstream provider keys. Serves the metered
 // /v1 paths + /balance + /v1/models on a loopback port behind Caddy, and runs the CREDIT SOCKET server — the one
-// door the payment world may open into this one (payments → proxy, `credit`).
+// door the payments trust domain may open into this one (payments → proxy, `credit`).
 //
-// It must never import payment-world code (no rails, no order store, no settle, no /buy). Enforced by
-// test/world-isolation.test.ts in the source graph and by scripts/assert-worlds.ts in Bun metadata + binary.
+// It must never import payments trust domain code (no rails, no order store, no settle, no /buy). Enforced by
+// test/trust-domain-isolation.test.ts in the source graph and by scripts/assert-trust-domains.ts in Bun metadata + binary.
 import { openDb, DB_PATH } from "./ledger/db";
 import { createProxyHandler } from "./handler";
 import { deny } from "./http";
@@ -46,9 +46,9 @@ const MAX_MESSAGES_BODY_BYTES = numEnv("MAX_MESSAGES_BODY_BYTES", 33_554_432, 10
 // that omit a cap still work. The hold is sized against it. 0 = strict (require an explicit cap).
 const DEFAULT_MAX_OUTPUT_TOKENS = numEnv("DEFAULT_MAX_OUTPUT_TOKENS", 0, 0, 1_000_000);
 
-// Global, identity-free throttle for THIS world's free reads (/balance, /v1/models). The payments service
+// Global, identity-free throttle for THIS trust domain's free reads (/balance, /v1/models). The payments service
 // runs its own bucket for /order-status + /rails and reads the SAME env names, so each default is sized at
-// half the intended aggregate — raising the shared env raises BOTH worlds' caps at once.
+// half the intended aggregate — raising the shared env raises BOTH trust domains' caps at once.
 const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });

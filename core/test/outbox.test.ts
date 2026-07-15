@@ -1,4 +1,4 @@
-// credit_outbox + payment-world revenue accessors on the orders store. These are the
+// credit_outbox + payments trust domain revenue accessors on the orders store. These are the
 // durable-crossing primitives the settle() rewrite builds on: enqueue is at-most-once per idempotency_key
 // (INSERT OR IGNORE, never throws), the sender drains unacked rows oldest-first and acks them, and revenue
 // now books here in pending.db instead of balances.db.

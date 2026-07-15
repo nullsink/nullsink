@@ -11,23 +11,26 @@ This doc maps how the pieces fit. For the privacy and money-safety guarantees se
 
 ## The shape: two processes over a pure core
 
-nullsink runs as two processes on one box, split by privilege rather than by scale. Each is a
-composition root — the only place that binds a port, starts timers, opens a database, and
-installs signal handlers.
+nullsink runs as two processes on one box, split by responsibility and runtime capability rather
+than by scale. Each is a composition root — the only place that binds a port, starts timers,
+opens a database, and installs signal handlers. Here, **trust domain** means an application-level
+code and data-flow boundary enforced by separate entrypoints, dependency closures, and binaries.
+The services currently share an OS user and environment file, so this is not a separate-UID or
+OS-sandbox boundary.
 
-- **`src/proxy.ts`** (the *prompt world*) serves the metered `/v1` paths and `GET /balance`,
+- **`src/proxy.ts`** (the *proxy trust domain*) serves the metered `/v1` paths and `GET /balance`,
   and owns `balances.db`. It installs the SIGTERM/SIGINT handler that drains in-flight requests
   before exit, force-settling live streams by billing the metered partial and refunding the rest,
   and at boot it refunds holds an ungraceful crash left stranded. Those are the two recovery
   paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that skipped it.
-- **`src/payments.ts`** (the *payment world*) serves `/buy`, `/order-status`, `/rails`, runs the
+- **`src/payments.ts`** (the *payments trust domain*) serves `/buy`, `/order-status`, `/rails`, runs the
   settlement poller, and owns `pending.db` and the watch-only rail wallets.
 
 A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
 The two meet at exactly one place: a unix socket over which payments delivers credits to the
 proxy, in one direction, with one verb. Neither router imports the other's code.
-`test/world-isolation.test.ts` derives exhaustive runtime closures from the TypeScript AST;
-`scripts/assert-worlds.ts` cross-checks them against Bun's bundled-input metadata and distinctive
+`test/trust-domain-isolation.test.ts` derives exhaustive runtime closures from the TypeScript AST;
+`scripts/assert-trust-domains.ts` cross-checks them against Bun's bundled-input metadata and distinctive
 symbols in the compiled executables. The proxy binary is the unit the sealed tier attests, so it
 must stay payments-free structurally, not by hoping a bundler tree-shakes.
 
@@ -59,8 +62,8 @@ client
 ```
 
 Caddy fronts both, routing each public path to exactly one of them. Each router fails closed:
-an unmatched path is a 404, so a path routed to the wrong world is a hard error rather than a
-silent cross-world call.
+an unmatched path is a 404, so a path routed to the wrong trust domain is a hard error rather than a
+silent cross-trust-domain call.
 
 The `/v1` branch matches an **exact-path** registry, not a prefix (so
 `/v1/messages/batches` isn't silently admitted); an unmatched path is denied — the router

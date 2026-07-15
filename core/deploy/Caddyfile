@@ -9,11 +9,11 @@
 #
 # Design:
 #   - TWO upstreams, both loopback-bound (HOST=127.0.0.1); only Caddy faces the internet.
-#       :8080  nullsink-proxy    — the prompt world: /v1/* + /balance
-#       :8081  nullsink-payments — the payment world: /buy + /order-status + /rails
+#       :8080  nullsink-proxy    — the proxy trust domain: /v1/* + /balance
+#       :8081  nullsink-payments — the payments trust domain: /buy + /order-status + /rails
 #     The two processes separate privilege: a request that carries a prompt never reaches the process that
 #     holds the payment→token link, and vice versa. Route each path to exactly one upstream — there is no
-#     shared router behind these ports, so a misrouted path is a hard 404, not a silent cross-world call.
+#     shared router behind these ports, so a misrouted path is a hard 404, not a silent cross-trust-domain call.
 #   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions + POST /v1/responses + GET /v1/models
 #     + GET /v1/models + GET /balance + POST /buy + POST /order-status + GET /rails.
 #   - /buy IS routed: a browser-side UI can only call a reachable endpoint, and we run no server-side BFF,
@@ -111,7 +111,7 @@
 		}
 	}
 
-	# --- Credit purchase (called by the UI). Tiny JSON body. PAYMENT WORLD -> :8081. ---
+	# --- Credit purchase (called by the UI). Tiny JSON body. PAYMENTS TRUST DOMAIN -> :8081. ---
 	handle /buy {
 		request_body {
 			max_size 4KB
@@ -122,7 +122,7 @@
 	}
 
 	# --- Order status (the UI polls a pending payment's progress, keyed by the token HASH — never the
-	#     raw token). Tiny JSON body, same as /buy; reveals no balance. PAYMENT WORLD -> :8081. ---
+	#     raw token). Tiny JSON body, same as /buy; reveals no balance. PAYMENTS TRUST DOMAIN -> :8081. ---
 	handle /order-status {
 		request_body {
 			max_size 4KB
@@ -134,7 +134,7 @@
 
 	# --- Active pay rails (the UI picker reads this to render the coin choices; reveals only which coins
 	#     we accept — already public on the marketing pages). Tiny GET, no body, no balance.
-	#     PAYMENT WORLD -> :8081. ---
+	#     PAYMENTS TRUST DOMAIN -> :8081. ---
 	handle /rails {
 		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For

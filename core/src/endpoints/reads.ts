@@ -1,5 +1,5 @@
-// PROMPT-world read endpoints — /balance and /v1/models — extracted from handler.ts. Cheap reads behind the
-// global, identity-free read throttle (no money gate), each `(req) => Promise<Response>`. The payment-world
+// PROXY TRUST DOMAIN read endpoints — /balance and /v1/models — extracted from handler.ts. Cheap reads behind the
+// global, identity-free read throttle (no money gate), each `(req) => Promise<Response>`. The payments trust domain
 // reads (/order-status, /rails) live in payment-reads.ts so the attested proxy never imports their source.
 import { deny } from "../http";
 import { hashToken } from "../ledger/hash";

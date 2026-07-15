@@ -2,8 +2,8 @@
 // end-to-end. proxy.ts and payments.ts are the split's wiring — ports, the credit-socket path, which store
 // feeds the credit server vs the sender — and nothing else covers them: no test imports them (they are pure
 // side-effect roots), and mutation testing skips them for that reason. A swapped port, a mismatched
-// CREDIT_SOCK default, or a store wired to the wrong side would pass every unit test, world-isolation, and
-// assert-worlds, and only surface at runtime. This catches exactly that class.
+// CREDIT_SOCK default, or a store wired to the wrong side would pass every unit test, trust-domain-isolation, and
+// assert-trust-domains, and only surface at runtime. This catches exactly that class.
 //
 // Flow: seed one credit into pending.db's outbox, boot payments (owns pending.db, runs the sender) and proxy
 // (owns balances.db, binds the socket + serves /balance), and assert the credit crosses and is readable via

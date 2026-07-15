@@ -1,11 +1,11 @@
-// The service-world policy is intentionally exhaustive. Ownership is derived from the two real composition
+// The trust-domain policy is intentionally exhaustive. Ownership is derived from the two real composition
 // roots; only a small reviewed set may appear in BOTH runtime closures, and every src module must either be
 // reachable from a service or be named as intentionally non-service. This avoids sampled deny-lists whose
 // omissions make a boundary test silently vacuous.
 import { readdirSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runtimeModuleGraph, type OpaqueRuntimeImport, type UnresolvedLocalImport } from "./world-graph";
+import { runtimeModuleGraph, type OpaqueRuntimeImport, type UnresolvedLocalImport } from "./trust-domain-graph";
 
 export const CORE_DIR = fileURLToPath(new URL("../", import.meta.url));
 export const SRC_DIR = resolve(CORE_DIR, "src");
@@ -13,7 +13,7 @@ export const PROXY_ROOT = "proxy.ts";
 export const PAYMENTS_ROOT = "payments.ts";
 
 // Pure infrastructure/contracts deliberately used by both binaries. This is an ALLOW-list for the exact
-// intersection, not a sample: a new shared module fails until its cross-world use is explicitly reviewed.
+// intersection, not a sample: a new shared module fails until its cross-trust-domain use is explicitly reviewed.
 export const INTENTIONAL_SHARED_RUNTIME = new Set([
   "credit-wire.ts",
   "endpoints/read-throttle.ts",
@@ -125,7 +125,7 @@ function union(...sets: Set<string>[]): Set<string> {
   return new Set(sets.flatMap((set) => [...set]));
 }
 
-export type WorldInspection = {
+export type TrustDomainInspection = {
   proxy: Set<string>;
   payments: Set<string>;
   shared: Set<string>;
@@ -145,7 +145,7 @@ export type WorldInspection = {
   opaque: OpaqueRuntimeImport[];
 };
 
-export function inspectServiceWorlds(coreDir = CORE_DIR): WorldInspection {
+export function inspectTrustDomains(coreDir = CORE_DIR): TrustDomainInspection {
   const srcDir = resolve(coreDir, "src");
   const proxyGraph = runtimeModuleGraph([resolve(srcDir, PROXY_ROOT)]);
   const paymentsGraph = runtimeModuleGraph([resolve(srcDir, PAYMENTS_ROOT)]);

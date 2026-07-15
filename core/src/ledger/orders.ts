@@ -54,8 +54,8 @@ export function openOrderStore(path: string) {
   // that reverse lookup. Cheap on a table bounded by MAX_OPEN_ORDERS.
   db.run(`CREATE INDEX IF NOT EXISTS idx_pending_hash ON pending_orders (hash)`);
 
-  // --- The payment→prompt-world credit crossing + the sales book — both PAYMENT-world state, so they
-  //     live here in pending.db and never in the prompt world's balances.db. ---
+  // --- The payment→proxy trust domain credit crossing + the sales book — both PAYMENTS TRUST DOMAIN state, so they
+  //     live here in pending.db and never in the proxy trust domain's balances.db. ---
 
   // credit_outbox: the durable, exactly-once credit hand-off. settle() writes a row here in the SAME
   // transaction that closes the order; the sender (credit-sender.ts) drains unacked rows into the balance
@@ -75,7 +75,7 @@ export function openOrderStore(path: string) {
   // coin (`asset` + `scale` = atomic-units-per-whole) and how much of it landed (`asset_atomic`), and the USD
   // credit issued. Holds NO token hash / address / identity — a "$X sale at time T", not a request log. It
   // lives here rather than in balances.db so coin amounts, locked rates, and txid-derived keys stay out of
-  // the prompt world; settle() writes it in the outbox transaction (booked iff a credit is enqueued).
+  // the proxy trust domain; settle() writes it in the outbox transaction (booked iff a credit is enqueued).
   db.run(`CREATE TABLE IF NOT EXISTS revenue (
   id           INTEGER PRIMARY KEY,
   at           INTEGER NOT NULL,

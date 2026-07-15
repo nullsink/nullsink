@@ -1,23 +1,23 @@
-// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payment-world code;
-// symmetrically, payments must not carry the prompt/balance world. These tests root the graph at the actual
+// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payments trust-domain code;
+// symmetrically, payments must not carry the proxy/balance trust domain. These tests root the graph at the actual
 // composition roots and parse every runtime import with TypeScript's AST. Build-time verification separately
-// checks Bun's metafiles and compiled-binary symbols (scripts/assert-worlds.ts).
+// checks Bun's metafiles and compiled-binary symbols (scripts/assert-trust-domains.ts).
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
-import { runtimeModuleGraph } from "../scripts/world-graph";
+import { runtimeModuleGraph } from "../scripts/trust-domain-graph";
 import {
   INTENTIONAL_PAYMENTS_ONLY_RUNTIME,
   INTENTIONAL_PROXY_ONLY_RUNTIME,
   INTENTIONAL_SHARED_RUNTIME,
-  inspectServiceWorlds,
+  inspectTrustDomains,
   sorted,
-} from "../scripts/world-policy";
+} from "../scripts/trust-domain-policy";
 
 type RuntimeForm = { name: string; source: string };
 
-// Each fixture makes one module prompt-owned (reachable from proxy.ts), then references it from payments.ts
+// Each fixture makes one module proxy-owned (reachable from proxy.ts), then references it from payments.ts
 // using another legal runtime-import spelling. If the parser misses that spelling, `owned.ts` disappears from
 // the intersection and the test fails. These are graph tests, not regex unit tests: resolution + traversal are
 // exercised along with parsing.
@@ -37,7 +37,7 @@ const RUNTIME_IMPORT_FORMS: RuntimeForm[] = [
 ];
 
 function fixtureIntersection(paymentsSource: string): string[] {
-  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-world-graph-"));
+  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-trust-domain-graph-"));
   try {
     writeFileSync(resolve(dir, "owned.ts"), "export default 1; export const value = 1; export type Shape = number;\n");
     writeFileSync(resolve(dir, "proxy.ts"), `import './owned';\n`);
@@ -58,12 +58,12 @@ function fixtureIntersection(paymentsSource: string): string[] {
 }
 
 for (const fixture of RUNTIME_IMPORT_FORMS) {
-  test(`world graph detects a cross-world ${fixture.name}`, () => {
+  test(`runtime module graph detects a cross-trust-domain ${fixture.name}`, () => {
     expect(fixtureIntersection(fixture.source)).toEqual(["owned.ts"]);
   });
 }
 
-test("world graph excludes imports and re-exports that TypeScript erases", () => {
+test("runtime module graph excludes imports and re-exports that TypeScript erases", () => {
   const typeOnly = `
     import type { Shape } from './owned';
     import { type Shape as InlineShape } from "./owned";
@@ -76,8 +76,8 @@ test("world graph excludes imports and re-exports that TypeScript erases", () =>
   expect(fixtureIntersection(typeOnly)).toEqual([]);
 });
 
-test("world graph reports computed dynamic imports and requires instead of silently dropping them", () => {
-  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-world-opaque-"));
+test("runtime module graph reports computed dynamic imports and requires instead of silently dropping them", () => {
+  const dir = mkdtempSync(resolve(tmpdir(), "nullsink-trust-domain-opaque-"));
   try {
     const entry = resolve(dir, "entry.ts");
     writeFileSync(
@@ -92,34 +92,34 @@ test("world graph reports computed dynamic imports and requires instead of silen
 });
 
 test("the composition-root graphs resolve every local runtime import and stay inside src", () => {
-  const worlds = inspectServiceWorlds();
-  expect(worlds.unresolved).toEqual([]);
-  expect(worlds.opaque).toEqual([]);
-  expect(sorted(worlds.outsideSource)).toEqual([]);
-  expect(worlds.proxy.has("proxy.ts")).toBe(true);
-  expect(worlds.payments.has("payments.ts")).toBe(true);
+  const trustDomains = inspectTrustDomains();
+  expect(trustDomains.unresolved).toEqual([]);
+  expect(trustDomains.opaque).toEqual([]);
+  expect(sorted(trustDomains.outsideSource)).toEqual([]);
+  expect(trustDomains.proxy.has("proxy.ts")).toBe(true);
+  expect(trustDomains.payments.has("payments.ts")).toBe(true);
 });
 
-test("every exclusive module remains in its reviewed service world", () => {
-  const worlds = inspectServiceWorlds();
-  expect(sorted(worlds.unexpectedProxyOnly)).toEqual([]);
-  expect(sorted(worlds.staleProxyOnlyAllowances)).toEqual([]);
-  expect(sorted(worlds.proxyOnly)).toEqual(sorted(INTENTIONAL_PROXY_ONLY_RUNTIME));
-  expect(sorted(worlds.unexpectedPaymentsOnly)).toEqual([]);
-  expect(sorted(worlds.stalePaymentsOnlyAllowances)).toEqual([]);
-  expect(sorted(worlds.paymentsOnly)).toEqual(sorted(INTENTIONAL_PAYMENTS_ONLY_RUNTIME));
+test("every exclusive module remains in its reviewed trust domain", () => {
+  const trustDomains = inspectTrustDomains();
+  expect(sorted(trustDomains.unexpectedProxyOnly)).toEqual([]);
+  expect(sorted(trustDomains.staleProxyOnlyAllowances)).toEqual([]);
+  expect(sorted(trustDomains.proxyOnly)).toEqual(sorted(INTENTIONAL_PROXY_ONLY_RUNTIME));
+  expect(sorted(trustDomains.unexpectedPaymentsOnly)).toEqual([]);
+  expect(sorted(trustDomains.stalePaymentsOnlyAllowances)).toEqual([]);
+  expect(sorted(trustDomains.paymentsOnly)).toEqual(sorted(INTENTIONAL_PAYMENTS_ONLY_RUNTIME));
 });
 
 test("only the exhaustively reviewed infrastructure set is shared by both services", () => {
-  const worlds = inspectServiceWorlds();
-  expect(sorted(worlds.unexpectedShared)).toEqual([]);
-  expect(sorted(worlds.staleSharedAllowances)).toEqual([]);
-  expect(sorted(worlds.shared)).toEqual(sorted(INTENTIONAL_SHARED_RUNTIME));
+  const trustDomains = inspectTrustDomains();
+  expect(sorted(trustDomains.unexpectedShared)).toEqual([]);
+  expect(sorted(trustDomains.staleSharedAllowances)).toEqual([]);
+  expect(sorted(trustDomains.shared)).toEqual(sorted(INTENTIONAL_SHARED_RUNTIME));
 });
 
 test("every src module is service-owned or explicitly non-service", () => {
-  const worlds = inspectServiceWorlds();
-  expect(sorted(worlds.reachedNonService)).toEqual([]);
-  expect(sorted(worlds.unclassifiedSource)).toEqual([]);
-  expect(sorted(worlds.staleNonServiceAllowances)).toEqual([]);
+  const trustDomains = inspectTrustDomains();
+  expect(sorted(trustDomains.reachedNonService)).toEqual([]);
+  expect(sorted(trustDomains.unclassifiedSource)).toEqual([]);
+  expect(sorted(trustDomains.staleNonServiceAllowances)).toEqual([]);
 });

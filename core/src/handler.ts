@@ -1,11 +1,11 @@
-// PROMPT-world request handler: the metered money path (POST /v1/*) plus the two free reads it owns
+// PROXY TRUST DOMAIN request handler: the metered money path (POST /v1/*) plus the two free reads it owns
 // (GET /balance, GET /v1/models). A factory over an injected dependency bag, so tests supply in-memory stores
 // and a stubbed upstream fetch — no port, no network. proxy.ts wires production deps; pure helpers (pricing,
 // usage, hashing) are imported directly.
 //
-// This module must NOT import anything payment-world (rails, the order store, /buy). The proxy binary is the
+// This module must NOT import anything from the payments trust domain (rails, the order store, /buy). The proxy binary is the
 // unit the sealed tier attests, so it must never bundle payments code — that's a structural guarantee, not a
-// tree-shaking hope. The combined both-worlds router lives in test/support/handler-combined.ts, which only
+// tree-shaking hope. The combined trust-domain router lives in test/support/handler-combined.ts, which only
 // the tests import; neither composition root does.
 import { hashToken } from "./ledger/hash";
 import { priceUsage, isReasoningModel, pricedModels } from "./cost";
@@ -172,7 +172,7 @@ export type ProxyHandlerDeps = {
   // that don't send a cap work. Provider-agnostic.
   defaultMaxOutputTokens?: number;
   upstreamFetch: typeof fetch; // injectable so tests stub the upstream without a network
-  // Global, identity-free throttle for this world's unauthenticated READ endpoints (/balance, /v1/models):
+  // Global, identity-free throttle for this trust domain's unauthenticated READ endpoints (/balance, /v1/models):
   // no money gate + a DB read per call, so a flood is pure free work — cap the aggregate rate. Fail-safe, no
   // IP/token key (privacy thesis). Omitted = no limit (e.g. tests). Each process gets its OWN bucket, so the
   // two together must be retuned or aggregate read capacity doubles. The metered endpoints deliberately get
@@ -193,8 +193,8 @@ export type ProxyHandlerDeps = {
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
 
-// Prompt-world route dispatch. Returns undefined when the path isn't ours, so the combined test router
-// (test/support/handler-combined.ts) can fall through to the payment-world routes. createProxyHandler wraps
+// Proxy trust-domain route dispatch. Returns undefined when the path isn't ours, so the combined test router
+// (test/support/handler-combined.ts) can fall through to the payments trust domain routes. createProxyHandler wraps
 // this with /healthz + the fail-closed 404.
 export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
   const {
@@ -233,7 +233,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
   // one provider (OpenAI + Tinfoil on /v1/chat/completions); handleMetered resolves the one a request means.
   const providersForPath = (pathname: string): Provider[] | undefined => PROVIDERS.get(pathname);
 
-  // This world's own (non-metered) endpoints — /balance + /v1/models — built over the balance store + the
+  // This trust domain's own (non-metered) endpoints — /balance + /v1/models — built over the balance store + the
   // served-model catalog. Each is `(req) => Promise<Response>`; the dispatcher below routes to them. The
   // metered money path (handleMetered) stays here in the handler.
   const endpoints = makeProxyEndpoints({
@@ -550,10 +550,10 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     }
   }
 
-  // Dispatch only the PROMPT-world paths. undefined = "not mine" (the combined router then tries the
-  // payment-world routes; createProxyHandler turns it into the fail-closed 404).
+  // Dispatch only the PROXY TRUST DOMAIN paths. undefined = "not mine" (the combined router then tries the
+  // payments trust domain routes; createProxyHandler turns it into the fail-closed 404).
   return function proxyRoutes(req: Request, url: URL): Promise<Response> | undefined {
-    // This world's free read: a token holder checks their own balance.
+    // This trust domain's free read: a token holder checks their own balance.
     if (req.method === "GET" && url.pathname === "/balance") return endpoints.balance(req);
     // The one /v1 path that's a free read, not a metered forward: the served-model catalog. Matched here (a
     // GET) before the POST-only metered routing below, so it never reaches handleMetered.
@@ -570,7 +570,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
   };
 }
 
-// The proxy service's HTTP handler: prompt-world routes + /healthz, fail-closed 404 on anything else.
+// The proxy service's HTTP handler: proxy trust domain routes + /healthz, fail-closed 404 on anything else.
 // proxy.ts wires this to Bun.serve.
 export function createProxyHandler(d: ProxyHandlerDeps): (req: Request) => Promise<Response> {
   const routes = buildProxyRoutes(d);

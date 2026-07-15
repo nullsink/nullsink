@@ -45,8 +45,8 @@ jobs:
           printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > client/src/version.ts   # baked into the client UI bundle (shown by the wordmark)
       - name: build server + operator-CLI binaries (linux-x64)
         run: |
-          # `build` compiles BOTH service binaries and then runs assert-worlds.ts, which verifies the parsed
-          # source graph, Bun's bundled-input metadata, and executable symbols. A cross-world import fails the
+          # `build` compiles BOTH service binaries and then runs assert-trust-domains.ts, which verifies the parsed
+          # source graph, Bun's bundled-input metadata, and executable symbols. A cross-trust-domain import fails the
           # release, not just CI.
           bun --filter './core' build       # -> core/nullsink-{proxy,payments}-linux-x64 (same script CI smoke-checks on every PR)
           bun --filter './core' build:nsk   # -> core/nsk-linux-x64 (the nsk ops CLI; same tag as the servers, can't drift)

@@ -1,5 +1,5 @@
 [Unit]
-Description=nullsink payments — buy rails + settlement poller (payment world)
+Description=nullsink payments — buy rails + settlement poller (payments trust domain)
 After=network-online.target
 Wants=network-online.target
 # Ordering ONLY, never Requires=/BindsTo=: /buy must keep quoting and the poller must keep detecting
@@ -12,7 +12,7 @@ OnFailure=status-alert@%n.service
 Type=simple
 # Same uid as nullsink-proxy.service — see the note there. Both open /var/lib/nullsink, but each opens only
 # its OWN database: this service never links the balance store (enforced at the module level by
-# test/world-isolation.test.ts and on the compiled binary by scripts/assert-worlds.ts).
+# test/trust-domain-isolation.test.ts and on the compiled binary by scripts/assert-trust-domains.ts).
 User=nullsink
 Group=nullsink
 WorkingDirectory=/opt/nullsink
