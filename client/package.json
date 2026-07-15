@@ -17,7 +17,7 @@
     "preview": "bunx --bun vite preview",
     "sync:models": "bun sync-models.ts",
     "typecheck": "tsc && tsc -p tsconfig.test.json",
-    "test": "tsc -p tsconfig.test.json && bun test"
+    "test": "tsc -p tsconfig.test.json && bun test --isolate"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.10.2",
