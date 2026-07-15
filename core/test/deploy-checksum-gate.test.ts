@@ -44,6 +44,49 @@ case "$MODE" in
     }
     if fake_install "$work"; then echo IF:REACHED_INSTALL; else echo IF:ABORTED; fi
     [ -e "$work/ACTIVATED" ] && echo ACTIVATED:YES || echo ACTIVATED:NO ;;
+  missing_under_if)
+    # A downloader can fail or claim success without producing a required file. Both cases must stop before
+    # verify_sums --ignore-missing (which cannot itself prove that every requested asset was downloaded).
+    fetch_asset() { return 0; }
+    fake_install() {
+      stage_binary_assets v9.9.9 "$work" || return 1
+      touch "$work/ACTIVATED"
+    }
+    if fake_install; then echo IF:REACHED_INSTALL; else echo IF:ABORTED; fi
+    [ -e "$work/ACTIVATED" ] && echo ACTIVATED:YES || echo ACTIVATED:NO ;;
+  manifest_omits_required)
+    fetch_asset() {
+      case "$2" in
+        nullsink-proxy-linux-x64|nullsink-payments-linux-x64) printf '%s\n' "$2" > "$3/$2" ;;
+        SHA256SUMS) ( cd "$3" && sha256sum nullsink-payments-linux-x64 > SHA256SUMS ) ;;
+      esac
+    }
+    fake_install() {
+      stage_binary_assets v9.9.9 "$work" || return 1
+      touch "$work/ACTIVATED"
+    }
+    if fake_install; then echo IF:REACHED_INSTALL; else echo IF:ABORTED; fi
+    [ -e "$work/ACTIVATED" ] && echo ACTIVATED:YES || echo ACTIVATED:NO ;;
+  shared_manifest)
+    manifest_fetches=0
+    fetch_asset() {
+      local name hash
+      if [ "$2" = SHA256SUMS ]; then
+        manifest_fetches=$((manifest_fetches + 1))
+        : > "$3/SHA256SUMS"
+        for name in asset-one asset-two; do
+          hash="$(printf '%s\n' "$name" | sha256sum | awk '{print $1}')"
+          printf '%s  %s\n' "$hash" "$name" >> "$3/SHA256SUMS"
+        done
+      else
+        printf '%s\n' "$2" > "$3/$2"
+      fi
+    }
+    mkdir -p "$work/release"
+    stage_release_manifest v9.9.9 "$work/release" || exit 1
+    stage_release_assets v9.9.9 "$work/one" "$work/release/SHA256SUMS" asset-one || exit 1
+    stage_release_assets v9.9.9 "$work/two" "$work/release/SHA256SUMS" asset-two || exit 1
+    echo MANIFEST_FETCHES:"$manifest_fetches" ;;
 esac
 `;
 
@@ -72,12 +115,43 @@ test("the gate holds when called under `if` with set -e suspended — the #79 by
   expect(o).toContain("ACTIVATED:NO");
 });
 
-test("every install_* site routes its checksum through verify_sums (no bare `sha256sum -c` at an install site)", () => {
+test("a missing required asset aborts under `if` before activation despite --ignore-missing", () => {
+  const r = run("missing_under_if");
+  const o = out(r);
+  expect(o).toContain("IF:ABORTED");
+  expect(o).toContain("ACTIVATED:NO");
+  expect(o).not.toContain("IF:REACHED_INSTALL");
+});
+
+test("a checksum manifest that omits one required asset cannot authorize activation", () => {
+  const r = run("manifest_omits_required");
+  const o = out(r);
+  expect(o).toContain("IF:ABORTED");
+  expect(o).toContain("ACTIVATED:NO");
+  expect(o).toContain("does not cover required asset nullsink-proxy-linux-x64");
+});
+
+test("multiple artifact stages can share one immutable manifest fetch", () => {
+  const r = run("shared_manifest");
+  expect(r.exitCode).toBe(0);
+  expect(out(r)).toContain("MANIFEST_FETCHES:1");
+});
+
+test("every release installer routes through one fail-explicit staging/checksum gate", () => {
   const lib = readFileSync(LIB, "utf8");
-  // All four asset installers must gate via verify_sums with an explicit `|| return 1`. Tolerant of the temp-var
-  // name and spacing so a benign rename doesn't trip it — only the SHAPE (verify_sums <dir> || return 1) matters.
-  const gates = lib.match(/verify_sums "\$\w+"\s*\|\|\s*return 1/g) ?? [];
-  expect(gates.length).toBe(4); // install_binary, install_nsk, install_deploy_tree, install_client_ui
+  expect(lib).toContain('fetch_asset "$tag" "$asset" "$dest" || return 1');
+  expect(lib).toContain('test -f "$dest/$asset" || return 1');
+  expect(lib).toContain('fetch_asset "$tag" \'SHA256SUMS\' "$dest" || return 1');
+  expect(lib).toContain('awk -v required="$asset"');
+  expect(lib).toContain('verify_sums_against "$dest" "$manifest" || return 1');
+  for (const asset of [
+    "nullsink-proxy-linux-x64",
+    "nsk-linux-x64",
+    "deploy-${tag}.tar.gz",
+    "nullsink-ui-${tag}.tar.gz",
+  ]) {
+    expect(lib).toContain(asset);
+  }
   // And none may fall back to the bare form that #79 removed (the shape set -e suspension bypasses). Target the
   // install-site temp var ("$tmp") specifically: verify_sums's OWN body legitimately runs `cd "$1" && sha256sum
   // -c`, so a looser pattern would false-match the very helper this gate routes through.

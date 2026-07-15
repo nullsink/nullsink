@@ -7,6 +7,9 @@ Wants=network-online.target
 # After= just avoids a guaranteed-failing first delivery attempt on a cold boot.
 After=nullsink-proxy.service
 OnFailure=status-alert@%n.service
+# Fail closed across a restore crash: both ledgers are one recovery unit, even though each process opens one.
+ConditionPathExists=!/var/lib/nullsink/.restore-in-progress
+ConditionPathExists=!/var/lib/nullsink/.deploy-in-progress
 
 [Service]
 Type=simple
@@ -30,6 +33,8 @@ RestartSec=2
 # in-flight this DB holds the ONLY payment→token link, and an unacked outbox row is a credit the customer has
 # PAID FOR but not yet received — losing it = a paid customer with nothing to credit. BACK IT UP.
 StateDirectory=nullsink
+StateDirectoryMode=0700
+UMask=0077
 Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
 
 # The credit crossing (payments → proxy, one direction, one verb). nullsink-proxy.service binds this socket

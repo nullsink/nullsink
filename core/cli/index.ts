@@ -4,11 +4,12 @@
 // sync-prices tool and the buyer-side gen-token tool are deliberately NOT bundled here.
 //
 // Subcommands are loaded with dynamic import(), NOT static imports: each opens its on-disk ledger INSIDE its
-// run() (after the root guard below), and lazy-loading keeps `version`/usage from pulling the ledger modules
-// at all. The guard-before-open guarantee now rests on run() opening the DB — never at module top (see the
-// note in each subcommand). KEEP index.ts's own static imports light (version + guard).
+// run() (after the root guard + process-lifetime shared maintenance lock below), and lazy-loading keeps
+// `version`/usage from pulling the ledger modules at all. KEEP index.ts's own static imports light: neither
+// the version, root guard, nor lock boundary imports a ledger module.
 import { BUILD_VERSION } from "../src/version";
 import { refuseRootOrExit } from "./guard";
+import { acquireLedgerLockOrExit } from "./ledger-lock";
 
 const COMMANDS: Record<string, () => Promise<(args: string[]) => void>> = {
   issue: () => import("./issue").then((m) => m.runIssue),
@@ -40,9 +41,10 @@ if (!load) {
   console.error(cmd ? `${USAGE}\n\nunknown command: ${cmd}` : USAGE);
   process.exit(1);
 }
-// Known ledger-opening command resolved — refuse to run as root BEFORE the dynamic import below opens
-// balances.db (a root open strands root-owned -wal/-shm the service user can't write; see guard.ts).
+// Known ledger-opening command resolved — refuse root, set umask 0077, reject durable maintenance markers,
+// and acquire the shared ledger lock BEFORE the dynamic import below can open balances.db/pending.db.
 refuseRootOrExit(cmd);
+acquireLedgerLockOrExit();
 load()
   .then((run) => run(process.argv.slice(3)))
   .catch((err) => {

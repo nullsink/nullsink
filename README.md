@@ -3,7 +3,7 @@
 An anonymous, account-less metered reverse proxy for Anthropic and OpenAI, paid in
 Monero or Bitcoin. Mint a bearer key in your browser,
 fund it on-chain, and call it from the official Anthropic/OpenAI SDKs by overriding the
-base URL. No account, no IP, no request logs.
+base URL. No account, no IP logs, no request-content logs.
 
 Two Bun + TypeScript workspaces:
 
@@ -195,14 +195,21 @@ artifacts and publishes them as a GitHub Release:
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
 - **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
 
-On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
-atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
-systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
-rolling the symlinks back to the previous release if either service is unhealthy.
-It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
-Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
-rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
-Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.
+For an existing box, fetch and checksum-verify the **target release's**
+`deploy-<tag>.tar.gz`, then run its `deploy/deploy.sh <tag> <verified-SHA256SUMS>`. Do not run the
+already-installed deployer: deployment semantics are part of the release, and an older script cannot safely
+activate a newer contract. The target deployer stages every artifact against one `SHA256SUMS` snapshot, stops
+the app and maintenance jobs, activates binaries, config, and UI while the durable reboot gate remains armed,
+flushes every touched filesystem before committing, then restarts and version-health-checks both services. Any
+failure restores and version-health-checks the previous matching proxy/payments/UI release. The exact copy-paste
+procedure is in [`core/deploy/README.md`](core/deploy/README.md). A durable deploy marker prevents both app
+services and backups from booting into a power-interrupted mixed activation; recovery remains an
+operator/staging-tested procedure rather than an automatic start.
+
+An ordinary app deploy deliberately does **not** install or upgrade Bitcoin Core, Monero, or
+`tinfoil-proxy`. Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
+rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated Bitcoin node
+box. First-time app bootstrap is `core/deploy/setup.sh`.
 
 ## License
 

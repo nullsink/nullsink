@@ -5,6 +5,11 @@ Wants=network-online.target
 # Page Telegram if this unit enters `failed` (a clean crash, or a crash-loop that trips the start limit).
 # Secondary to status-check.timer, which catches a hung-but-"active" or stalled service every 10 min.
 OnFailure=status-alert@%n.service
+# restore.sh writes this marker before replacing either ledger and removes it only after the pair validates.
+# A crash/power loss between the two renames must never boot one half of the app against mismatched money state.
+ConditionPathExists=!/var/lib/nullsink/.restore-in-progress
+# deploy.sh holds this durable marker while the two binaries/tree/units are not yet one bootable release.
+ConditionPathExists=!/var/lib/nullsink/.deploy-in-progress
 
 [Service]
 Type=simple
@@ -36,6 +41,8 @@ RestartSec=2
 # refunding everyone). It holds token hashes + balances + the applied-credit markers; no identity, no
 # request history. pending.db is in the same directory but belongs to nullsink-payments.service.
 StateDirectory=nullsink
+StateDirectoryMode=0700
+UMask=0077
 Environment=DB_PATH=/var/lib/nullsink/balances.db
 
 # The credit crossing. THIS service binds the socket; nullsink-payments connects to it. RuntimeDirectory is

@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
 # Bootstrap nullsink on a fresh Ubuntu box. Run as root: `bash setup.sh`.
-# Idempotent — safe to re-run to redeploy the latest code.
+# Safe to re-run for host/toolchain reconciliation. Existing app/UI upgrades go through deploy.sh's
+# multi-artifact transaction; setup never independently advances those coupled artifacts.
 set -euo pipefail
 
 # Quiet, non-interactive apt: skip needrestart's repeated "Scanning processes…" blocks + any prompts.
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 
-# Runs AS ROOT. The box runs only compiled binaries (server + `nsk`) + the deploy/ scripts; setup.sh fetches
-# them as verified Release assets (install_binary / install_nsk / install_deploy_tree) via plain curl — no
-# gh, no auth, no source tree, no Bun.
+# Runs AS ROOT. The box runs only compiled server binaries + the deploy/ scripts; setup.sh fetches them as
+# verified Release assets (install_bootstrap_release / install_deploy_tree) via plain curl — no gh, no auth,
+# no source tree, no Bun. The optional `nsk` operator CLI is installed separately by install-nsk.sh.
 APP_DIR="/opt/nullsink"
 SVC_USER="nullsink"
 ENV_FILE="/etc/nullsink.env"
 WEB_BASE="/var/www/nullsink"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web symlink)
+SETUP_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Shared "apply repo config" library (install_units + health_ok + the PROXY_UNIT/PAYMENTS_UNIT names), also
 # sourced by deploy.sh so the unit-install glob is one source of truth across bootstrap + redeploy. The app
 # is TWO units; both run as $SVC_USER. Needs APP_DIR/ENV_FILE (set above).
 # shellcheck source=deploy/lib.sh
-source "$(dirname "$0")/lib.sh"
+source "$SETUP_SCRIPT_DIR/lib.sh"
+# shellcheck source=deploy/maintenance-lock.sh
+source "$SETUP_SCRIPT_DIR/maintenance-lock.sh"
 
 # --- Output: numbered, colorized (tty only) section headers + a collected "next steps" checklist ---
 if [ -t 1 ]; then _b=$'\e[1m'; _c=$'\e[1;36m'; _g=$'\e[1;32m'; _y=$'\e[1;33m'; _z=$'\e[0m'; else _b=''; _c=''; _g=''; _y=''; _z=''; fi
@@ -28,16 +32,42 @@ note() { printf '%s    !! %s%s\n' "$_y" "$1" "$_z"; }   # an inline warning / in
 PENDING=()
 todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add to the end-of-run checklist
 
+complete_live_release() {  # print tag iff proxy + payments + UI pointers form one readable lockstep release
+  local proxy_target pay_target web_target proxy_path pay_path web_path tag
+  proxy_target="$(readlink /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"
+  pay_target="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
+  web_target="$(readlink "$WEB_BASE/current-web" 2>/dev/null || true)"
+  proxy_path="$(readlink -f /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"
+  pay_path="$(readlink -f /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
+  web_path="$(readlink -f "$WEB_BASE/current-web" 2>/dev/null || true)"
+  [ -x "$proxy_path" ] && [ -x "$pay_path" ] && [ -d "$web_path" ] &&
+    [ -r "$web_path/index.html" ] || return 1
+  tag="$(matching_release_tag "$proxy_target" "$pay_target" "$web_target" || true)"
+  [ -n "$tag" ] || return 1
+  printf '%s\n' "$tag"
+}
+
+has_live_release_pointer() {
+  [ -e /usr/local/lib/nullsink/current-proxy ] || [ -L /usr/local/lib/nullsink/current-proxy ] ||
+    [ -e /usr/local/lib/nullsink/current-payments ] || [ -L /usr/local/lib/nullsink/current-payments ] ||
+    [ -e "$WEB_BASE/current-web" ] || [ -L "$WEB_BASE/current-web" ]
+}
+
 # --- Pinned external toolchain (bump deliberately) ---
 # nullsink app release: the GitHub Release tag whose self-contained binary the box runs (fetched + checksum-
-# verified + activated by install_binary). AUTO-BUMPED to each release by release-please — the
+# verified + activated by install_bootstrap_release). AUTO-BUMPED to each release by release-please — the
 # `x-release-please-version` annotation on the line below + the generic extra-files entry in
 # release-please-config.json — so a fresh bootstrap installs the current release without a manual edit.
-# deploy/deploy.sh <tag> rolls an existing box to any tag. Env-overridable so a re-run can pin a specific
+# The verified target bundle's deploy.sh rolls an existing box to any tag. Env-overridable so a setup re-run
+# can pin a specific
 # release WITHOUT editing this file (and without downgrading a box already past the default):
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
 RELEASE_TAG="${RELEASE_TAG:-v1.8.2}" # x-release-please-version
+valid_release_tag "$RELEASE_TAG" || {
+  echo "!! invalid RELEASE_TAG=$RELEASE_TAG (expected vMAJOR.MINOR.PATCH[-PRERELEASE][+BUILD])" >&2
+  exit 1
+}
 # Bitcoin Core pin + install helper live in lib.sh now (shared with setup-nodes.sh, so the pin can't drift).
 # Monero + tinfoil-proxy pins stay here — they're app-box-only (the node box installs only bitcoind).
 # Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
@@ -110,12 +140,56 @@ install_verified_tinfoil_proxy() {  # the Tinfoil attestation sidecar — fetch+
   echo "    tinfoil-proxy ${TINFOIL_PROXY_VERSION} installed"
 }
 
+# Serialize before reading the live release. Otherwise a deploy can finish between this snapshot and the
+# lock acquisition, leaving setup to install scripts/units using a stale version decision.
+acquire_maintenance_lock "setup" || exit 1
+
+# A setup rerun may update external host/toolchain pins only when its app/UI release already matches this
+# setup tree. Refuse BEFORE packages, deploy-tree extraction, or unit installation: advancing config/scripts
+# ahead of old binaries would bypass deploy.sh's rollback transaction even if the binary steps below skipped.
+CURRENT_LIVE_RELEASE="$(complete_live_release || true)"
+if [ -n "$CURRENT_LIVE_RELEASE" ] && [ "$CURRENT_LIVE_RELEASE" != "$RELEASE_TAG" ]; then
+  echo "!! existing app + UI are $CURRENT_LIVE_RELEASE, but this setup targets $RELEASE_TAG" >&2
+  echo "!! setup made no changes; fetch + verify the target release's deploy bundle, run its deploy.sh," >&2
+  echo "!! then re-run setup (see the target deploy/README.md upgrade procedure)." >&2
+  exit 1
+fi
+RESUMING_TARGET_RELEASE=0
+if [ -z "$CURRENT_LIVE_RELEASE" ] && has_live_release_pointer; then
+  if release_pointers_target_tag "$RELEASE_TAG" \
+      /usr/local/lib/nullsink/current-proxy \
+      /usr/local/lib/nullsink/current-payments \
+      "$WEB_BASE/current-web"; then
+    RESUMING_TARGET_RELEASE=1
+    note "incomplete $RELEASE_TAG activation detected; setup will re-stage both app + UI before repairing it"
+    systemctl disable --now "$PROXY_UNIT" "$PAYMENTS_UNIT" >/dev/null || {
+      echo "!! could not stop + disable both app units before repairing the partial release" >&2
+      exit 1
+    }
+  else
+    echo "!! partial/mixed app release pointers do not all target $RELEASE_TAG; setup made no changes" >&2
+    echo "!! repair a complete proxy + payments + UI baseline before running setup or deploy.sh" >&2
+    exit 1
+  fi
+fi
+
 step "Installing system packages"
 apt-get update -qq
 # sqlite3 CLI: required by deploy/backup.sh, restore.sh and the status-check integrity probe (the APP uses
 # bun:sqlite, an embedded engine — the CLI is a separate package). age: encrypted off-box backups.
 # bzip2: the Monero CLI .tar.bz2 bundle. curl: fetches the public Release assets (binaries + tarballs).
 apt-get install -y -qq curl bzip2 sqlite3 age
+
+# Fetch one immutable manifest view for every nullsink release asset this setup may install. A fresh setup
+# must not authorize its deploy tree, service binaries, and UI against different snapshots of a mutable
+# release. External runtime pins below retain their separate, embedded upstream checksums.
+SETUP_RELEASE_DIR="$(mktemp -d)"
+trap 'rm -rf "$SETUP_RELEASE_DIR"' EXIT
+stage_release_manifest "$RELEASE_TAG" "$SETUP_RELEASE_DIR" || {
+  echo "!! could not stage the $RELEASE_TAG checksum manifest; refusing release-asset installation" >&2
+  exit 1
+}
+SETUP_RELEASE_MANIFEST="$SETUP_RELEASE_DIR/SHA256SUMS"
 
 step "Configuring unattended SECURITY upgrades (no auto-reboot)"
 # Deterministic patching instead of inheriting whatever the base image enables. Ubuntu's shipped
@@ -143,11 +217,16 @@ step "Installing the deploy tree to $APP_DIR (release tarball)"
 # deploy_binary function, which is already parsed into memory + exits, so it has no such hazard.)
 if [ "$(realpath "$(dirname "$0")/.." 2>/dev/null)" = "$APP_DIR" ]; then
   note "running from $APP_DIR/deploy — using the already-extracted deploy tree (no re-fetch)"
-elif install_deploy_tree "$RELEASE_TAG" "$APP_DIR"; then
-  :
 else
-  todo "deploy tree not installed (check network/tag + re-run) — backup/status-check/alert units can't run until $APP_DIR/deploy exists"
+  install_deploy_tree "$RELEASE_TAG" "$APP_DIR" "$SETUP_RELEASE_MANIFEST" || {
+    echo "!! deploy tree was not replaced; refusing to install units or continue with mixed scripts" >&2
+    exit 1
+  }
 fi
+[ -f "$APP_DIR/deploy/Caddyfile" ] && [ -f "$APP_DIR/deploy/lib.sh" ] || {
+  echo "!! $APP_DIR/deploy is incomplete; refusing to install units" >&2
+  exit 1
+}
 chown -R "$SVC_USER:$SVC_USER" "$APP_DIR"
 chmod +x "$APP_DIR"/deploy/*.sh   # status-check.sh + alert.sh + backup.sh are run by systemd; keep the exec bit
 
@@ -233,24 +312,26 @@ step "Installing systemd units"
 # per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
 install_units
 
-step "Installing the app binaries (pinned release)"
-# Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in
-# lockstep). Guarded: a failure here (network down, or the release missing) must NOT abort the rest of the
-# bootstrap — the box still gets units/edge/firewall; finish the binary install after. The units won't start
-# until the binaries are in place (next step warns/continues).
-if install_binary "$RELEASE_TAG"; then
-  :
+step "Installing the app + client UI (pinned release)"
+# Fresh bootstrap is one coupled operation: fetch, checksum-verify, and extract BOTH service binaries and the
+# browser UI before moving any live pointer. Guarded: a staging failure still lets setup finish host/rail work,
+# but app units remain disabled. If power is lost while the three same-tag pointers are being flipped, the next
+# setup run recognizes only that exact target-tag partial state, re-stages both sides, and completes it.
+APP_RELEASE_READY=0
+if [ -n "$CURRENT_LIVE_RELEASE" ]; then
+  APP_RELEASE_READY=1
+  note "app + UI already form complete $CURRENT_LIVE_RELEASE; setup leaves them untouched"
 else
-  todo "app binaries not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — $PROXY_UNIT/$PAYMENTS_UNIT won't start until they're in place"
-fi
-
-step "Installing the client UI (pinned release)"
-# Fetch+verify+activate the pinned release's UI into the versioned webroot ($WEB_BASE/web-<tag> + a current-web
-# symlink); the Caddyfile serves {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}. Guarded like the binary above.
-if install_client_ui "$RELEASE_TAG" "$WEB_BASE"; then
-  :
-else
-  todo "client UI not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — Caddy 404s the site until $WEB_BASE/current-web exists"
+  SETUP_APP_STAGE="$SETUP_RELEASE_DIR/app-release"
+  if install_bootstrap_release "$RELEASE_TAG" "$SETUP_APP_STAGE" "$WEB_BASE" "$SETUP_RELEASE_MANIFEST" &&
+      [ "$(complete_live_release || true)" = "$RELEASE_TAG" ]; then
+    APP_RELEASE_READY=1
+    if [ "$RESUMING_TARGET_RELEASE" -eq 1 ]; then
+      note "repaired the interrupted $RELEASE_TAG app + UI activation"
+    fi
+  else
+    todo "app + UI not installed as one complete $RELEASE_TAG release (re-run fresh setup; same-target partial activation is repairable) — $PROXY_UNIT/$PAYMENTS_UNIT remain disabled"
+  fi
 fi
 
 step "Configuring tinfoil-proxy (enclave attestation sidecar)"
@@ -273,21 +354,31 @@ fi
 
 step "Installing systemd services"
 # Each unit's ExecStart points at its binary (/usr/local/lib/nullsink/current-{proxy,payments}), installed in
-# the step above.
-enable_app_units
+# the step above. Never arm a fresh box to boot one half of an incomplete app/UI activation.
+if [ "$APP_RELEASE_READY" -eq 1 ]; then
+  enable_app_units
+else
+  systemctl disable --now "$PROXY_UNIT" "$PAYMENTS_UNIT" >/dev/null || {
+    echo "!! incomplete app/UI release and could not stop + disable both app units" >&2
+    exit 1
+  }
+  note "app units left stopped + disabled until setup completes one app/UI release"
+fi
 # The env file EXISTING isn't the same as it being CONFIGURED. On a re-run (env present) we (re)start so the
 # buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the box boots and the rails
 # work, yet /v1/messages will 401 until a real Anthropic key is set (or run OpenAI-only via OPENAI_API_KEY —
 # at least one provider key is required for nullsink-proxy to boot). A freshly templated env is left for the
 # operator to fill; nullsink-payments would start fine, but there's no reason to run half the app.
-if [ "$FRESH_ENV" -eq 0 ]; then
+if [ "$APP_RELEASE_READY" -eq 1 ] && [ "$FRESH_ENV" -eq 0 ]; then
   restart_app
   _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_akey" ] || [ "$_akey" = replace-me ]; then
     todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $PROXY_UNIT"
   fi
-else
+elif [ "$APP_RELEASE_READY" -eq 1 ]; then
   todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $PROXY_UNIT $PAYMENTS_UNIT"
+else
+  todo "Re-run setup to complete the app + UI release before starting $PROXY_UNIT/$PAYMENTS_UNIT"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"

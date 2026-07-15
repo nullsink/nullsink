@@ -5,9 +5,15 @@
 [Unit]
 Description=nullsink rail + app health check (one-shot; run by status-check.timer)
 OnFailure=status-alert@%n.service
+# Timers can become immediately due when re-enabled. A skipped condition is successful and does not page;
+# restore explicitly runs a real check after activation; deploy re-enables this timer only after app health.
+ConditionPathExists=!/var/lib/nullsink/.restore-in-progress
+ConditionPathExists=!/var/lib/nullsink/.restore-activation-pending
+ConditionPathExists=!/var/lib/nullsink/.deploy-in-progress
 
 [Service]
 Type=oneshot
+UMask=0077
 # HEARTBEAT_URL (the dead-man's-switch ping target) lives in the app env file; `-` so a missing file is fine.
 EnvironmentFile=-/etc/nullsink.env
 # Root: needs to read /etc/monero-wallet-rpc.env and hit the localhost RPC + /healthz without permission

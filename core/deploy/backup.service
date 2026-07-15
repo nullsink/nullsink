@@ -5,6 +5,15 @@
 Description=nullsink billing-DB backup (one-shot; run by backup.timer)
 # Page Telegram if a backup run fails (a silent backup failure = creeping data-loss risk).
 OnFailure=status-alert@%n.service
+# Never snapshot the short-lived half-restored pair left by a killed/power-lost restore. restore.sh stops the
+# timer too; this persistent condition is the reboot backstop until an operator safely resumes the restore.
+ConditionPathExists=!/var/lib/nullsink/.restore-in-progress
+# During post-restore health activation the pair is valid, but restore still holds the exclusive ledger lock.
+# A Persistent timer may fire immediately when restarted; skip that transient launch successfully (no
+# OnFailure page). restore.sh removes this marker only after readiness, releases the lock, then explicitly
+# starts one fresh backup so the skipped calendar occurrence is not lost.
+ConditionPathExists=!/var/lib/nullsink/.restore-activation-pending
+ConditionPathExists=!/var/lib/nullsink/.deploy-in-progress
 
 [Service]
 Type=oneshot
@@ -17,6 +26,8 @@ EnvironmentFile=-/etc/nullsink.env
 # ProtectSystem=strict. balances.db belongs to nullsink-proxy and pending.db to nullsink-payments, but they
 # share one uid and one directory, so a single backup run still snapshots both consistently.
 StateDirectory=nullsink
+StateDirectoryMode=0700
+UMask=0077
 Environment=DB_DIR=/var/lib/nullsink
 ExecStart=/opt/nullsink/deploy/backup.sh
 

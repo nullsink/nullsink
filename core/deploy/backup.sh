@@ -3,32 +3,48 @@
 # (User=nullsink in backup.service), so the SQLite sidecars it touches stay service-owned — a root
 # `.backup` leaves root-owned -wal/-shm that break the service's billing writes.
 #
-# Uses sqlite3 `.backup`, which snapshots a CONSISTENT copy even while the service is writing under WAL (a
-# plain `cp` is NOT safe). Produces ONE timestamped artifact in BACKUP_DIR:
+# Holds the shared ledger-maintenance lock for the run, then uses sqlite3 `.backup`, which snapshots a
+# CONSISTENT copy even while the service is writing under WAL (a plain `cp` is NOT safe). Produces ONE
+# timestamped artifact in BACKUP_DIR, published only after validation + fsync + atomic rename:
 #   - if BACKUP_AGE_RECIPIENT is set: an age-encrypted tar (`.tar.age`) — REQUIRED posture for OFF-BOX
 #     copies: the box holds only the public recipient, so a box compromise can't decrypt past backups.
 #   - else: a plain tar (fine for an on-box copy; do NOT push an unencrypted tar off-box).
 # If BACKUP_PUSH_CMD is set, it's run as a shell snippet with $ARTIFACT = the finished artifact path, to
 # ship it off-box (scp/rsync/rclone — your choice; destination-agnostic). Prunes to BACKUP_KEEP newest.
 #
-# Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD,
-# BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP.
+# Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD, BACKUP_KEEP.
 set -euo pipefail
+umask 077
+
+# shellcheck source=deploy/backup-safety.sh
+source "$(dirname "$0")/backup-safety.sh"
+# shellcheck source=deploy/maintenance-lock.sh
+source "$(dirname "$0")/maintenance-lock.sh"
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqlite3)" >&2; exit 1; }
 
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 mkdir -p "$BACKUP_DIR"
+acquire_backup_run_lock "$BACKUP_DIR" || exit 1
+acquire_ledger_shared_lock "$DB_DIR" "ledger backup" || exit 1
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+artifact_tmp=""
+# shellcheck disable=SC2329 # invoked by the EXIT trap below
+cleanup_backup() {
+  rm -rf "$work"
+  if [ -n "$artifact_tmp" ] && { [ -e "$artifact_tmp" ] || [ -L "$artifact_tmp" ]; }; then
+    rm -f "$artifact_tmp"
+  fi
+}
+trap cleanup_backup EXIT
 
 # Consistent snapshots via .backup (NOT cp). The CLI opens its OWN connection, so set a busy_timeout (the
 # app's PRAGMA doesn't apply here) — else a concurrent settler write lock returns SQLITE_BUSY and aborts the
-# run. pending.db may be absent (Anthropic-only / rail off) — skip it.
+# run. Both ledgers are mandatory on current installations; a missing pending.db is a page-worthy failure.
 #
 # ORDER IS LOAD-BEARING: pending.db FIRST, then balances.db. The two hold opposite halves of a credit —
 # pending.db's credit_outbox records that a credit was DELIVERED (acked_at), balances.db's applied_orders that
@@ -38,15 +54,10 @@ trap 'rm -rf "$work"' EXIT
 # an artifact whose outbox claims a delivery the ledger never saw, and restoring it silently destroys a
 # customer's PAID credit — the sender skips acked rows, and nothing else remembers the debt. The opposite
 # skew is harmless: a credit applied after pending's snapshot is simply redelivered on the next poll and lands
-# as already_applied (creditOnce is idempotent).
-# restore.sh re-arms the outbox regardless, which also covers restoring one DB without the other.
-files=()
-if [ -f "$DB_DIR/pending.db" ]; then
-  sqlite3 -cmd '.timeout 10000' "$DB_DIR/pending.db" ".backup '$work/pending.db'"
-  files+=(pending.db)
-fi
-sqlite3 -cmd '.timeout 10000' "$DB_DIR/balances.db" ".backup '$work/balances.db'"
-files+=(balances.db)
+# as already_applied (creditOnce is idempotent). Restore this matched pair. A one-DB/skewed restore cannot
+# reconstruct an acknowledged credit after its outbox payload has been privacy-scrubbed; restore.sh can only
+# re-arm legacy acked rows that still retain a real hash and amount.
+backup_snapshot_databases "$DB_DIR" "$work"
 
 # Bitcoin watch-only wallet LABELS (address→order-index map). These are wallet-local metadata — NOT on-chain
 # and NOT re-derivable from the descriptor/seed — so a bitcoind datadir loss would orphan the deposit→order
@@ -74,26 +85,24 @@ tar -C "$work" -cf "$work/backup.tar" "${files[@]}"
 if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
   command -v age >/dev/null || { echo "BACKUP_AGE_RECIPIENT set but 'age' is not installed (apt-get install age)" >&2; exit 1; }
   artifact="$BACKUP_DIR/backup-$STAMP.tar.age"
-  age -r "$BACKUP_AGE_RECIPIENT" -o "$artifact" "$work/backup.tar"
+  artifact_tmp="$(mktemp "$BACKUP_DIR/.backup-$STAMP.tar.age.partial.XXXXXX")"
+  age -r "$BACKUP_AGE_RECIPIENT" "$work/backup.tar" > "$artifact_tmp"
+  artifact_format=age
 else
   artifact="$BACKUP_DIR/backup-$STAMP.tar"
-  cp "$work/backup.tar" "$artifact"
+  artifact_tmp="$(mktemp "$BACKUP_DIR/.backup-$STAMP.tar.partial.XXXXXX")"
+  cp "$work/backup.tar" "$artifact_tmp"
+  artifact_format=tar
 fi
-chmod 600 "$artifact"
+backup_publish_candidate "$artifact_tmp" "$artifact" "$artifact_format"
+artifact_tmp=""
 echo "backup: $artifact ($(stat -c %s "$artifact" 2>/dev/null || echo '?') bytes)"
 
 # Ship off-box (operator-configured; destination-agnostic). $ARTIFACT is the finished file. REFUSE to push
 # an UNENCRYPTED artifact: pending.db carries the subaddr→token link the two-DB split exists to isolate, so
-# a plaintext off-box copy is the worst privacy regression in the system. Set BACKUP_AGE_RECIPIENT, or
-# BACKUP_PUSH_ALLOW_PLAINTEXT=1 to override (e.g. an encrypted-transport on-box→on-box hop).
-if [ -n "${BACKUP_PUSH_CMD:-}" ]; then
-  if [ -z "${BACKUP_AGE_RECIPIENT:-}" ] && [ "${BACKUP_PUSH_ALLOW_PLAINTEXT:-0}" != 1 ]; then
-    echo "refusing to push an UNENCRYPTED artifact off-box — set BACKUP_AGE_RECIPIENT (or BACKUP_PUSH_ALLOW_PLAINTEXT=1)" >&2
-    exit 1
-  fi
-  echo "push: shipping $(basename "$artifact") off-box"
-  ARTIFACT="$artifact" bash -c "$BACKUP_PUSH_CMD"
-fi
+# a plaintext off-box copy is the worst privacy regression in the system. There is deliberately no override:
+# transport encryption does not protect the destination's at-rest copy.
+backup_push_artifact "$artifact" "${BACKUP_PUSH_CMD:-}" || exit 1
 
 # Retention: keep the BACKUP_KEEP most-recent artifacts, prune older ones. Collect via mapfile (NOT a
 # bare `ls | tail` pipeline): under `set -euo pipefail`, one of the two globs is ALWAYS unmatched (a box has

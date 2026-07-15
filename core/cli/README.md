@@ -23,7 +23,7 @@ nsk orders [--rail monero|bitcoin] [--format table|csv|json]   in-flight (unpaid
 full (the `table` view abbreviates them for reading); the buyer also gets their hash from the `/buy` flow.
 
 `orders` is the **live** view — the in-flight `pending_orders` (quoted by `/buy`, awaiting payment). It reads
-a *different* DB, `pending.db` (the only place the payment↔token-hash link lives), and follows the `balances`
+a *different* DB, `pending.db` (the only place the payment↔token-hash link lives until delivery ack), and follows the `balances`
 convention: the `table` view abbreviates the hash **and** the pay-to address for reading, while `csv`/`json`
 carry both in full for export (rows to stdout, summary to stderr). That link is the operator's to see and is
 transient (rows self-clear at the reaper); the isolation guarantee is about a *balances.db* leak, not this
@@ -34,7 +34,11 @@ It opens the on-disk SQLite ledger (`/var/lib/nullsink/balances.db` by default; 
 `orders` instead reads its sibling `pending.db`),
 so it runs **on the box, as the service user**: `sudo -u nullsink nsk issue 17`. A root open would leave
 root-owned WAL sidecars the service can't write, so `nsk` **refuses to run as root** (override with
-`NSK_ALLOW_ROOT=1` for a deliberate break-glass run).
+`NSK_ALLOW_ROOT=1` for a deliberate break-glass run). Ledger-opening commands also set umask `0077`, reject
+durable restore-swap, restore-activation, and deploy markers, and hold a shared
+`/var/lib/nullsink/.ledger.lock` for their full process
+lifetime. `restore.sh --apply` takes the exclusive side and fails before stopping services if an operator CLI
+command is still active. `version` and usage remain DB- and lock-free.
 
 `nsk` is **optional and opt-in**: the box does not ship it by default. Install it on demand with
 `sudo deploy/install-nsk.sh` (defaults to the running server's tag; pass a tag to choose one). Once
@@ -53,7 +57,9 @@ break-glass / bootstrap path — `/buy` is the primary purchasing flow.
 ## Dev / buyer tools (NOT in `nsk`, NOT on the box)
 
 - **`gen-token.ts`** — buyer-side: prints a token + its hash for the hash-only buy flow (the buyer keeps
-  the token, sends only the hash to `/buy`). DB-free by design (imports only `cli/mint`). Run with Bun.
+  the token, sends only the hash to `/buy` with the required `X-Nullsink-Quote-Contract: 2` header).
+  `/buy` is a versioned UI-private contract, not a compatibility-stable public API. DB-free by design
+  (imports only `cli/mint`). Run with Bun.
 - **`sync-prices.ts`** — dev-only: fetches models.dev and rewrites `src/cost/prices.json` (the committed
   price catalog the app reads at startup). Run on a dev checkout, review the diff, commit, then cut a release.
   Never on the box (it needs the network + writes the source tree).
