@@ -50,11 +50,15 @@ const MAX_BUY_BODY_BYTES = 4 * 1024;
 // slack before the internal reap. ORDER_BACKSTOP_MS is the absolute safety net (internal only).
 const ORDER_TTL_MS = numEnv("ORDER_TTL_MS", 4 * 60 * 60 * 1000, 5 * 60 * 1000, 30 * 24 * 60 * 60 * 1000);
 const REAP_GRACE_MS = numEnv("REAP_GRACE_MS", 30 * 60 * 1000, 60 * 1000, 24 * 60 * 60 * 1000);
+// One duration drives both sides of the near-deadline hand-off: the reaper keeps an unseen order through
+// this horizon, and /buy tells the client to keep hash-only status tracking through the same instant. Keep
+// the sum here so a configured grace can never silently drift from the browser contract.
+const ORDER_TRACKING_MS = ORDER_TTL_MS + REAP_GRACE_MS;
 const ORDER_BACKSTOP_MS = numEnv("ORDER_BACKSTOP_MS", 24 * 60 * 60 * 1000, 60 * 60 * 1000, 30 * 24 * 60 * 60 * 1000);
 // Backstop must outlast the unfunded-reap horizon — else it fires first, silently disabling the fast reap AND
 // maybe dropping an order still confirming. numEnv validates vars independently, so guard this relation here.
-if (ORDER_BACKSTOP_MS <= ORDER_TTL_MS + REAP_GRACE_MS) {
-  log.error("boot", `ORDER_BACKSTOP_MS (${ORDER_BACKSTOP_MS}) must exceed ORDER_TTL_MS + REAP_GRACE_MS (${ORDER_TTL_MS + REAP_GRACE_MS})`);
+if (ORDER_BACKSTOP_MS <= ORDER_TRACKING_MS) {
+  log.error("boot", `ORDER_BACKSTOP_MS (${ORDER_BACKSTOP_MS}) must exceed ORDER_TTL_MS + REAP_GRACE_MS (${ORDER_TRACKING_MS})`);
   process.exit(1);
 }
 // Global, identity-free /buy bucket: capacity = burst, refill/min = sustained.
@@ -71,6 +75,9 @@ const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerS
 
 // The one on-disk store this service owns. The proxy opens balances.db; neither touches the other's.
 const orders = openOrderStore(PENDING_DB_PATH);
+const rearmedLegacyCredits = orders.rearmLegacyAckedCredits();
+if (rearmedLegacyCredits > 0)
+  log.warn("credit", `re-armed ${rearmedLegacyCredits} legacy acknowledged credit(s) for idempotent delivery + payload clearing`);
 
 // Ephemeral live payment progress for /order-status, fed by the poller each tick. Held here, not the DB — it's a
 // display aid, not money, and is re-derived on the next poll after a restart.
@@ -97,6 +104,7 @@ const handler = createPaymentsHandler({
   buyMinUsd: BUY_MIN_USD,
   buyMaxUsd: BUY_MAX_USD,
   orderTtlMs: ORDER_TTL_MS,
+  orderTrackingMs: ORDER_TRACKING_MS,
   maxOpenOrders: MAX_OPEN_ORDERS,
   maxBuyBodyBytes: MAX_BUY_BODY_BYTES,
   buyRateLimit,
@@ -128,39 +136,46 @@ const sendCredit = makeSocketSender(CREDIT_SOCK, CREDIT_TIMEOUT_MS);
 // Past POLL_FAIL_ALERT the tick emits a greppable ERROR marker so the monitor pages.
 const pollFailsByRail = new Map<string, number>();
 
-// Poll ONE rail: scope the wallet query + settle + status to THIS rail's own open orders. Errors are isolated
-// (logged, retried next tick) so one rail's wallet/node outage can't stall the others.
+// One outcome path owns the streak + log classification for EVERY failure in a rail tick: opening the order
+// store, asking the wallet, settling, and refreshing status. Keeping those failures in one category matters:
+// a healthy wallet followed by a broken DB/settler is just as blind to deposits as an unreachable wallet.
+// Never pass the caught value here — DB/RPC errors can contain user-linked values.
+function recordRailPollOutcome(railName: string, succeeded: boolean): void {
+  const prevFails = pollFailsByRail.get(railName) ?? 0;
+  const outcome = classifyPollOutcome(prevFails, succeeded, POLL_FAIL_ALERT);
+  pollFailsByRail.set(railName, outcome.fails);
+  if (outcome.event === "blind")
+    log.error("poll", `[${railName}] POLL BLIND: ${outcome.fails} consecutive poll failures — deposit detection is DOWN`);
+  else if (outcome.event === "transient") log.warn("poll", `[${railName}] poll failed`);
+  else if (outcome.event === "recovered")
+    log.info("poll", `[${railName}] poll recovered after ${prevFails} consecutive failures — deposit detection restored`);
+}
+
+// Poll ONE rail: scope the wallet query + settle + status to THIS rail's own open orders. The whole attempt is
+// isolated (logged, retried next tick) so one rail's wallet, DB, settler, or status failure can't stall the
+// others. A tick is successful only after every step completes; otherwise a post-wallet failure must not clear
+// an existing blind streak or disappear inside Promise.allSettled().
 async function pollRail(rail: PayRail): Promise<void> {
-  const watch = orders.openOrders(rail.name).map((o) => o.order_index);
-  let transfers: Incoming[] = [];
-  if (watch.length > 0) {
-    try {
+  try {
+    const watch = orders.openOrders(rail.name).map((o) => o.order_index);
+    let transfers: Incoming[] = [];
+    if (watch.length > 0)
       transfers = await rail.incomingTransfers(watch);
-    } catch (err) {
-      const o = classifyPollOutcome(pollFailsByRail.get(rail.name) ?? 0, false, POLL_FAIL_ALERT);
-      pollFailsByRail.set(rail.name, o.fails);
-      if (o.event === "blind")
-        log.error("poll", `[${rail.name}] POLL BLIND: ${o.fails} consecutive incomingTransfers failures — deposit detection is DOWN: ${log.errMsg(err)}`);
-      else log.warn("poll", `[${rail.name}] incomingTransfers failed: ${log.errMsg(err)}`);
-      return;
-    }
+    settle(transfers, orders, Date.now(), {
+      scale: rail.scale,
+      asset: rail.name,
+      rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
+      backstopMs: ORDER_BACKSTOP_MS,
+      unfundedReapMs: ORDER_TRACKING_MS,
+    });
+    // Refresh the live /order-status view AFTER settle has removed credited/reaped orders, so closed ones drop out.
+    // Unlike settle's reap guard (durable pending_orders.seen_at), this map is process-local and empty after a
+    // restart — /order-status reports `detected` from seen_at until the wallet repopulates it.
+    orderStatus.update(transfers, orders.openOrders(rail.name).map((o) => o.order_index), rail.name);
+    recordRailPollOutcome(rail.name, true);
+  } catch {
+    recordRailPollOutcome(rail.name, false);
   }
-  const prevFails = pollFailsByRail.get(rail.name) ?? 0;
-  const recovered = classifyPollOutcome(prevFails, true, POLL_FAIL_ALERT);
-  if (recovered.event === "recovered")
-    log.info("poll", `[${rail.name}] poll recovered after ${prevFails} consecutive failures — deposit detection restored`);
-  pollFailsByRail.set(rail.name, recovered.fails);
-  settle(transfers, orders, Date.now(), {
-    scale: rail.scale,
-    asset: rail.name,
-    rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
-    backstopMs: ORDER_BACKSTOP_MS,
-    unfundedReapMs: ORDER_TTL_MS + REAP_GRACE_MS,
-  });
-  // Refresh the live /order-status view AFTER settle has removed credited/reaped orders, so closed ones drop out.
-  // Unlike settle's reap guard (durable pending_orders.seen_at), this map is process-local and empty after a
-  // restart — /order-status reports `detected` from seen_at until the wallet repopulates it.
-  orderStatus.update(transfers, orders.openOrders(rail.name).map((o) => o.order_index), rail.name);
 }
 
 // Each tick polls every active rail independently — allSettled so one rail's failure can't block another — then
@@ -187,7 +202,9 @@ function tick(): void {
   if (polling) return; // don't let a slow tick overlap the next — this is also the sender's re-entrancy guard
   polling = true;
   pollOnce()
-    .catch((e) => log.error("poll", `tick error: ${log.errMsg(e)}`))
+    // A thrown DB/runtime error may carry uncontrolled values. The service state + fixed category are enough
+    // to page and diagnose locally without persisting the exception string.
+    .catch(() => log.error("poll", "tick failed"))
     .finally(() => {
       polling = false;
     });

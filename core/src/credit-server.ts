@@ -19,7 +19,7 @@ export function createCreditHandler(balances: BalanceStore, now: () => number = 
     // better to wedge the durable outbox — nothing is lost — than to credit under a shape the two sides don't share.
     const wire = req.headers.get(CREDIT_WIRE_HEADER);
     if (wire !== String(CREDIT_WIRE_VERSION)) {
-      log.error("credit", `wire version mismatch: got ${wire ?? "none"}, expected ${CREDIT_WIRE_VERSION} — refusing`);
+      log.error("credit", `wire version mismatch (expected ${CREDIT_WIRE_VERSION}) — refusing`);
       return Response.json({ error: "wire_version_mismatch" }, { status: 400 });
     }
 

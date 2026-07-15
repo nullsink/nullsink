@@ -29,6 +29,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> = {}) {
     buyMinUsd: 5,
     buyMaxUsd: 2000,
     orderTtlMs: 4 * 60 * 60 * 1000,
+    orderTrackingMs: (4 * 60 + 30) * 60 * 1000,
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,

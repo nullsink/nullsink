@@ -69,8 +69,10 @@ runbook + the final box configs). The drain window is the one place a paid depos
    /var/lib/bitcoind/nullsink.bak`, add `wallet=nullsink` to the conf, `systemctl restart bitcoind`.
    Migrate, never re-import from the xpub: an order's PK is the wallet's derivation index — a fresh
    keypool collides with keyed orders, a pruned node can't rescan, and a reset keypool re-issues indices
-   whose old un-swept UTXOs would match future orders after the 24h idempotency-marker purge (a
-   double-credit path, not merely an inconvenience). If a cutover attempt aborts, destroy the `.bak` and
+   whose old un-swept UTXOs could satisfy and close colliding future orders. Durable transaction markers
+   prevent a previously applied deposit from crediting twice, but that can leave the colliding new order
+   closed without its intended credit; a deposit never applied to the ledger could instead land on the wrong
+   order. If a cutover attempt aborts, destroy the `.bak` and
    take a fresh `backupwallet` inside the next attempt's drain — a stale snapshot recreates the
    prune-window and collision failures. Afterwards delete every transient copy of the wallet backup on
    both boxes and any hop machine — it holds the xpub, which derives all past and future deposit

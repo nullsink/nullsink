@@ -1,9 +1,10 @@
 // Operational logging. This system stores almost no user data by design, so these journald lines ARE the
-// primary debugging + monitoring signal — no per-request record, no APM, nothing else. Two hard rules:
+// primary debugging + monitoring signal — no routine per-request record or APM. Exceptional upstream,
+// billing, and wallet failures do emit minimized event lines. Two hard rules:
 //
 //   1. PRIVACY INVARIANT — a warn/error/info line must NEVER carry a user-linkable field: never a token
-//      hash next to an address, never a txid next to a hash. When in doubt, log a count or a truncated
-//      id, not the linking pair.
+//      hash next to an address, and no token/hash/address/txid/prompt/response in event text. When in doubt,
+//      log a count or our own finite category/status, not an identifier or free-form provider response.
 //
 //   2. LEVELS map to journald priority so `journalctl -p err` / `-p warning` filter. systemd parses a
 //      leading `<N>` (SyslogLevelPrefix, on by default for StandardOutput=journal); we emit it only under

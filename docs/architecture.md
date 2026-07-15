@@ -1,10 +1,10 @@
 # Architecture
 
-nullsink is a metered proxy in front of Anthropic and OpenAI. A user prepays with
+nullsink is a metered proxy in front of Anthropic, OpenAI, and Tinfoil. A user prepays with
 Monero or Bitcoin, gets a bearer token, and spends it against a balance. Each request
 is forwarded upstream with *our* provider key and billed for exact usage. We keep no
-identity and no request logs: a token is a bearer secret, and only its SHA-256 hash is
-ever stored.
+identity, access logs, or prompt/response logs. Exceptional upstream and billing failures produce
+content-minimized journal events, but a token is a bearer secret and only its SHA-256 hash is ever stored.
 
 This doc maps how the pieces fit. For the privacy and money-safety guarantees see
 [trust-model.md](trust-model.md); for the billing math see [billing-model.md](billing-model.md).
@@ -92,10 +92,11 @@ second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin H
   idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
   a row exists while a hold is outstanding, and survivors are refunded at boot).
 - **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
-  `credit_outbox` (credits owed to the balance ledger). Orders are the **only** place the payment
-  ↔ token link lives, in a separate database on purpose: a leak of `balances.db` can't reveal who
-  funded which token. The link is dropped when the order settles. Coin amounts, locked rates, and
-  transaction-derived keys stay on this side of the wall too.
+  `credit_outbox` (credits owed to the balance ledger). The payment ↔ token link exists only here:
+  first on the order, then on its unacked outbox row while delivery is still owed. A definite ledger
+  ack atomically replaces the active row's hash and amount with empty/zero values, leaving only its
+  transaction-derived idempotency key and timestamps. A leak of `balances.db` therefore can't reveal who funded which
+  token. Coin amounts, locked rates, and transaction-derived keys stay on the payment side too.
 
 Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
 / `financials`) is the exception and a second writer: it opens both directly on the box, and
@@ -112,7 +113,7 @@ Settlement and crediting now live in different processes, so the hand-off is a *
 outbox** rather than a function call. `settle()` writes a `credit_outbox` row in the same
 `pending.db` transaction that closes the order: if the row exists, the sale happened. A sender
 drains unacked rows over the unix socket, and only marks a row acked once the proxy confirms the
-credit is durable.
+credit is durable. That ack also clears the active row's token hash and amount in the same statement.
 
 That gives at-least-once delivery. The receiver makes it exactly-once: `creditOnce` commits the
 balance credit and its `applied_orders` marker in a single `balances.db` transaction, keyed by the
@@ -136,16 +137,26 @@ credit, while both processes answer `/healthz` and every unit reads `active`. So
 
 ```
 POST /buy {hash, credit_usd, rail?}                              [payments]
+  X-Nullsink-Quote-Contract: 2  (required UI/payment-state contract)
   → quote the coin's USD rate, lock it
   → mint a per-order address
   → store the pending order (pending.db)
-  → return {pay_to, amount, expires_at, ...}
+  → return {contract: 2, pay_to, amount, created_at, expires_at, tracking_until, ...}
+client → POST /order-status {hash, address}                     [payments]
+  → return {contract: 2, server_now, state, ...}
+  → only then expose still-payable initiation details; old/malformed contracts stay locked
   ─ ─ ─ ─ ─ (user pays on-chain) ─ ─ ─ ─ ─
 poller tick → rail.incomingTransfers() → settle()               [payments]
   → one transaction: drop the order, book the sale, enqueue the credit
   → drain the outbox over the credit socket
        → creditOnce(hash) → ack                                 [proxy]
 ```
+
+`/buy` is a versioned UI-private contract, not a stable third-party API. The required
+`X-Nullsink-Quote-Contract: 2` header binds order creation to the client payment state machine shipped
+with this release. A newer server rejects an already-loaded older bundle with `409
+client_upgrade_required`; that tab remains safely unable to create another payable address until the user
+refreshes it onto the current bundle.
 
 **Spend** — billing a request:
 

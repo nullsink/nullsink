@@ -11,13 +11,19 @@ import { readThrottled } from "./read-throttle";
 // padded past any real address to waste the exact-match lookup.
 const MAX_ADDRESS_LEN = 128;
 
+// Successful /order-status envelopes are versioned independently from /buy. A loaded client can therefore
+// tell whether the payment service it is polling still has the queued-credit/finalizing semantics it relies
+// on. This matters during rollback: an older service can truthfully say `closed` while a credit is still in
+// flight, so a new client must not treat an unversioned response as permission to replace the quote.
+const ORDER_STATUS_CONTRACT = 2 as const;
+
 // POST /order-status: live payment progress for an in-flight order, keyed by the token's HASH (never the raw
 // token — that goes only to /balance). The hash already crossed the wire to /buy, so this leaks nothing new;
-// it reveals only how far along a payment is, never the balance. Once an order settles the row is dropped
-// (settle.ts), so a credited/reaped/never-existed order all read `closed` — the dropped-link privacy
-// property. The client confirms the actual credit via /balance.
+// it reveals only how far along a payment is, never the balance. Once an order settles the row is dropped;
+// while its existing outbox row is still unacked we conservatively report `finalizing`, then collapse
+// credited/reaped/never-existed into `closed` after definite delivery. The client confirms via /balance.
 export function makeOrderStatus(d: PaymentsEndpointDeps) {
-  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, orderStatus, readRateLimit } = d;
+  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, hasUnackedCreditForHash, orderStatus, readRateLimit, now = Date.now } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
     if (throttled) return throttled;
@@ -37,7 +43,12 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
       address = body.address;
     }
     const order = address !== null ? openOrderByHashAddress(hash, address) : latestOpenOrderByHash(hash);
-    if (!order) return Response.json({ state: "closed" });
+    if (!order)
+      return Response.json({
+        contract: ORDER_STATUS_CONTRACT,
+        server_now: now(),
+        state: hasUnackedCreditForHash(hash) ? "finalizing" : "closed",
+      });
     // Format by the ORDER's rail (a BTC order shows BTC sats/unit even while Monero is also active).
     // Fallback fires only if a rail is dropped from PAY_RAILS with open orders still live — it would then
     // render in the WRONG coin's scale/unit, so drain a rail's open orders before removing it.
@@ -66,6 +77,8 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
           ? "detected"
           : "waiting";
     return Response.json({
+      contract: ORDER_STATUS_CONTRACT,
+      server_now: now(),
       state,
       confirmations,
       required: r.confirmations,

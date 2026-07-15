@@ -1,12 +1,13 @@
 // The core privacy invariant (LOAD-BEARING). The customer's token is their money and their only identity.
-// The server, Caddy, and the operator must never see the raw token, only its SHA-256 hash.
+// It crosses same-origin TLS for API authentication and balance checks, is hashed in-process, and is never
+// persisted raw. Purchase and payment-status endpoints receive only its SHA-256 hash.
 //
 //   1. Generate in-browser: "0sink_" + base64url(32 bytes from crypto.getRandomValues) + a 4-char checksum.
 //      crypto.getRandomValues, NEVER Math.random — the 256-bit unguessability (the 43 random chars) is what
 //      keeps the public /balance validity-oracle safe. The checksum adds NO entropy.
 //   2. Hash in-browser with SubtleCrypto: SHA-256(token) -> lowercase hex (64 chars).
-//   3. POST only the hash to /buy. The raw token never leaves the page over the network
-//      (except the one /balance header, same-origin, TLS).
+//   3. POST only the hash to /buy and /order-status. Send the raw bearer only as same-origin TLS
+//      authentication for metered API calls and /balance; the receiving process hashes it immediately.
 //
 // The FORMAT + checksum + paste-validation live in the shared pure leaf core/src/token-format.ts, imported
 // here AND by the core CLI minter (core/cli/mint.ts) so a UI-minted token and a CLI-minted one are

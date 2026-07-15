@@ -16,6 +16,8 @@ export const OWN_API_ERROR_CODES = [
   "invalid_address",
   "invalid_amount",
   "unknown_rail",
+  "client_upgrade_required",
+  "order_in_progress",
   "busy_try_later",
   "rate_unavailable",
   "wallet_unavailable",

@@ -2,13 +2,27 @@
 // durable-crossing primitives the settle() rewrite builds on: enqueue is at-most-once per idempotency_key
 // (INSERT OR IGNORE, never throws), the sender drains unacked rows oldest-first and acks them, and revenue
 // now books here in pending.db instead of balances.db.
-import { test, expect } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
+import { unlinkSync } from "node:fs";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
 import { drainCreditOutbox } from "./support/drain";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
 const HASH = "a".repeat(64);
+const MIGRATION_DB = `/tmp/nullsink-outbox-migration-${process.pid}.db`;
+
+function removeDb(path: string): void {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try {
+      unlinkSync(path + suffix);
+    } catch {
+      // Not present.
+    }
+  }
+}
+
+afterEach(() => removeDb(MIGRATION_DB));
 
 test("enqueueCredit is idempotent per idempotency_key (INSERT OR IGNORE): first wins, repeat is a no-op", () => {
   const o = openOrderStore(":memory:");
@@ -25,8 +39,68 @@ test("listUnackedCredits returns unacked rows oldest-first; ackCredit removes a 
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:a", "tx:b"]);
   o.ackCredit("tx:a", 500);
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]); // acked row drops out
+  expect(
+    o.db.query<{ hash: string; micros: number; acked_at: number }, [string]>(
+      "SELECT hash, micros, acked_at FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("tx:a"),
+  ).toEqual({ hash: "", micros: 0, acked_at: 500 }); // delivery payload is scrubbed, key remains
   o.ackCredit("tx:a", 999); // re-ack is harmless
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]);
+});
+
+test("payments startup safely re-arms historical acked payloads, then a definite ack tombstones them", () => {
+  removeDb(MIGRATION_DB);
+  const legacy = openOrderStore(MIGRATION_DB);
+  legacy.enqueueCredit("acked", HASH, 5_000_000, 100);
+  legacy.enqueueCredit("live", "b".repeat(64), 7_000_000, 200);
+  // Recreate the pre-migration ack shape: delivery marked complete, payload still retained.
+  legacy.db.run("UPDATE credit_outbox SET acked_at = 300 WHERE idempotency_key = 'acked'");
+  legacy.db.close();
+
+  const migrated = openOrderStore(MIGRATION_DB);
+  // Opening the store is schema-only: an operator's read-only `nsk` command must not mutate delivery state.
+  expect(
+    migrated.db.query<{ idempotency_key: string; hash: string; micros: number; acked_at: number | null }, []>(
+      "SELECT idempotency_key, hash, micros, acked_at FROM credit_outbox ORDER BY created_at",
+    ).all(),
+  ).toEqual([
+    { idempotency_key: "acked", hash: HASH, micros: 5_000_000, acked_at: 300 },
+    { idempotency_key: "live", hash: "b".repeat(64), micros: 7_000_000, acked_at: null },
+  ]);
+  expect(migrated.rearmLegacyAckedCredits()).toBe(1);
+  expect(migrated.listUnackedCredits()).toEqual([
+    { idempotency_key: "acked", hash: HASH, micros: 5_000_000 },
+    { idempotency_key: "live", hash: "b".repeat(64), micros: 7_000_000 },
+  ]);
+  migrated.ackCredit("acked", 400);
+  expect(
+    migrated.db.query<{ hash: string; micros: number; acked_at: number }, [string]>(
+      "SELECT hash, micros, acked_at FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("acked"),
+  ).toEqual({ hash: "", micros: 0, acked_at: 400 });
+  migrated.db.close();
+});
+
+test("legacy re-arm repairs a missing receiver marker and harmlessly dedupes one already applied", () => {
+  const store = openOrderStore(":memory:");
+  const balances = openDb(":memory:");
+  const otherHash = "b".repeat(64);
+  store.enqueueCredit("already", HASH, 5_000_000, 100);
+  store.enqueueCredit("missing", otherHash, 7_000_000, 200);
+  // Both rows have the old shape: acked in pending.db while still retaining delivery payloads.
+  store.db.run("UPDATE credit_outbox SET acked_at = 300");
+  expect(balances.creditOnce(HASH, 5_000_000, "already", 250)).toBe(true);
+
+  expect(store.rearmLegacyAckedCredits()).toBe(2);
+  drainCreditOutbox(store, balances, 400);
+  expect(balances.getBalance(HASH)).toBe(5_000_000); // existing marker prevented a double credit
+  expect(balances.getBalance(otherHash)).toBe(7_000_000); // missing marker was repaired
+  expect(store.listUnackedCredits()).toEqual([]);
+  expect(
+    store.db.query<{ n: number }, []>(
+      "SELECT count(*) AS n FROM credit_outbox WHERE acked_at IS NOT NULL AND hash = '' AND micros = 0",
+    ).get()?.n,
+  ).toBe(2); // both definite outcomes cleared their active delivery payload
 });
 
 test("acking every row leaves an empty work list (the drained-clean state)", () => {

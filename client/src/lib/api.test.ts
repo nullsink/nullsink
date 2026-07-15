@@ -2,7 +2,7 @@
 // test (QuotePay.test mocks the whole module away). Each request's body/headers and each status/error branch
 // is exercised against a stubbed global fetch. Privacy-critical: the raw token may appear ONLY in /balance.
 import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, creditVerificationErrorMessage, paymentStatusErrorMessage, toReadFailure, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
+import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, creditVerificationErrorMessage, paymentStatusErrorMessage, quoteExpiresAt, quoteTrackingUntil, toReadFailure, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
 
 type Call = { url: string; init?: RequestInit };
 let calls: Call[] = [];
@@ -35,12 +35,39 @@ test("requestQuote omits `rail` when not given, includes it when given", async (
   expect(bodyOf(calls[0])).toEqual({ hash: "HASH", credit_usd: 25, rail: "bitcoin" });
   expect(calls[0].url).toBe("/buy");
   expect((calls[0].init!.method)).toBe("POST");
+  expect(new Headers(calls[0].init!.headers).get("x-nullsink-quote-contract")).toBe("2");
 });
 
-test("requestQuote returns the parsed quote on 200", async () => {
-  const quote = { pay_to: "8addr", amount: "0.12345678", unit: "BTC", pay_uri: "bitcoin:8addr?amount=0.12345678", rate_usd: 60000, confirmations_required: 3, expires_at: 1234 };
+test("requestQuote returns the parsed v2 quote on 200", async () => {
+  const quote = { contract: 2, pay_to: "8addr", amount: "0.12345678", unit: "BTC", pay_uri: "bitcoin:8addr?amount=0.12345678", rate_usd: 60000, confirmations_required: 3, created_at: 1000, expires_at: 1234, tracking_until: 5678 };
   stubFetch(() => json(quote));
-  expect(await requestQuote("H", 50)).toEqual(quote);
+  expect(await requestQuote("H", 50)).toMatchObject(quote);
+});
+
+test("requestQuote marks an older response as unsafe for payment initiation", async () => {
+  // This is the actual immediately-previous response shape: it had tracking_until, but not the created_at
+  // required to turn those server timestamps into a skew-safe relative browser clock.
+  const quote = { pay_to: "8addr", amount: "0.12345678", unit: "BTC", pay_uri: "bitcoin:8addr?amount=0.12345678", rate_usd: 60000, confirmations_required: 3, expires_at: 1234, tracking_until: 5678 };
+  stubFetch(() => json(quote));
+  const result = await requestQuote("H", 50);
+  expect(result).toMatchObject({ ...quote, _initiation_clock_untrusted: true });
+  expect(result.tracking_until).toBe(5678);
+});
+
+test("requestQuote does not infer a trusted contract from timing fields alone", async () => {
+  const quote = { pay_to: "8addr", amount: "0.12345678", unit: "BTC", pay_uri: "bitcoin:8addr?amount=0.12345678", rate_usd: 60000, confirmations_required: 3, created_at: 10_000, expires_at: 11_000, tracking_until: 12_000 };
+  stubFetch(() => json(quote));
+  expect(await requestQuote("H", 50)).toMatchObject({ ...quote, _initiation_clock_untrusted: true });
+});
+
+test("requestQuote anchors server-authored durations to its monotonic request start", async () => {
+  const wire = { contract: 2, pay_to: "8addr", amount: "0.12345678", unit: "BTC", pay_uri: "bitcoin:8addr?amount=0.12345678", rate_usd: 60000, confirmations_required: 3, created_at: 10_000, expires_at: 11_000, tracking_until: 12_000 };
+  stubFetch(() => json(wire));
+  const quote = await requestQuote("H", 50);
+  expect(quote._request_started_at).toBeNumber();
+  expect(quote._request_started_wall_at).toBeNumber();
+  expect(quoteExpiresAt(quote)).toBe(1_000);
+  expect(quoteTrackingUntil(quote)).toBe(2_000);
 });
 
 test("requestQuote throws {code:'network', status:0} when fetch itself rejects", async () => {
@@ -86,8 +113,10 @@ test("checkBalance distinguishes rate limit, network, and server failures withou
   expect(balanceErrorMessage({ kind: "network", status: 0 })).toMatch(/connection/i);
   expect(balanceErrorMessage({ kind: "server", status: 500 })).toMatch(/temporarily unavailable/i);
   expect(toReadFailure({ kind: "rate_limited", status: 429 })).toEqual({ kind: "rate_limited", status: 429 });
-  expect(toReadFailure(new Error("unexpected"))).toEqual({ kind: "network", status: 0 });
+  expect(toReadFailure(new Error("unexpected"))).toEqual({ kind: "unknown", status: 0 });
+  expect(balanceErrorMessage({ kind: "unknown", status: 0 })).toMatch(/complete the balance check/i);
   expect(paymentStatusErrorMessage({ kind: "network", status: 0 })).toMatch(/payment status/i);
+  expect(paymentStatusErrorMessage({ kind: "unknown", status: 0 })).toMatch(/don(?:'|’)t resend/i);
   expect(creditVerificationErrorMessage({ kind: "server", status: 503 })).toMatch(/verify your credit/i);
 });
 
@@ -111,15 +140,17 @@ test("getRails reports an unestablished set on !ok, on a thrown fetch, and on an
 
 // --- fetchOrderStatus (hash-only; never the raw token) -----------------------
 test("fetchOrderStatus POSTs the hash and returns parsed status; preserves typed transient failures", async () => {
-  stubFetch(() => json({ state: "confirming", confirmations: 2, required: 10 }));
+  stubFetch(() => json({ contract: 2, server_now: 12_345, state: "confirming", confirmations: 2, required: 10 }));
   const st = await fetchOrderStatus("HASH");
+  expect(st.contract).toBe(2);
+  expect(st.server_now).toBe(12_345);
   expect(st.state).toBe("confirming");
   expect(bodyOf(calls[0])).toEqual({ hash: "HASH" }); // no address key when the caller omits it
   expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key"); // hash-only; no raw token on this path
 
   // With the tracked order's address, it rides in the body so the server scopes to THAT order (still no token).
   calls = [];
-  stubFetch(() => json({ state: "confirming", confirmations: 2, required: 10 }));
+  stubFetch(() => json({ contract: 2, server_now: 12_346, state: "confirming", confirmations: 2, required: 10 }));
   await fetchOrderStatus("HASH", "PAY_TO_ADDR");
   expect(bodyOf(calls[0])).toEqual({ hash: "HASH", address: "PAY_TO_ADDR" });
   expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key");
@@ -150,6 +181,8 @@ test("buyErrorMessage maps known codes to calm copy and falls back for the rest"
   expect(buyErrorMessage("network")).toMatch(/connection/i);
   // the busy/limit/wallet codes (429s + transient wallet outage) each get their own calm, distinct copy
   expect(buyErrorMessage("busy_try_later")).toMatch(/system is busy/i);
+  expect(buyErrorMessage("order_in_progress")).toMatch(/already has a payment in progress.*don't send again/i);
+  expect(buyErrorMessage("client_upgrade_required")).toMatch(/out of date.*refresh/i);
   expect(buyErrorMessage("rate_limited")).toMatch(/busy right now/i);
   expect(buyErrorMessage("wallet_unavailable")).toMatch(/temporarily unavailable/i);
   expect(buyErrorMessage("payments_error")).toMatch(/payments are temporarily unavailable/i);

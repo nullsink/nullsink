@@ -66,13 +66,13 @@ export function Layout({
             reassurance and left nothing for the two warnings that can cost money (no refunds; lose
             the key) — understated negations also read more credible than shouted ones.
             role="list" restores list semantics that `list-style: none` strips in Safari/VoiceOver. */}
-        <ul className="nots" role="list" aria-label="what we don't collect">
+        <ul className="nots" role="list" aria-label="what we don't retain">
           <li>no accounts</li>
           <li>no email</li>
           <li>no names</li>
           <li>no passwords</li>
-          <li>no IP</li>
-          <li>no request logs</li>
+          <li>no IP logs</li>
+          <li>no access or prompt logs</li>
           <li>no cookies</li>
           <li>no analytics</li>
           <li>no trackers</li>

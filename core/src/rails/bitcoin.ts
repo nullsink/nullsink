@@ -96,7 +96,7 @@ export function makeBitcoin(opts: BitcoinOptions) {
       if (!Number.isSafeInteger(orderIndex) || !watched.has(orderIndex)) continue; // not one of our open orders
       const sats = Math.round(Number(u?.amount ?? 0) * SATS_PER_BTC); // amount is BTC (float); round to sats
       if (!Number.isSafeInteger(sats)) {
-        log.warn("wallet", `skipping utxo with unsafe amount ${u?.amount} (txid ${String(u?.txid).slice(0, 8)})`);
+        log.warn("wallet", "skipping utxo with unsafe amount");
         continue;
       }
       if (sats <= 0) continue; // dust/zero — nothing to credit

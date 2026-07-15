@@ -93,13 +93,16 @@ test("incomingTransfers drops a UTXO whose sats exceed safe-integer precision (n
   const warnSpy = spyOn(console, "error").mockImplementation(() => {}); // log.warn → console.error
   const fetchImpl = router({
     listunspent: () => [
-      { txid: "ff", vout: 0, address: "bc1u", label: "5", amount: 1e8, confirmations: 5 }, // 1e8 BTC → 1e16 sats: unsafe
+      { txid: "TXID-SECRET-never-log", vout: 0, address: "bc1u", label: "5", amount: 1e8, confirmations: 5 }, // 1e8 BTC → 1e16 sats: unsafe
       { txid: "gg", vout: 0, address: "bc1v", label: "6", amount: 0.001, confirmations: 5 }, // safe → still credited
     ],
   });
   const got = await makeBitcoin({ ...CFG, fetchImpl }).incomingTransfers([5, 6]);
   expect(got).toEqual([{ orderIndex: 6, idempotencyKey: "bitcoin:gg:6", amount: 100_000, confirmations: 5, final: true }]);
   expect(warnSpy).toHaveBeenCalled();
+  const journal = warnSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+  expect(journal).not.toContain("TXID-SECRET");
+  expect(journal).not.toContain("100000000");
   warnSpy.mockRestore();
 });
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { BuyError, Quote, Rail } from "../lib/api.ts";
+import type { BuyError, Quote, Rail, Rails } from "../lib/api.ts";
 import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, toReadFailure, usd, type ReadFailure } from "../lib/api.ts";
 import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
@@ -28,6 +28,28 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // getRails() (below) reconciles against the server's authoritative set; the picker renders only when ≥2 rails.
   const [rails, setRails] = useState<Rail[]>(RAILS_OPTIMISTIC.rails);
   const [rail, setRail] = useState(RAILS_OPTIMISTIC.default);
+  // React state does not become visible until the current event has finished. Keep a synchronous gate as
+  // well, so two submits in the same turn cannot mint two tokens / open two orders. The generation makes
+  // every continuation prove that it still belongs to the active request before it can commit UI state.
+  const submitInFlight = useRef(false);
+  const submitGeneration = useRef(0);
+  const mounted = useRef(false);
+  const pendingRails = useRef<Rails | null>(null);
+
+  const applyRails = useCallback((next: Rails) => {
+    setRails(next.rails);
+    setRail((cur) => (next.rails.some((x) => x.name === cur) ? cur : next.default));
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      submitGeneration.current++;
+      submitInFlight.current = false;
+      pendingRails.current = null;
+    };
+  }, []);
 
   // Layout effect, NOT a passive effect: a passive effect fires after paint, so one frame of the
   // pay screen still sandwiched between the (not-yet-unmounted) marketing sections reaches the
@@ -61,11 +83,16 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // coin if it survived a successful reconciliation; otherwise take the server default.
   useEffect(() => {
     getRails().then((r) => {
-      if (!r) return;
-      setRails(r.rails);
-      setRail((cur) => (r.rails.some((x) => x.name === cur) ? cur : r.default));
+      // Do not let a late configuration read visually change the selected rail after submit has frozen
+      // the intent. /buy remains authoritative if this optional reconciliation loses that race.
+      if (!r || !mounted.current) return;
+      if (submitInFlight.current) {
+        pendingRails.current = r;
+        return;
+      }
+      applyRails(r);
     });
-  }, []);
+  }, [applyRails]);
 
   // The "tick the terms box first" nudge: shown when submit is attempted without consent, cleared
   // the moment the box is ticked (the render condition includes !agreed).
@@ -80,6 +107,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // genuine "no balance" (the null RETURN, i.e. the 401 path). Without this we'd render "no balance" on a
   // throttle and tell someone with a funded key it's empty.
   const [checkError, setCheckError] = useState<ReadFailure | null>(null);
+  // Invalidates an in-flight balance result whenever the editable token changes. Without this, a slow
+  // response for token A can paint its balance underneath token B after the user edits the field.
+  const balanceCheckGeneration = useRef(0);
 
   // The save-gate for a freshly-minted key: payment details stay hidden until the user affirms the
   // key is saved. A minted key exists only in this tab's memory — if the tab dies during the ~30
@@ -94,6 +124,16 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   const [busy, setBusy] = useState(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [finalBalance, setFinalBalance] = useState(0);
+
+  const finishSubmit = useCallback((generation: number) => {
+    if (generation !== submitGeneration.current) return;
+    submitInFlight.current = false;
+    if (!mounted.current) return;
+    setBusy(false);
+    const pending = pendingRails.current;
+    pendingRails.current = null;
+    if (pending) applyRails(pending);
+  }, [applyRails]);
 
   // Leave-warning whenever a key is on screen (pay + done, any key). For a minted key it's
   // load-bearing — it's unrecoverable, so a lost key loses the credit; for a pasted top-up it's
@@ -134,36 +174,52 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
 
   const acknowledge = useCallback(
     async (tok: string) => {
+      if (submitInFlight.current) return;
+      submitInFlight.current = true;
+      const generation = ++submitGeneration.current;
+      const requestAmount = amount;
+      const requestRail = rail;
       setBusy(true);
       setErrorCode(null);
       try {
         const hash = await hashToken(tok);
-        setQuote(await requestQuote(hash, amount, rail || undefined));
+        if (!mounted.current || generation !== submitGeneration.current) return;
+        const nextQuote = await requestQuote(hash, requestAmount, requestRail || undefined);
+        if (!mounted.current || generation !== submitGeneration.current) return;
+        setQuote(nextQuote);
       } catch (e) {
-        setErrorCode((e as BuyError).code ?? "unknown");
+        if (mounted.current && generation === submitGeneration.current)
+          setErrorCode((e as BuyError).code ?? "unknown");
       } finally {
-        setBusy(false);
+        finishSubmit(generation);
       }
     },
-    [amount, rail],
+    [amount, rail, finishSubmit],
   );
 
   const keyState = keyFieldState(paste);
 
   async function check() {
-    if (!keyState.willTopUp) return;
+    if (submitInFlight.current || !keyState.willTopUp) return;
+    const generation = ++balanceCheckGeneration.current;
+    const token = paste;
     setChecking(true);
     setCheckError(null);
     try {
-      setCheckedBalance(await checkBalance(paste));
+      const balance = await checkBalance(token);
+      if (generation !== balanceCheckGeneration.current) return;
+      setCheckedBalance(balance);
     } catch (error) {
+      if (generation !== balanceCheckGeneration.current) return;
       // A THROWN error is transient (read-throttle 429 / network / 5xx), not "no balance" — that's the
       // null RETURN (401). Flag it so we show "try again" rather than implying the key is empty.
       setCheckedBalance(null);
       setCheckError(toReadFailure(error));
     } finally {
-      setDidCheck(true);
-      setChecking(false);
+      if (generation === balanceCheckGeneration.current) {
+        setDidCheck(true);
+        setChecking(false);
+      }
     }
   }
 
@@ -172,6 +228,8 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   // shown key and an error. Those errors also create NO order/address server-side (the handler
   // returns before that), so a failed attempt leaves zero state and a retry is clean.
   async function submit() {
+    // `busy` is deliberately not the lock: a second submit event can run before React commits it.
+    if (submitInFlight.current) return;
     // Click-through acceptance still gates the purchase — but with an enabled button that EXPLAINS
     // on click (inline notice + focus the checkbox) instead of a disabled one: a dead button is
     // unfocusable, gives no reason, and the page's primary CTA shouldn't be born inert. The
@@ -183,31 +241,51 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     }
     // A non-blank but malformed key blocks the purchase (the CTA is also disabled in that state).
     if (keyState.malformed) return;
+    submitInFlight.current = true;
+    const generation = ++submitGeneration.current;
+    balanceCheckGeneration.current++;
+    setChecking(false);
     const useExisting = keyState.willTopUp; // blank field → mint a new key; a valid token → top it up
     const tok = useExisting ? paste : generateToken();
     const wasNew = !useExisting;
+    // Explicit snapshots document the purchase intent that is frozen for this generation. Descendant
+    // controls are disabled below, and their setters also reject programmatic/same-turn edits.
+    const requestAmount = amount;
+    const requestRail = rail;
     setBusy(true);
     setErrorCode(null);
     // Top-up: snapshot the existing balance first — the baseline a success delta is measured against.
-    // A transient failure here is non-fatal: fall back to 0 (success is still balance > baseline).
+    // A thrown read failure is NOT a zero balance: proceeding would let an unchanged positive balance
+    // satisfy `balance > 0` and falsely report a successful top-up. Only a definitive 401/null establishes 0.
     let baseline = 0;
     if (!wasNew) {
+      setCheckError(null);
+      setDidCheck(false);
       try {
         baseline = (await checkBalance(tok)) ?? 0;
-      } catch {
-        baseline = 0;
+        if (!mounted.current || generation !== submitGeneration.current) return;
+      } catch (error) {
+        if (!mounted.current || generation !== submitGeneration.current) return;
+        setCheckedBalance(null);
+        setCheckError(toReadFailure(error));
+        setDidCheck(true);
+        finishSubmit(generation);
+        return; // fail closed: do not hash the token, create an order, or enter the pay phase
       }
     }
     try {
       const hash = await hashToken(tok);
-      const q = await requestQuote(hash, amount, rail || undefined);
+      if (!mounted.current || generation !== submitGeneration.current) return;
+      const q = await requestQuote(hash, requestAmount, requestRail || undefined);
+      if (!mounted.current || generation !== submitGeneration.current) return;
       setOrder({ token: tok, wasNew, baseline });
       setQuote(q);
       setPhase("pay"); // navigate ONLY once a payable quote is in hand
     } catch (e) {
-      setErrorCode((e as BuyError).code ?? "unknown");
+      if (mounted.current && generation === submitGeneration.current)
+        setErrorCode((e as BuyError).code ?? "unknown");
     } finally {
-      setBusy(false);
+      finishSubmit(generation);
     }
   }
 
@@ -230,11 +308,13 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     return (
       <form
         className="section"
+        aria-busy={busy}
         onSubmit={(e) => {
           e.preventDefault(); // we mint + fetch in-page; never navigate (the raw key lives only in memory)
           submit();
         }}
       >
+        <fieldset disabled={busy} style={{ border: 0, margin: 0, minWidth: 0, padding: 0 }}>
         {/* The optional key field leads the form: a returning user tops up here; a new user sees it once,
             leaves it blank, and continues straight down through amount → terms. Blank mints a fresh key; a
             valid token tops it up (check its balance with the button). */}
@@ -256,8 +336,12 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
             data-form-type="other"
             value={paste}
             onChange={(e) => {
+              if (submitInFlight.current) return;
+              balanceCheckGeneration.current++;
               setPaste(e.target.value.trim());
+              setChecking(false);
               setDidCheck(false);
+              setCheckedBalance(null);
               setCheckError(null);
             }}
             aria-label="your 0sink_ token — leave blank to mint a new key"
@@ -270,7 +354,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
               {checking ? "checking…" : "check balance"}
             </button>
             {/* Always-present polite live region: the result fills in after a check and is announced in place. */}
-            <span role="status">
+            <span role="status" aria-label="balance status">
               {keyState.willTopUp &&
                 didCheck &&
                 (checkError ? (
@@ -294,10 +378,14 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
 
         <AmountStep
           amount={amount}
-          setAmount={setAmount}
+          setAmount={(next) => {
+            if (!submitInFlight.current) setAmount(next);
+          }}
           rails={rails}
           rail={rail}
-          setRail={setRail}
+          setRail={(next) => {
+            if (!submitInFlight.current) setRail(next);
+          }}
         />
 
         {/* Environmental /buy errors (rate/wallet/busy/rate-limit) surface here, pre-navigation. */}
@@ -339,7 +427,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         >
           {busy ? "requesting…" : keyState.willTopUp ? "add credit →" : "mint key →"}
         </button>
-
+        </fieldset>
       </form>
     );
   }
@@ -373,6 +461,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
           </>
         ) : (
           <QuotePay
+            key={quote?.pay_to ?? "quote-pending"}
             token={order.token}
             quote={quote}
             baseline={order.baseline}

@@ -190,7 +190,7 @@ const shutdown = async () => {
     graceMs: SHUTDOWN_GRACE_MS,
     now: Date.now,
     sleep: (ms) => new Promise<void>((r) => setTimeout(r, ms)),
-    onSettleError: (err) => log.error("shutdown", `force-settle of an in-flight stream threw (others unaffected): ${log.errMsg(err)}`),
+    onSettleError: () => log.error("shutdown", "force-settle of an in-flight stream failed (others unaffected)"),
   });
   if (forceSettled > 0)
     log.warn("shutdown", `force-settled ${forceSettled} in-flight stream(s) at the drain deadline (metered partial billed, rest refunded)`);

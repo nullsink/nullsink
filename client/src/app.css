@@ -556,7 +556,8 @@ button:disabled { cursor: not-allowed; }
   justify-content: space-between;
   gap: 12px;
 }
-.status .watch { color: var(--ns-bone); }
+.status .watch { flex: 1; min-width: 0; color: var(--ns-bone); line-height: 1.5; overflow-wrap: anywhere; }
+.status-expired { margin-top: 14px; }
 
 /* ---- pay with another coin (Trocador swap fallback) ---- */
 /* A short link directly under the key (above the XMR details) so a non-XMR holder spots the escape hatch
@@ -1224,4 +1225,8 @@ code.code-url { color: var(--ns-acid); }
   .presets { grid-template-columns: repeat(2, 1fr); }
   /* stack the QR above the payment details so the address/amount get the full width */
   .pay { flex-direction: column; }
+  /* Money-safety copy must keep its full measure. Put the short action below it instead of squeezing a
+     multi-sentence outage/expiry warning into the sliver beside the button. */
+  .status { align-items: flex-start; flex-direction: column; }
+  .status .copy.acid { align-self: flex-start; }
 }

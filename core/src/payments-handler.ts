@@ -29,6 +29,9 @@ export type PaymentsHandlerDeps = {
   buyMinUsd: number;
   buyMaxUsd: number;
   orderTtlMs: number; // quoted expires_at window: how long the buyer is told the address stays valid
+  // How long from creation an unseen order remains trackable. Production passes ORDER_TTL_MS +
+  // REAP_GRACE_MS, the exact duration used by settle's unfunded reaper.
+  orderTrackingMs: number;
   maxOpenOrders: number;
   maxBuyBodyBytes: number;
   buyRateLimit?: TokenBucket; // global, identity-free /buy rate limit; omitted = no limit (e.g. tests)
@@ -39,12 +42,13 @@ export type PaymentsHandlerDeps = {
   // Live per-order payment progress for /order-status (the poller's last-seen sighting). Omitted in tests
   // that don't exercise /order-status; absent → every open order reads as "waiting".
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined;
+  now?: () => number; // optional deterministic /order-status response clock (production uses Date.now)
 };
 
 // Dispatch only the PAYMENT-world paths. undefined = "not mine" (the combined router already tried the
 // prompt-world routes; createPaymentsHandler turns it into the fail-closed 404).
 export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
-  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress } = d.orders;
+  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress, hasUnackedCreditForHash } = d.orders;
   const endpoints = makePaymentsEndpoints({
     rails: d.rails,
     defaultRail: d.defaultRail,
@@ -52,15 +56,18 @@ export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url:
     buyMinUsd: d.buyMinUsd,
     buyMaxUsd: d.buyMaxUsd,
     orderTtlMs: d.orderTtlMs,
+    orderTrackingMs: d.orderTrackingMs,
     maxOpenOrders: d.maxOpenOrders,
     maxBuyBodyBytes: d.maxBuyBodyBytes,
     tryAddOrder,
     openCount,
     latestOpenOrderByHash,
     openOrderByHashAddress,
+    hasUnackedCreditForHash,
     buyRateLimit: d.buyRateLimit,
     readRateLimit: d.readRateLimit,
     orderStatus: d.orderStatus,
+    now: d.now,
   });
 
   return function paymentsRoutes(req: Request, url: URL): Promise<Response> | undefined {

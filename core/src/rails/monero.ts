@@ -78,7 +78,7 @@ export function makeMonero(opts: MoneroOptions) {
     for (const t of list) {
       const amount = Number(t?.amount ?? 0);
       if (!Number.isSafeInteger(amount)) {
-        log.warn("wallet", `skipping transfer with unsafe amount ${t?.amount} (txid ${String(t?.txid).slice(0, 8)})`);
+        log.warn("wallet", "skipping transfer with unsafe amount");
         continue;
       }
       if (t?.double_spend_seen === true) continue; // never credits → never surface it

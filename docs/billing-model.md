@@ -73,8 +73,18 @@ context editing) are re-added.
 ## Order lifecycle
 
 `POST /buy` quotes a coin amount, locks the USD rate, and mints a single-use watch-only address,
-storing the order in `pending.db`. The poller (`ledger/settle.ts`) then moves that order through
-a small state machine:
+storing the order in `pending.db`. It is a versioned UI-private endpoint: callers must send
+`X-Nullsink-Quote-Contract: 2`, and an old loaded bundle is rejected with `409
+client_upgrade_required` so it cannot create a replacement address after abandoning an earlier quote.
+The store also admits at most one open order or undelivered credit per token hash; overlapping attempts get
+`409 order_in_progress` until the earlier credit is definitely acknowledged.
+Before exposing the address, the client performs a hash-only `POST /order-status` handshake. Contract v2
+returns `server_now`; the client floors its quote clock to that server-relative elapsed time and keeps every
+initiation surface hidden if the response is old, malformed, or from a rolled-back service. Opening the
+optional pre-filled swap is itself absorbing payment intent: direct-pay and second-swap controls disappear
+because this is a pay-once order, not a reusable deposit address. During mixed-version recovery automatic
+polls remain hash-only; a raw-key balance verification happens only when the holder explicitly selects it.
+The poller (`ledger/settle.ts`) then moves that order through a small state machine:
 
 ```mermaid
 stateDiagram-v2
@@ -83,7 +93,8 @@ stateDiagram-v2
     Quoted --> Unfunded: never seen, age past TTL + grace (default ~4.5h)
     Paying --> Credited: deposit final (rail's confirmations reached)
     Paying --> Stuck: never confirms, age past backstop (default 24h)
-    Credited --> [*]: credit the balance, drop the payment-token link
+    Credited --> Delivered: enqueue and deliver the balance credit
+    Delivered --> [*]: ledger ack clears the active outbox link
     Unfunded --> [*]: reap the order
     Stuck --> [*]: stop watching the address
 ```

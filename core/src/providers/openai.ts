@@ -83,9 +83,9 @@ function openaiChatOutputCap(body: any): number | null {
 }
 
 // The only non-passthrough mutation, both privacy- and billing-driven:
-//   • store:false — OpenAI retains prompts/outputs by default; force it off so the upstream keeps nothing
-//     (matches the stateless Anthropic path + our no-retention promise; drops server-side chaining, which
-//     clients replace by resending context — the stateless norm).
+//   • store:false — disables OpenAI application-state storage/server-side chaining. It does NOT by itself
+//     disable default abuse-monitoring retention; that requires an approved organization-level data control.
+//     Clients replace server-side chaining by resending context.
 //   • stream_options.include_usage (streaming only) — OpenAI omits usage from streams unless asked, and
 //     without it a streamed response carries NO usage → we'd refund in full (free usage). This makes the
 //     final chunk carry exact usage; the scanner's content fallback covers a mid-stream disconnect.

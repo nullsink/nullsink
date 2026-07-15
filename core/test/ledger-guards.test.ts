@@ -37,7 +37,11 @@ test("settle SKIPS an order with expected_atomic === 0 (no divide-by-zero, no cr
 test("latestOpenOrderByHash returns the NEWEST open order for a hash (DESC), with its rail", () => {
   const store = openOrderStore(":memory:");
   store.tryAddOrder(mk({ order_index: 1, hash: "h1", created_at: 1000, rail: "monero" }), SEED_MAX);
-  store.tryAddOrder(mk({ order_index: 2, hash: "h1", created_at: 2000, rail: "bitcoin" }), SEED_MAX);
+  // Seed a pre-single-flight duplicate directly: current writes reject it, but upgraded databases can
+  // already contain this shape and must still open/read it safely (no UNIQUE(hash) migration).
+  store.db.query(
+    "INSERT INTO pending_orders (rail, order_index, address, hash, expected_atomic, credit_micros, received_atomic, created_at, rate_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run("bitcoin", 2, "a0", "h1", 1_000_000, 1_000_000, 0, 2000, 0);
   const latest = store.latestOpenOrderByHash("h1");
   expect(latest?.created_at).toBe(2000); // ASC would return the 1000 row
   expect(latest?.order_index).toBe(2);
@@ -51,7 +55,7 @@ test("latestOpenOrderByHash returns the NEWEST open order for a hash (DESC), wit
 test("purgeStale keeps an order created exactly AT the cutoff (strict <, not <=)", () => {
   const store = openOrderStore(":memory:");
   store.tryAddOrder(mk({ order_index: 0, created_at: 2000 }), SEED_MAX); // == cutoff → must survive
-  store.tryAddOrder(mk({ order_index: 1, created_at: 1999 }), SEED_MAX); // < cutoff → reaped
+  store.tryAddOrder(mk({ order_index: 1, hash: "h2", created_at: 1999 }), SEED_MAX); // < cutoff → reaped
   store.purgeStale(2000);
   expect(store.openOrders().map((o) => o.order_index)).toEqual([0]);
   store.db.close();

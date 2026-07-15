@@ -13,7 +13,7 @@ import { deny } from "../../src/http";
 import { BUILD_VERSION } from "../../src/version";
 
 // Re-exported so the handler tests keep a single import site for the combined surface.
-export { isModelNotFound, maskedErrorDetail } from "../../src/handler";
+export { isModelNotFound } from "../../src/handler";
 export type { RailView } from "../../src/rails/types";
 export type { ProxyHandlerDeps } from "../../src/handler";
 export type { PaymentsHandlerDeps } from "../../src/payments-handler";

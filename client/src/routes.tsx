@@ -30,7 +30,7 @@ export const ROUTES: Route[] = [
     url: `${PROD}/`,
     title: "nullsink: anonymous LLM proxy",
     description:
-      "Anonymous LLM proxy. Mint a prepaid key in your browser, pay with Monero or Bitcoin, and use any Anthropic or OpenAI SDK. No account, no request logs.",
+      "Anonymous LLM proxy. Mint a prepaid key in your browser, pay with Monero or Bitcoin, and use supported AI APIs. No account or access/prompt logs.",
     Component: App,
   },
   {
@@ -57,7 +57,7 @@ export const ROUTES: Route[] = [
     url: `${PROD}/privacy/`,
     title: "nullsink: privacy policy",
     description:
-      "What nullsink handles (a token hash and a balance) and what it never keeps (your IP, prompts, identity, or request logs). No account, no cookies, no tracking.",
+      "What nullsink stores and retains: token hashes, balances, temporary payment links, accounting records, and minimized operational events—and what it does not log locally: access traffic, prompts, or responses.",
     Component: Privacy,
   },
   {

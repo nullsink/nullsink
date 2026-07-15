@@ -115,13 +115,15 @@ const buyInjection: Record<number, { status: number; code: string }> = {
 // expires_at the buyer is told (the real server uses a multi-hour ORDER_TTL_MS; we keep that generous
 // window so the quote does NOT expire mid-timeline — the 0sink_expired sentinel is the way to demo expiry).
 const ORDER_TTL_MS = 24 * 60 * 60 * 1000;
+const REAP_GRACE_MS = 30 * 60 * 1000;
 const SOON_EXPIRY_MS = 15_000; // 0sink_soon sentinel: expire ~15s out so the auto-expire flip is watchable
 
 const HASH_RE = /^[0-9a-f]{64}$/;
 
-// One in-flight order per hash (a fresh /buy for the same hash overwrites it — matching the client, which
-// only ever has one purchase live). createdAt anchors the timeline; baselineUsd carries a top-up's prior
-// balance so /balance can return baseline + credit once credited (see /balance below).
+// One in-flight order per hash. Like production, the mock refuses a replacement while the earlier payment
+// is waiting or confirming; once its simulated credit is durable, a top-up may replace the completed
+// timeline. createdAt anchors the timeline; baselineUsd carries a top-up's prior balance so /balance can
+// return baseline + credit once credited (see /balance below).
 type Order = {
   hash: string;
   rail: string; // which rail this order quoted in — drives unit + required + amount in statusFor
@@ -139,15 +141,15 @@ function statusFor(order: Order, now: number) {
   const c = RAIL_CFG[order.rail] ?? RAIL_CFG[RAILS.default];
   const required = c.confirmations;
   const expected = toCoin(order.expectedAtomic, c);
-  if (elapsed >= ORDER_CLOSED_AFTER_MS) return { state: "closed" as const };
+  if (elapsed >= ORDER_CLOSED_AFTER_MS) return { contract: 2 as const, server_now: now, state: "closed" as const };
   if (elapsed < SEEN_AFTER_MS) {
-    return { state: "waiting" as const, confirmations: 0, required, received: toCoin(0, c), expected, unit: c.unit, expires_at: order.expiresAt };
+    return { contract: 2 as const, server_now: now, state: "waiting" as const, confirmations: 0, required, received: toCoin(0, c), expected, unit: c.unit, expires_at: order.expiresAt };
   }
   // seen: received jumps to the FULL expected (users pay in one tx). Confs ramp 0→N over CONFIRM_WINDOW_MS
   // regardless of N, so XMR (10) and BTC (3) both finalize at the same wall-clock, showing a different n/N.
   const confs = Math.min(required, Math.floor(((elapsed - SEEN_AFTER_MS) / CONFIRM_WINDOW_MS) * required));
   const state = confs < required ? ("confirming" as const) : ("finalizing" as const);
-  return { state, confirmations: confs, required, received: expected, expected, unit: c.unit, expires_at: order.expiresAt };
+  return { contract: 2 as const, server_now: now, state, confirmations: confs, required, received: expected, expected, unit: c.unit, expires_at: order.expiresAt };
 }
 
 // Credited balance for a hash at `now`. The order carries a baseline (the prior credited balance, set at
@@ -180,6 +182,8 @@ export function mockApi(): Plugin {
         };
 
         if (req.method === "POST" && url === "/buy") {
+          if (req.headers["x-nullsink-quote-contract"] !== "2")
+            return send(409, { error: "client_upgrade_required" });
           readJson(req, (body) => {
             if (body === INVALID_JSON) return send(400, { error: "invalid_json" });
             const hash = typeof body?.hash === "string" ? body.hash : null;
@@ -198,6 +202,11 @@ export function mockApi(): Plugin {
             const cfg = RAIL_CFG[rail];
             if (!cfg) return send(400, { error: "unknown_rail" });
 
+            const now = Date.now();
+            const existing = orders.get(hash);
+            if (existing && now - existing.createdAt < CREDITED_AFTER_MS)
+              return send(409, { error: "order_in_progress" });
+
             // error injection: by sentinel amount, or by sentinel key hash (see the table above).
             const inj =
               buyInjection[creditUsd] ??
@@ -212,7 +221,6 @@ export function mockApi(): Plugin {
                       : null);
             if (inj) return send(inj.status, { error: inj.code });
 
-            const now = Date.now();
             // a top-up against an already-credited key sums onto the prior balance. We carry that prior
             // balance as the new order's baseline so /balance returns baseline + credit once credited.
             const prior = creditedUsd(hash, now) ?? 0;
@@ -236,13 +244,16 @@ export function mockApi(): Plugin {
             });
             const amount = toCoin(atomic, cfg);
             send(200, {
+              contract: 2,
               pay_to: cfg.payTo,
               amount,
               unit: cfg.unit,
               pay_uri: cfg.uri(amount),
               rate_usd: cfg.rate,
               confirmations_required: cfg.confirmations,
+              created_at: now,
               expires_at: expiresAt,
+              tracking_until: expiresAt + REAP_GRACE_MS,
             });
           });
           return;
@@ -254,7 +265,7 @@ export function mockApi(): Plugin {
             const hash = typeof body?.hash === "string" ? body.hash : null;
             if (!hash || !HASH_RE.test(hash)) return send(400, { error: "invalid_hash" });
             const order = orders.get(hash);
-            if (!order) return send(200, { state: "closed" }); // no open order → bare closed (server parity)
+            if (!order) return send(200, { contract: 2, server_now: Date.now(), state: "closed" }); // no open order → bare closed (server parity)
             send(200, statusFor(order, Date.now()));
           });
           return;

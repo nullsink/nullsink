@@ -26,15 +26,18 @@ export type PaymentsEndpointDeps = {
   buyMinUsd: number;
   buyMaxUsd: number;
   orderTtlMs: number; // quoted expires_at window
+  orderTrackingMs: number; // unseen-order tracking/reap horizon; includes the post-expiry grace
   maxOpenOrders: number; // global in-flight order ceiling (the only order cap)
   maxBuyBodyBytes: number; // body-size guard for /buy + /order-status
   tryAddOrder: OrdersStore["tryAddOrder"]; // /buy: atomic slot-claiming insert
   openCount: OrdersStore["openCount"]; // /buy: in-flight ceiling pre-check
   latestOpenOrderByHash: OrdersStore["latestOpenOrderByHash"]; // /order-status unscoped fallback (no address)
   openOrderByHashAddress: OrdersStore["openOrderByHashAddress"]; // /order-status scoped to the client's tracked order
+  hasUnackedCreditForHash: OrdersStore["hasUnackedCreditForHash"]; // settled but not definitely delivered
   buyRateLimit?: TokenBucket; // global /buy burst guard; omitted = no limit (tests)
   readRateLimit?: TokenBucket; // global read throttle for /order-status + /rails; omitted = no limit. Its own bucket per world.
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined; // live payment progress
+  now?: () => number; // response clock for /order-status; injected only for deterministic contract tests
 };
 
 // Render an atomic coin amount at its scale (a power of ten → decimals = digits of the scale minus 1).

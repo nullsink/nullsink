@@ -1,12 +1,12 @@
 // API surface for the nullsink purchase page. Same-origin endpoints; the
 // authoritative contract lives in core's request handler.
 //
-//   POST /buy           { hash, credit_usd }            -> a one-time quote (pay_to + amount + unit + pay_uri)
+//   POST /buy           contract header + { hash, credit_usd } -> a one-time quote
 //   POST /order-status  { hash, address? }               -> live payment progress (no balance)
 //   GET  /balance       header x-api-key: <raw token>    -> { balance_usd }
 //
-// The raw token is sent over the wire exactly once, to /balance, on our own origin.
-// /buy and /order-status only ever see the SHA-256 hash. See lib/token.ts for the invariant.
+// Within this purchase-page module, the raw token is sent only to /balance on our own origin. Metered API
+// clients also send it as their bearer credential. /buy and /order-status see only the SHA-256 hash.
 import { DEFAULT_MARGIN } from "../../../core/src/pricing-config.ts";
 
 // --- limits -----------------------------------------------------------------
@@ -41,13 +41,127 @@ const USD_WHOLE_FMT = new Intl.NumberFormat("en-US", { style: "currency", curren
 export const usdWhole = (n: number): string => USD_WHOLE_FMT.format(n);
 
 export interface Quote {
+  // Version 2 identifies the quote timing + tracking contract explicitly. Optional at the wire boundary so
+  // a new bundle can fail closed when an older backend ignores the request header during rollback.
+  contract?: number;
   pay_to: string;
   amount: string; // verbatim coin amount string (8dp for BTC) — display AS-IS, never reformat/round
   unit: string; // display ticker, e.g. "BTC"
   pay_uri: string; // wallet URI for the QR, built server-side (e.g. bitcoin:addr?amount=…)
   rate_usd: number;
   confirmations_required: number;
+  // Quote creation time from the payment service. Optional only during a mixed-version deploy. New clients
+  // combine it with the monotonic request-start anchor below, so a device's wall-clock skew cannot extend the
+  // period in which a payment address is displayed.
+  created_at?: number; // server epoch ms
   expires_at: number; // epoch ms
+  // Server-authored unseen-order reap horizon (expires_at + configured grace). Optional only for a
+  // mixed-version deploy or an older cached response; new servers always send it.
+  tracking_until?: number; // epoch ms
+  // Client-only, monotonic request-start anchor attached by requestQuote; never sent over the wire. Starting
+  // the server-authored durations before the server creates the order can hide an address slightly early,
+  // but can never keep it payable beyond the server's own deadline because of network latency.
+  _request_started_at?: number; // performance.now() domain
+  _request_started_wall_at?: number; // Date.now() domain; counts device sleep when performance.now pauses
+  // An older payment service cannot supply a trustworthy relative quote clock. The new UI therefore hides
+  // payment-initiation details for that response while continuing conservative status tracking.
+  _initiation_clock_untrusted?: true;
+}
+
+function hasRelativeQuoteClock(quote: Quote): quote is Quote & {
+  created_at: number;
+  _request_started_at: number;
+  _request_started_wall_at: number;
+} {
+  return (
+    Number.isFinite(quote.created_at) &&
+    Number.isFinite(quote._request_started_at) &&
+    Number.isFinite(quote._request_started_wall_at)
+  );
+}
+
+function relativeDeadline(quote: Quote, serverDeadline: number | undefined): number | undefined {
+  if (serverDeadline === undefined || !Number.isFinite(serverDeadline)) return undefined;
+  if (quote._initiation_clock_untrusted) return Number.NEGATIVE_INFINITY;
+  if (!hasRelativeQuoteClock(quote)) return serverDeadline;
+  // Relative-clock quotes use an elapsed-time domain whose origin is the browser's request start.
+  const deadline = serverDeadline - quote.created_at;
+  return Number.isFinite(deadline) ? deadline : serverDeadline;
+}
+
+type RelativeClockState = {
+  elapsed: number;
+  wallSample: number;
+  monotonicSample: number | undefined;
+};
+
+// Keep the accumulated clock private to this module instead of adding mutable bookkeeping to the quote
+// value that the UI passes around. Each sample advances by the greater positive delta reported by the wall
+// and monotonic clocks. Updating both sample anchors even when one moves backwards is important: after a
+// wall-clock rollback, a later period of device sleep is still counted by Date.now even on browsers whose
+// performance.now pauses while asleep.
+const relativeClockState = new WeakMap<Quote, RelativeClockState>();
+
+function monotonicNow(): number | undefined {
+  if (typeof performance === "undefined") return undefined;
+  const now = performance.now();
+  return Number.isFinite(now) ? now : undefined;
+}
+
+/** Current time in the same clock domain as quoteExpiresAt/quoteTrackingUntil. */
+export function quoteClockNow(quote: Quote): number {
+  if (hasRelativeQuoteClock(quote)) {
+    const wallNow = Date.now();
+    const monoNow = monotonicNow();
+    const prior = relativeClockState.get(quote);
+    if (!prior) {
+      // The first read may happen well after /buy returns. Anchor to the greatest observed duration so
+      // network/render delay and an initial sleep are conservative, never validity-extending.
+      const wallElapsed = wallNow - quote._request_started_wall_at;
+      const monotonicElapsed = monoNow === undefined ? 0 : monoNow - quote._request_started_at;
+      const elapsed = Math.max(
+        0,
+        Number.isFinite(wallElapsed) ? wallElapsed : 0,
+        Number.isFinite(monotonicElapsed) ? monotonicElapsed : 0,
+      );
+      relativeClockState.set(quote, { elapsed, wallSample: wallNow, monotonicSample: monoNow });
+      return elapsed;
+    }
+
+    const wallDelta = wallNow - prior.wallSample;
+    const monotonicDelta =
+      monoNow === undefined || prior.monotonicSample === undefined ? 0 : monoNow - prior.monotonicSample;
+    prior.elapsed += Math.max(
+      0,
+      Number.isFinite(wallDelta) ? wallDelta : 0,
+      Number.isFinite(monotonicDelta) ? monotonicDelta : 0,
+    );
+    // Deliberately retain a backwards sample as the new anchor without reducing elapsed. If Date.now then
+    // advances while performance.now is suspended, that sleep interval is added on the next observation.
+    prior.wallSample = wallNow;
+    prior.monotonicSample = monoNow;
+    return prior.elapsed;
+  }
+  return Date.now();
+}
+
+/** Record independent evidence that this quote's elapsed clock reached a server-relative boundary. */
+export function advanceQuoteClockTo(quote: Quote, elapsedFloor: number): number {
+  const now = quoteClockNow(quote);
+  if (!hasRelativeQuoteClock(quote) || !Number.isFinite(elapsedFloor)) return now;
+  const state = relativeClockState.get(quote)!;
+  state.elapsed = Math.max(state.elapsed, elapsedFloor);
+  return state.elapsed;
+}
+
+/** Local deadline immune to device wall-clock skew when the server supplied created_at. */
+export function quoteExpiresAt(quote: Quote): number {
+  return relativeDeadline(quote, quote.expires_at)!;
+}
+
+/** Local tracking horizon, or undefined for an older response. */
+export function quoteTrackingUntil(quote: Quote): number | undefined {
+  return relativeDeadline(quote, quote.tracking_until);
 }
 
 // --- pay with another coin (Trocador AnonPay swap fallback) -----------------
@@ -90,7 +204,7 @@ export interface BuyError {
 // distinguish "try later", "check your connection", and "the service answered but is unavailable" — not
 // duplicate server prose or infer token validity from a transport failure.
 export type ReadFailure = {
-  kind: "network" | "rate_limited" | "server";
+  kind: "network" | "rate_limited" | "server" | "unknown";
   status: number;
   retryAfterSec?: number;
 };
@@ -116,6 +230,8 @@ export function balanceErrorMessage(error: ReadFailure): string {
       return "Couldn't reach nullsink. Check your connection and try again.";
     case "server":
       return "The balance service is temporarily unavailable. Try again shortly.";
+    case "unknown":
+      return "Couldn't complete the balance check. Try again shortly.";
   }
 }
 
@@ -126,10 +242,15 @@ export function toReadFailure(error: unknown): ReadFailure {
     error &&
     typeof error === "object" &&
     "kind" in error &&
-    ((error as ReadFailure).kind === "network" || (error as ReadFailure).kind === "rate_limited" || (error as ReadFailure).kind === "server")
+    ((error as ReadFailure).kind === "network" ||
+      (error as ReadFailure).kind === "rate_limited" ||
+      (error as ReadFailure).kind === "server" ||
+      (error as ReadFailure).kind === "unknown")
   )
     return error as ReadFailure;
-  return { kind: "network", status: 0 };
+  // A programming/parsing exception is not evidence of a connectivity problem. Keep it actionable but
+  // honest, and retain the money-safe instructions at the payment-specific call sites below.
+  return { kind: "unknown", status: 0 };
 }
 
 // A payment status read never establishes that no payment landed. The instruction is deliberately stable
@@ -142,6 +263,8 @@ export function paymentStatusErrorMessage(error: ReadFailure): string {
       return "Couldn't reach nullsink to check payment status. Don't resend; check again shortly.";
     case "server":
       return "Payment status is temporarily unavailable. Don't resend; check again shortly.";
+    case "unknown":
+      return "Couldn't complete the payment status check. Don't resend; check again shortly.";
   }
 }
 
@@ -155,6 +278,8 @@ export function creditVerificationErrorMessage(error: ReadFailure): string {
       return "Couldn't verify your credit yet: couldn't reach nullsink. Don't resend; check again shortly.";
     case "server":
       return "Couldn't verify your credit yet: the balance service is temporarily unavailable. Don't resend; check again shortly.";
+    case "unknown":
+      return "Couldn't complete credit verification yet. Don't resend; check again shortly.";
   }
 }
 
@@ -165,6 +290,10 @@ export function buyErrorMessage(code: string): string {
       return "Couldn't get a price right now. Try again shortly.";
     case "busy_try_later":
       return "The system is busy. Try again soon.";
+    case "order_in_progress":
+      return "This key already has a payment in progress. Don't send again; check its status or balance first.";
+    case "client_upgrade_required":
+      return "This payment page is out of date. Refresh the page before requesting another quote.";
     case "rate_limited":
       // 429 from the global, identity-free rate limit — a single honest user can hit it because
       // OTHERS are flooding, so don't blame them ("too many requests"); just "busy, retry".
@@ -235,11 +364,15 @@ export async function getRails(): Promise<Rails | null> {
 
 // POST /buy — quote a payment in `rail` (omit → the server's default rail). Throws BuyError on a non-200.
 export async function requestQuote(hash: string, creditUsd: number, rail?: string): Promise<Quote> {
+  const requestStartedAt = typeof performance !== "undefined" ? performance.now() : 0;
+  const requestStartedWallAt = Date.now();
   let res: Response;
   try {
     res = await fetch("/buy", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      // New payment-state contract. A post-upgrade server rejects old loaded bundles that omit this header,
+      // preventing them from opening a replacement after their old expiry-only UI abandoned tracking.
+      headers: { "content-type": "application/json", "x-nullsink-quote-contract": "2" },
       body: JSON.stringify(rail ? { hash, credit_usd: creditUsd, rail } : { hash, credit_usd: creditUsd }),
     });
   } catch {
@@ -254,7 +387,10 @@ export async function requestQuote(hash: string, creditUsd: number, rail?: strin
     }
     throw { code, status: res.status } as BuyError;
   }
-  return (await res.json()) as Quote;
+  const quote = (await res.json()) as Quote;
+  return quote.contract === 2 && Number.isFinite(quote.created_at)
+    ? { ...quote, _request_started_at: requestStartedAt, _request_started_wall_at: requestStartedWallAt }
+    : { ...quote, _initiation_clock_untrusted: true };
 }
 
 // GET /balance — returns the balance in USD, or null for 401 (unknown / never-funded).
@@ -275,10 +411,18 @@ export async function checkBalance(rawToken: string): Promise<number | null> {
 
 // Live payment progress for an in-flight order, keyed by the token's HASH (never the raw token — so a
 // re-check during the wait never puts the spendable secret on the wire; that's reserved for /balance).
-// `closed` means there's no open order for this hash: it may have credited, been reaped, or never
-// existed — the server can't tell (the link is dropped at settle), so the caller falls back to /balance
-// for the authoritative outcome.
+// `closed` means there's no open order or undelivered outbox credit for this hash: it may have credited,
+// been reaped, or never existed. After definite delivery the link is scrubbed, so the server deliberately
+// collapses those cases and the caller falls back to /balance for the authoritative outcome.
 export interface OrderStatus {
+  // Version 2 guarantees that `finalizing` covers an undelivered credit and that `closed` follows its
+  // definite acknowledgement. Optional at the type boundary because a new UI can meet an older backend
+  // during rollback; the tracking reducer treats missing/unknown versions as fail-closed recovery mode.
+  contract?: number;
+  // Server wall time at response creation. V2 clients compare it with the quote's server-authored created_at
+  // before exposing an address, closing the request-suspended-before-first-clock-sample hole. Optional only at
+  // the wire boundary so an older/rolled-back payment service fails closed.
+  server_now?: number; // server epoch ms
   // `detected` = the server has durably seen an inbound for this order (pending_orders.seen_at) but has no
   // live confirmation count right now — its progress map is process-local and empty after a restart, and the
   // wallet may still be resyncing. It exists so a payer is never told "not seen yet" about a payment we HAVE

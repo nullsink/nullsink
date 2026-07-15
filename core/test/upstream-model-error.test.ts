@@ -3,7 +3,7 @@
 // masked 503, NOT the raw provider body. Plus the masked-error log scrub drops the upstream request_id.
 // The bodies below are captured VERBATIM from the live providers (real keys, 2026-06-22).
 import { test, expect, spyOn } from "bun:test";
-import { isModelNotFound, maskedErrorDetail, createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
+import { isModelNotFound, createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";
@@ -26,25 +26,12 @@ test("isModelNotFound: a genuine non-model error is NOT a model-not-found (still
   expect(isModelNotFound(500, "boom")).toBe(false);
 });
 
-test("maskedErrorDetail: logs type + model, DROPS the upstream request_id", () => {
-  const d = maskedErrorDetail(ANTHROPIC_404);
-  expect(d).toContain("not_found_error");
-  expect(d).toContain("model: claude-sonnet-4-5-20251101"); // the model id — the actionable bit
-  expect(d).not.toContain("req_011"); // the request_id — never logged
-});
-
-test("maskedErrorDetail: openai includes type/code; non-JSON → short slice; JSON without error.* → empty", () => {
-  expect(maskedErrorDetail(OPENAI_CHAT_404)).toContain("invalid_request_error/model_not_found");
-  expect(maskedErrorDetail("<html>502 Bad Gateway</html>")).toBe("<html>502 Bad Gateway</html>");
-  expect(maskedErrorDetail(JSON.stringify({ request_id: "req_secret", x: 1 }))).toBe(""); // no error.* → don't slice raw (it holds request_id)
-});
-
 function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response>) {
   const balances = openDb(":memory:");
   const deps: HandlerDeps = {
     anthropic: { apiKey: "k", baseUrl: "https://up.example", version: "2023-06-01", estimateHold: byteBoundHold },
     upstreamTimeoutMs: 1000,
-    margin: 1.15, buyMinUsd: 5, buyMaxUsd: 2000, orderTtlMs: 4 * 60 * 60 * 1000, maxOpenOrders: 1000,
+    margin: 1.15, buyMinUsd: 5, buyMaxUsd: 2000, orderTtlMs: 4 * 60 * 60 * 1000, orderTrackingMs: (4 * 60 + 30) * 60 * 1000, maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances, orders: openOrderStore(":memory:"),
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([["monero", { name: "monero", createAddress: async () => ({ address: "8a", orderIndex: 0 }), rateUsd: async () => 150, scale: 1e12, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` }]]),
@@ -71,7 +58,19 @@ test("handler: an upstream model 404 returns 400 unsupported_model (not a masked
 
   const line = warnSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
   expect(line).toContain("model not found upstream");
-  expect(line).toContain("claude-sonnet-4-5-20251101"); // the model is logged (actionable)
+  expect(line).not.toContain("claude-sonnet-4-5-20251101");
   expect(line).not.toContain("req_011"); // the upstream request_id is NOT
   warnSpy.mockRestore();
+});
+
+test("handler never journals any upstream-controlled fields from a masked failure", async () => {
+  const errorSpy = spyOn(console, "error").mockImplementation(() => {});
+  const body = JSON.stringify({ error: { type: "PROMPT-SECRET-type", code: "PROMPT-SECRET-code", message: "PROMPT-SECRET-message" } });
+  const { handler, balances } = makeHandler(async () => new Response(body, { status: 500 }));
+  balances.credit(hashToken("pr_secret_log"), 10_000_000_000);
+  expect((await handler(msg("pr_secret_log"))).status).toBe(503);
+  const journal = errorSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+  expect(journal).toContain("masked 500");
+  expect(journal).not.toContain("PROMPT-SECRET");
+  errorSpy.mockRestore();
 });

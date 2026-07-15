@@ -6,7 +6,6 @@
 // have credited), whereas the in-process delivery there is synchronous and always definite. This is the only
 // production path.
 import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION, type CreditRequest, type DeliveryResult } from "./credit-wire";
-import * as log from "./log";
 import type { OrdersStore } from "./ledger/orders";
 
 export type CreditSender = (c: CreditRequest) => Promise<DeliveryResult>;
@@ -28,10 +27,11 @@ export function makeSocketSender(sockPath: string, timeoutMs = 5_000): CreditSen
       const body = (await res.json().catch(() => null)) as { result?: unknown } | null;
       if (body?.result === "applied" || body?.result === "already_applied") return { ok: true, outcome: body.result };
       return { ok: false, reason: "unrecognized_response" }; // a 2xx we don't understand is not an ack
-    } catch (err) {
+    } catch {
       // Connect refused (proxy not up yet), timeout, reset — all ambiguous. Never a boot failure: the outbox is
-      // durable, so the next tick retries.
-      return { ok: false, reason: log.errMsg(err) };
+      // durable, so the next tick retries. Keep the reason categorical: runtime fetch exceptions can embed
+      // URLs or other uncontrolled detail and this value is later written to the system journal.
+      return { ok: false, reason: "transport_error" };
     }
   };
 }

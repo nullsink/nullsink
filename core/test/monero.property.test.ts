@@ -75,6 +75,20 @@ test("incomingTransfers scopes get_transfers to given order indices, omitting th
   expect(seen[2]).toEqual({ in: true, account_index: 0 });
 });
 
+test("unsafe-transfer diagnostics never journal a transaction id", async () => {
+  const warnSpy = spyOn(console, "error").mockImplementation(() => {});
+  const txid = "TXID-SECRET-never-log";
+  const { incomingTransfers } = makeMonero({
+    ...CFG,
+    fetchImpl: rpcOk({ in: [{ txid, amount: Number.MAX_SAFE_INTEGER + 1, subaddr_index: { minor: 1 } }] }),
+  });
+  expect(await incomingTransfers()).toEqual([]);
+  const journal = warnSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
+  expect(journal).not.toContain(txid);
+  expect(journal).not.toContain(String(Number.MAX_SAFE_INTEGER + 1));
+  warnSpy.mockRestore();
+});
+
 test("incomingTransfers applies defaults for missing fields (and isn't final at 0 confs)", async () => {
   const { incomingTransfers } = makeMonero({ ...CFG, fetchImpl: rpcOk({ in: [{ amount: 100 }] }) });
   expect(await incomingTransfers()).toEqual([{ orderIndex: 0, idempotencyKey: ":0", amount: 100, confirmations: 0, final: false }]);

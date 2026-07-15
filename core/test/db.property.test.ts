@@ -2,11 +2,10 @@
 // of credit / creditOnce / openHold / settleHold / recoverHolds / getBalance and runs
 // each against BOTH the real SQLite store (a fresh :memory: db per sequence) and a pure in-memory reference
 // model. After every command we assert the two agree, so any divergence — a botched atomic debit, a
-// double-credit, a purge that forgets too much, a hold refunded twice — surfaces as a shrunk, minimal
+// double-credit, an idempotency marker that is forgotten, a hold refunded twice — surfaces as a shrunk, minimal
 // failing sequence (with a seed to repro).
 //
 // The interesting invariants this exercises, without enumerating cases by hand:
-//   - hold() debits iff the token is known AND the balance covers it (overdraft race / unknown token)
 //   - openHold() debits + journals atomically iff the balance covers it (else writes nothing)
 //   - settleHold() closes a hold AT MOST once — a repeat finds no row and refunds nothing (drain race)
 //   - recoverHolds() refunds every open hold IN FULL and clears the journal (crash recovery), then no-ops
@@ -16,7 +15,7 @@ import { test, expect } from "bun:test";
 import fc from "fast-check";
 import { openDb, type BalanceStore } from "../src/ledger/db";
 
-// applied: orderId -> applied_at, mirroring the applied_orders table so we can model purge precisely.
+// applied: orderId -> applied_at, mirroring the permanent applied_orders idempotency set.
 // holds: hold_id -> {hash, micros}, mirroring the holds journal so we can model open / settle / recover.
 type Model = {
   balances: Map<string, number>;

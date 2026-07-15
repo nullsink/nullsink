@@ -59,6 +59,7 @@ const deps: HandlerDeps = {
   buyMinUsd: 5,
   buyMaxUsd: 2000,
   orderTtlMs: 14_400_000,
+  orderTrackingMs: 16_200_000,
   maxOpenOrders: 1000,
   maxBuyBodyBytes: 4096,
   maxMessagesBodyBytes: 33_554_432,

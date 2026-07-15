@@ -28,6 +28,37 @@ test("removeOrder returns false when no row matches (rail, order_index)", () => 
   store.db.close();
 });
 
+test("an unacked credit stays discoverable by hash only until definite delivery", () => {
+  const store = openOrderStore(":memory:");
+  expect(store.hasUnackedCreditForHash("hash-a")).toBe(false);
+  store.enqueueCredit("key-a", "hash-a", 1, 10);
+  expect(store.hasUnackedCreditForHash("hash-a")).toBe(true);
+  expect(store.hasUnackedCreditForHash("hash-b")).toBe(false);
+  store.ackCredit("key-a", 20);
+  expect(store.hasUnackedCreditForHash("hash-a")).toBe(false);
+  store.db.close();
+});
+
+test("the atomic order claim blocks a hash while its earlier credit is unacked", () => {
+  const store = openOrderStore(":memory:");
+  const order = {
+    rail: "monero",
+    order_index: 7,
+    address: "address-7",
+    hash: "hash-a",
+    expected_atomic: 1,
+    credit_micros: 1,
+    received_atomic: 0,
+    created_at: 30,
+    rate_usd: 1,
+  };
+  store.enqueueCredit("key-a", order.hash, 1, 10);
+  expect(store.tryAddOrder(order, 10)).toBe(false);
+  store.ackCredit("key-a", 20);
+  expect(store.tryAddOrder(order, 10)).toBe(true);
+  store.db.close();
+});
+
 test("composite key isolates rails: same index coexists, and removeOrder/openOrders/purgeStale only touch their own rail", () => {
   rm(PENDING);
   const store = openOrderStore(PENDING);

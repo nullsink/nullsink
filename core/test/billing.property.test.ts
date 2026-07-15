@@ -19,6 +19,7 @@ const MODELS = ["claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-4-6"];
 // The quoted expires_at window (matches the ORDER_TTL_MS prod default). Shared between the handler deps
 // and the expires_at assertion so the test can't silently agree with itself if one side changes.
 const ORDER_TTL_MS = 4 * 60 * 60 * 1000;
+const ORDER_TRACKING_MS = ORDER_TTL_MS + 30 * 60 * 1000;
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 
@@ -54,6 +55,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> & RailK
     buyMinUsd: 5,
     buyMaxUsd: 2000,
     orderTtlMs: ORDER_TTL_MS,
+    orderTrackingMs: ORDER_TRACKING_MS,
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,
@@ -611,6 +613,7 @@ test("upstream unreachable / timeout → native envelope, retryable, refunded, n
     expect([c.code, JSON.stringify(j).includes("upstream.example")]).toEqual([c.code, false]); // host never leaked
     expect([c.code, balances.getBalance(hashToken(token))]).toEqual([c.code, initial]); // refunded in full
   }
+  expect(errSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n")).not.toContain("upstream.example");
   errSpy.mockRestore();
 });
 
@@ -773,21 +776,25 @@ test("/buy quotes enough XMR to never under-charge credit_usd × MARGIN", async 
         const { handler, orders } = makeHandler(ok("claude-opus-4-8", {}), { xmrUsd: async () => rate });
         const req = new Request("https://proxy.local/buy", {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", "x-nullsink-quote-contract": "2" },
           body: JSON.stringify({ hash, credit_usd: creditUsd }),
         });
         const res = await handler(req);
         expect(res.status).toBe(200);
-        const quote = (await res.json()) as { amount: string; rate_usd: number; expires_at: number };
+        const quote = (await res.json()) as { contract: number; amount: string; rate_usd: number; created_at: number; expires_at: number; tracking_until: number };
+        expect(quote.contract).toBe(2);
         // The quoted coin amount, valued at the quoted rate, must be at least credit_usd × MARGIN (margin never eroded).
         expect(Number(quote.amount) * rate).toBeGreaterThanOrEqual(creditUsd * 1.15 - 1e-6);
         // An order was recorded for later settlement.
         expect(orders.openCount()).toBe(1);
-        // The advertised deadline IS the honored horizon: expires_at == the order's stored created_at +
-        // the backstop window — one timestamp, one window. Catches a regression to a separate advisory
-        // TTL (a different base time) or a different offset between quoted and purged deadlines.
+        // Both browser horizons use the order's stored timestamp. expires_at is the last instant at which
+        // payment details remain valid; tracking_until is the exact unseen-order reap horizon, including
+        // the server's post-expiry grace. One base time prevents boundary drift.
         const stored = orders.openOrders()[0]!;
+        expect(quote.created_at).toBe(stored.created_at);
         expect(quote.expires_at).toBe(stored.created_at + ORDER_TTL_MS);
+        expect(quote.tracking_until).toBe(stored.created_at + ORDER_TRACKING_MS);
+        expect(quote.tracking_until - quote.expires_at).toBe(30 * 60 * 1000);
       },
     ),
     { numRuns: 300 },
@@ -872,7 +879,7 @@ const balanceReq = (token: string | null) =>
 const buyReq = (body: unknown, headers: Record<string, string> = {}) =>
   new Request("https://proxy.local/buy", {
     method: "POST",
-    headers: { "content-type": "application/json", ...headers },
+    headers: { "content-type": "application/json", "x-nullsink-quote-contract": "2", ...headers },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 
@@ -932,6 +939,29 @@ test("/buy rejects malformed JSON and non-64-hex hashes", async () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toBe("invalid_hash");
   }
+});
+
+test("/buy rejects an old loaded payment bundle before price or wallet work", async () => {
+  let rates = 0;
+  let creates = 0;
+  const { handler, orders } = makeHandler(ok("x", {}), {
+    xmrUsd: async () => { rates++; return 150; },
+    createAddress: async () => ({ address: `8addr${++creates}`, orderIndex: creates }),
+  });
+  // Model the exact dangerous mixed-version point: the old tab's first payment fully delivered, so the
+  // outbox hash was scrubbed and neither single-flight guard can see it anymore.
+  orders.enqueueCredit("already-delivered", "a".repeat(64), 10_000_000, 1);
+  orders.ackCredit("already-delivered", 2);
+  expect(orders.hasUnackedCreditForHash("a".repeat(64))).toBe(false);
+  const legacy = new Request("https://proxy.local/buy", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ hash: "a".repeat(64), credit_usd: 10 }),
+  });
+  const res = await handler(legacy);
+  expect(res.status).toBe(409);
+  expect(((await res.json()) as { error: string }).error).toBe("client_upgrade_required");
+  expect({ rates, creates, orders: orders.openCount() }).toEqual({ rates: 0, creates: 0, orders: 0 });
 });
 
 test("/v1/messages rejects a body declaring an oversized content-length (413), before auth/parse", async () => {
@@ -1016,6 +1046,52 @@ test("/buy reserves a slot before createAddress: a concurrent burst at the cap m
   errSpy.mockRestore();
 });
 
+test("/buy rejects an existing or queued same-hash payment before rate/address work", async () => {
+  const A = "a".repeat(64);
+  let rates = 0;
+  let creates = 0;
+  const { handler, orders } = makeHandler(ok("x", {}), {
+    xmrUsd: async () => { rates++; return 150; },
+    createAddress: async () => ({ address: `8addr${++creates}`, orderIndex: creates }),
+  });
+  expect(orders.tryAddOrder({ rail: "monero", order_index: 40, address: "old", hash: A, expected_atomic: 1, credit_micros: 1, received_atomic: 0, created_at: 1, rate_usd: 150 }, 1000)).toBe(true);
+
+  let res = await handler(buyReq({ hash: A, credit_usd: 10 }));
+  expect(res.status).toBe(409);
+  expect(((await res.json()) as { error: string }).error).toBe("order_in_progress");
+  expect({ rates, creates }).toEqual({ rates: 0, creates: 0 });
+
+  orders.removeOrder(40, "monero");
+  orders.enqueueCredit("queued", A, 10_000_000, 2);
+  res = await handler(buyReq({ hash: A, credit_usd: 10 }));
+  expect(res.status).toBe(409);
+  expect({ rates, creates }).toEqual({ rates: 0, creates: 0 });
+
+  orders.ackCredit("queued", 3);
+  expect((await handler(buyReq({ hash: A, credit_usd: 10 }))).status).toBe(200);
+  expect({ rates, creates }).toEqual({ rates: 1, creates: 1 });
+});
+
+test("concurrent same-hash buys mint and store exactly one address", async () => {
+  const A = "a".repeat(64);
+  let creates = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const { handler, orders } = makeHandler(ok("x", {}), {
+    xmrUsd: async () => { await gate; return 150; },
+    createAddress: async () => ({ address: `8addr${++creates}`, orderIndex: creates }),
+  });
+
+  const first = handler(buyReq({ hash: A, credit_usd: 10 }));
+  const second = handler(buyReq({ hash: A, credit_usd: 20 }));
+  await Promise.resolve();
+  release();
+  const responses = await Promise.all([first, second]);
+  expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+  expect(creates).toBe(1);
+  expect(orders.openOrders().filter((o) => o.hash === A)).toHaveLength(1);
+});
+
 test("/buy releases the reservation after a successful order (sequential buys don't leak slots)", async () => {
   // A missing/wrong `finally pendingCreates--` would leave the in-process counter inflated after every
   // success, so openCount() + pendingCreates would hit the cap at half the real ceiling and the Nth buy
@@ -1039,6 +1115,14 @@ test("orders.tryAddOrder is the hard cap backstop: count-gated insert rejects pa
   expect(store.tryAddOrder(mk(0), 1)).toBe(true); // 0 < 1 → lands
   expect(store.tryAddOrder(mk(1), 1)).toBe(false); // count 1, not < 1 → rejected
   expect(store.openCount()).toBe(1); // the second never landed a row
+});
+
+test("orders.tryAddOrder atomically rejects a duplicate live hash without a UNIQUE migration", () => {
+  const store = openOrderStore(":memory:");
+  const mk = (i: number) => ({ rail: "monero", order_index: i, address: `8addr${i}`, hash: "a".repeat(64), expected_atomic: 1, credit_micros: 1, received_atomic: 0, created_at: i, rate_usd: 0 });
+  expect(store.tryAddOrder(mk(1), 10)).toBe(true);
+  expect(store.tryAddOrder(mk(2), 10)).toBe(false);
+  expect(store.openCount()).toBe(1);
 });
 
 test("/buy returns 503 and stores nothing when the cross-process claim loses the race after createAddress", async () => {
@@ -1178,11 +1262,30 @@ test("a tokenless metered request is rejected BEFORE the body is parsed (auth-be
   expect(reached).toBe(false);
 });
 
-test("/order-status returns closed for a hash with no open order (credited/reaped/never-existed are indistinguishable)", async () => {
-  const { handler } = makeHandler(ok("x", {}));
+test("/order-status distinguishes an undelivered credit, then collapses to closed after its definite ack", async () => {
+  const hash = "a".repeat(64);
+  const { handler, orders } = makeHandler(ok("x", {}));
+
+  let res = await handler(orderStatusReq({ hash }));
+  let body = (await res.json()) as { contract: number; state: string };
+  expect(body).toMatchObject({ contract: 2, state: "closed" });
+
+  orders.enqueueCredit("credit-key", hash, 1_000_000, 10);
+  res = await handler(orderStatusReq({ hash }));
+  body = (await res.json()) as { contract: number; state: string };
+  expect(body).toMatchObject({ contract: 2, state: "finalizing" });
+
+  orders.ackCredit("credit-key", 20);
+  res = await handler(orderStatusReq({ hash }));
+  body = (await res.json()) as { contract: number; state: string };
+  expect(body).toMatchObject({ contract: 2, state: "closed" });
+});
+
+test("/order-status returns closed for a hash with no open order or undelivered credit", async () => {
+  const { handler } = makeHandler(ok("x", {}), { now: () => 1_234_567_890 });
   const res = await handler(orderStatusReq({ hash: "a".repeat(64) }));
   expect(res.status).toBe(200);
-  expect(((await res.json()) as { state: string }).state).toBe("closed");
+  expect(await res.json()).toMatchObject({ contract: 2, server_now: 1_234_567_890, state: "closed" });
 });
 
 test("/order-status reflects an open order's live progress: waiting → confirming → finalizing", async () => {
@@ -1197,6 +1300,7 @@ test("/order-status reflects an open order's live progress: waiting → confirmi
   // No sighting yet → waiting, but the order's static fields are still reported.
   progress = undefined;
   let body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.contract).toBe(2);
   expect(body.state).toBe("waiting");
   expect(body.required).toBe(10);
   expect(body.expected).toBe((order.expected_atomic / ATOMIC_PER_XMR).toFixed(12));
@@ -1205,6 +1309,7 @@ test("/order-status reflects an open order's live progress: waiting → confirmi
   // Seen but under CONFIRMATIONS → confirming n/N, with the received amount surfaced.
   progress = { received_atomic: 500, confirmations: 3 };
   body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.contract).toBe(2);
   expect(body.state).toBe("confirming");
   expect(body.confirmations).toBe(3);
   expect(body.received).toBe((500 / ATOMIC_PER_XMR).toFixed(12));
@@ -1212,6 +1317,7 @@ test("/order-status reflects an open order's live progress: waiting → confirmi
   // CONFIRMATIONS met but not yet credited+closed → finalizing (client should now check /balance).
   progress = { received_atomic: 500, confirmations: 10 };
   body = (await (await handler(orderStatusReq({ hash }))).json()) as any;
+  expect(body.contract).toBe(2);
   expect(body.state).toBe("finalizing");
 });
 
@@ -1267,8 +1373,8 @@ test("/order-status rejects malformed JSON, non-64-hex hashes, and oversized bod
   expect(big.status).toBe(413);
 });
 
-// --- /order-status address scoping: a hash can have SEVERAL open orders (a top-up opens a second), so the
-//     read is scoped to the pay_to the client tracks; the unscoped fallback prefers the SEEN (paid) order. ---
+// --- /order-status address scoping: pre-single-flight databases can contain SEVERAL orders for one hash,
+//     so reads remain scoped to pay_to and the unscoped fallback prefers the SEEN (paid) legacy order. ---
 
 // Add a pending order for `hash` directly (bypassing /buy so the test controls order_index, address,
 // created_at, and seen_at) — the real store wired into the handler, so /order-status resolves against it.
@@ -1276,10 +1382,10 @@ const seedOrder = (
   orders: ReturnType<typeof makeHandler>["orders"],
   o: { order_index: number; address: string; hash: string; created_at: number; expected_atomic: number; seen?: boolean },
 ) => {
-  orders.tryAddOrder(
-    { rail: "monero", order_index: o.order_index, address: o.address, hash: o.hash, expected_atomic: o.expected_atomic, credit_micros: 1_000_000, received_atomic: 0, created_at: o.created_at, rate_usd: 150 },
-    1000,
-  );
+  // Direct insert deliberately models a database created before tryAddOrder enforced one live hash.
+  orders.db.query(
+    "INSERT INTO pending_orders (rail, order_index, address, hash, expected_atomic, credit_micros, received_atomic, created_at, rate_usd) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run("monero", o.order_index, o.address, o.hash, o.expected_atomic, 1_000_000, 0, o.created_at, 150);
   if (o.seen) orders.markSeen(o.order_index, "monero", o.created_at + 1);
 };
 const xmr = (atomic: number) => (atomic / ATOMIC_PER_XMR).toFixed(12); // the expected/received string /order-status renders
@@ -1303,7 +1409,7 @@ test("/order-status with an `address` returns THAT order, not the newest — eve
   expect(empty.expires_at).toBe(2000 + ORDER_TTL_MS);
 });
 
-test("/order-status with an `address` that matches no open order (or belongs to another hash) returns closed", async () => {
+test("address-scoped status is closed on no match, but conservatively finalizing for a same-hash queued credit", async () => {
   const { handler, orders } = makeHandler(ok("x", {}));
   const hash = "a".repeat(64);
   const otherHash = "b".repeat(64);
@@ -1312,6 +1418,13 @@ test("/order-status with an `address` that matches no open order (or belongs to 
   // No order carries this address → closed (credited/reaped/never-existed are indistinguishable).
   const none = (await (await handler(orderStatusReq({ hash, address: "NOPE_ADDR" }))).json()) as any;
   expect(none.state).toBe("closed");
+
+  // Outbox delivery is hash-wide because the settled order/address row is already gone. Conservatively keep
+  // any same-token scoped query in finalizing until that credit definitely acks; this may reflect a sibling
+  // quote, but it can only delay replacement, never abandon money in flight.
+  orders.enqueueCredit("credit-key", hash, 1_000_000, 10);
+  const queued = (await (await handler(orderStatusReq({ hash, address: "NOPE_ADDR" }))).json()) as any;
+  expect(queued.state).toBe("finalizing");
 
   // The address exists, but under a DIFFERENT hash → still closed (kills a "drop AND hash = ?" mutant, which
   // would find PAID_ADDR regardless of hash).

@@ -4,9 +4,9 @@ import { EXT } from "../lib/links.ts";
 
 // The privacy policy. A formal, prose policy (numbered sections) rendered in the legal-page style. The
 // claims here are NOT marketing — they are what the system actually does, so every statement must stay true
-// to the code: token hashed in-browser (lib/token.ts), only the hash stored (core/src/ledger/db.ts), no IP at the edge
-// or app (Caddyfile strips X-Forwarded-For, keeps no access log), no request logs (core/src/log.ts privacy
-// invariant), prompts forwarded to the upstream provider (core/src/handler.ts). If the behaviour changes, change
+// to the code: token hashed in-browser (lib/token.ts), only the hash stored (core/src/ledger/db.ts), no IP
+// retention at the edge and no client IP at the app (Caddy strips forwarding and keeps no access log),
+// content-minimized exceptional journal events (core/src/handler.ts), and prompts forwarded upstream. If the behaviour changes, change
 // this. Static content: prerenders to plain HTML, reads with JS off, no third-party origin (CSP-clean).
 export function Privacy() {
   return (
@@ -14,12 +14,12 @@ export function Privacy() {
       <section className="legal">
         <h1 className="legal-h1">Privacy policy</h1>
         <p className="legal-updated">
-          Last updated: <time dateTime="2026-06-08">8 June 2026</time>
+          Last updated: <time dateTime="2026-07-14">14 July 2026</time>
         </p>
 
         <p className="legal-lead">
           <Ns /> is built so that there is very little to collect. There are no accounts, no identities,
-          and no request logs. This policy sets out exactly what that means: the small amount we handle,
+          and no access logs or prompt/response logs. This policy sets out exactly what that means: the small amount we handle,
           what we never keep, and where your data goes when you make a request.
         </p>
 
@@ -37,9 +37,14 @@ export function Privacy() {
         <p>What we store:</p>
         <ul>
           <li>
-            <span className="lead-term">A token hash.</span> Your key is generated in your own browser.
-            Only its SHA-256 hash is ever sent to us. We store that hash together with a balance. We
-            cannot derive your key from the hash, and the hash is not linked to any name, email, or address.
+            <span className="lead-term">A token hash.</span> In the self-serve web flow your key is generated
+            in your browser; the buyer CLI can generate it locally too. An optional break-glass operator tool
+            can instead mint a key on the service box and display it once. The raw bearer key is sent over TLS
+            when you authenticate an API call or check its balance; we hash it in-process and never persist it
+            in the application databases. Purchase and payment-status requests send
+            only the SHA-256 hash. We store that hash with a balance and cannot derive your key from it; it is
+            not linked to any name or email. While an API call is in progress, a short-lived hold record also
+            carries the hash, reserved amount, and an opaque random identifier so a crash can refund it safely.
           </li>
           <li>
             <span className="lead-term">A balance.</span> A single number: how much prepaid credit the
@@ -48,8 +53,29 @@ export function Privacy() {
           <li>
             <span className="lead-term">Temporary payment details.</span> While a purchase is in progress
             we store the payment address, the expected and received coin amounts, the credit to apply,
-            and a timestamp, linked to the token hash. This record is deleted as soon as the payment settles, and otherwise
-            shortly after the quote expires.
+            and a timestamp, linked to the token hash. At settlement the active order is replaced by a
+            delivery record containing the token hash and credit amount only while durable credit delivery
+            is owed. After the balance ledger acknowledges it, those fields are cleared from the active
+            logical outbox row. Unpaid active orders are removed after their payment horizon.
+          </li>
+          <li>
+            <span className="lead-term">Payment idempotency and accounting records.</span> To prevent a
+            deposit crediting twice, we retain its transaction-derived idempotency key and timestamps. We
+            also keep an append-only sales journal containing the time, asset, coin amount, USD credit, and
+            gross USD value of each sale. Neither record contains a token hash, raw token, payment address,
+            name, email, prompt, or response after delivery is acknowledged.
+          </li>
+          <li>
+            <span className="lead-term">Aggregate operational metrics.</span> Periodic system-journal lines
+            contain totals and high-water marks such as request counts, broad error categories, and peak
+            concurrency. They contain no token, token hash, IP address, payment address, transaction key,
+            prompt, or response, and contain no field identifying an individual request.
+          </li>
+          <li>
+            <span className="lead-term">Exceptional operational events.</span> A failed upstream or billing
+            operation can produce one content-minimized journal line with its category, provider endpoint or
+            status, using only nullsink&apos;s own fixed categories. These lines contain
+            no bearer token, token hash, IP address, payment address, transaction key, prompt, or response.
           </li>
         </ul>
         <p>What we never store:</p>
@@ -86,16 +112,21 @@ export function Privacy() {
           </li>
           <li>
             The temporary payment details let us match an incoming payment to the right token and
-            credit it. Once that is done, the record is deleted.
+            credit it. The active order is closed at settlement, and the remaining direct token link is
+            cleared from the logical outbox row after the balance ledger acknowledges delivery.
           </li>
+          <li>The idempotency record prevents double credit; the sales journal supports reconciliation and accounting.</li>
+          <li>Aggregate operational metrics let us detect outages and billing anomalies without request-level logs.</li>
           <li>Any email you send us is used only to answer you.</li>
         </ul>
         <p>
           We do not sell, rent, or share any of this, and we do not use it for advertising or profiling.
           We could not build a profile of you even if we wanted to, because we hold nothing that identifies
           you. Where the GDPR applies, our legal basis for handling the token hash and balance is the
-          performance of our contract with you (running the service you paid for); for the brief payment
-          record we also rely on our legitimate interest in crediting payments correctly.
+          performance of our contract with you (running the service you paid for); for payment,
+          reconciliation, accounting, and aggregate operational records we also rely on our legitimate
+          interests in crediting correctly, preventing duplication, keeping financial records, and operating
+          the service safely, together with any applicable legal accounting obligations.
         </p>
 
         <h2>4. Where your data goes</h2>
@@ -103,12 +134,16 @@ export function Privacy() {
         <ul>
           <li>
             <span className="lead-term">LLM providers.</span> When you call the API, the content of your
-            request and its response are sent to the provider you address (currently Anthropic, and OpenAI
-            when enabled) so that it can answer you. We are the meter, not a store: we forward the request
+            request and its response are sent to the provider you address (currently Anthropic, OpenAI when
+            enabled, and Tinfoil when enabled) so that it can answer you. We are the meter, not a store: we forward the request
             under our own provider account and never attach your identity, because we have none to attach.
-            On the OpenAI path we force the &quot;do not store&quot; flag so the provider keeps no prompt or
-            output; the Anthropic path is stateless. Even so, a provider may retain content briefly for its
-            own trust-and-safety purposes under its policy. Your use of those models is governed by the
+            On the OpenAI path we set <code>store:false</code>, which disables application-state storage but
+            does not by itself disable abuse-monitoring retention; under OpenAI&apos;s standard controls those
+            logs may include content for up to 30 days. Anthropic&apos;s standard API retention deletes inputs
+            and outputs within 30 days, subject to trust-and-safety, legal, and contractual exceptions. The
+            Tinfoil path uses an attested confidential-compute enclave; Tinfoil states that interaction
+            content is inaccessible and not retained, while limited usage metadata is retained for billing
+            and operations. Provider handling is governed by the
             provider&apos;s terms and privacy policy:{" "}
             <a href="https://www.anthropic.com/legal/privacy" {...EXT}>
               Anthropic
@@ -117,14 +152,32 @@ export function Privacy() {
             <a href="https://openai.com/policies/privacy-policy" {...EXT}>
               OpenAI
             </a>
+            ,{" "}
+            <a href="https://tinfoil.sh/privacy" {...EXT}>
+              Tinfoil
+            </a>
             .
           </li>
           <li>
             <span className="lead-term">Payment network.</span> Payments are made in Monero or Bitcoin to a
-            single-use address. Our wallet keeps the addresses it generates, but they carry a fixed,
-            non-identifying label (an order number) and no link to your token — your payment and your key are
-            never tied together on our side. Bitcoin&apos;s ledger is public; Monero&apos;s is private by
-            design. Both networks are outside our control, and we tie neither to your key.
+            single-use address. Our watch-only wallet keeps generated addresses with non-token labels (a
+            fixed service label for Monero and an order index for Bitcoin), but no token or token hash.
+            Separately, our active payment database temporarily links that
+            order to a token hash solely so the deposit can be credited, then clears the direct logical link
+            after acknowledged delivery as described above. The payment networks never receive your token.
+            Bitcoin&apos;s ledger is public; Monero&apos;s is private by design. Both are outside our control.
+          </li>
+          <li>
+            <span className="lead-term">Optional third-party swaps.</span> If you choose the swap link, your
+            browser opens Trocador with the destination coin and network, the single-use payment address, and
+            the quoted amount already filled in. We do not send Trocador your raw key or token hash. Trocador
+            receives ordinary connection metadata such as your IP address, browser user agent, and language;
+            it and the partner exchange you choose may retain swap details such as coins, amounts, addresses,
+            and transaction hashes under their own policies, not this one. Review Trocador&apos;s{" "}
+            <a href="https://trocador.app/en/privacypolicy/" {...EXT}>
+              privacy policy
+            </a>{" "}
+            and the selected exchange&apos;s policy before continuing.
           </li>
           <li>
             <span className="lead-term">TLS certificate authority.</span> We use Let&apos;s Encrypt to
@@ -149,11 +202,27 @@ export function Privacy() {
         <h2>5. How long we keep things</h2>
         <ul>
           <li>
-            A balance is kept for as long as the token holds credit, because the balance is the credit. It
-            carries no identity.
+            Balance ledger rows, including the one-way token hash and amount, are retained even after the
+            balance reaches zero. They carry no name or other identity.
           </li>
-          <li>Temporary payment details are deleted as soon as the payment settles, and otherwise shortly after the quote expires.</li>
-          <li>We keep no access logs or request logs, so there are none to retain.</li>
+          <li>
+            The active order link is removed at settlement. The token hash and credit amount used for
+            delivery are cleared from the active logical outbox row after the balance ledger acknowledges
+            the credit. Unpaid active orders are removed after their payment horizon. SQLite pages and WAL
+            files can retain older bytes until WAL truncation or byte reuse. On-box disaster-recovery backups
+            are plaintext unless backup encryption is configured; off-box upload is permitted only for
+            encrypted artifacts. Both can retain earlier active state under their separate retention policies.
+            This is logical application deletion, not a promise of immediate forensic erasure.
+          </li>
+          <li>
+            Transaction-derived idempotency keys and timestamps are retained to prevent double credit.
+            Sales-journal rows are retained as needed for reconciliation and accounting; they have no direct
+            token or address field.
+          </li>
+          <li>
+            Aggregate metrics and content-minimized exceptional operational events remain only under the host
+            system journal&apos;s rotating retention policy. We keep no access logs or routine per-request logs.
+          </li>
           <li>Email correspondence is kept only as long as needed to deal with your inquiry.</li>
         </ul>
 

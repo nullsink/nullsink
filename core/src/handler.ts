@@ -57,27 +57,6 @@ export function isModelNotFound(status: number, text: string): boolean {
   return status === 404; // any other 404 on our fixed metered endpoints is a model-not-found
 }
 
-// Structured detail for the masked-error / model-not-found logs: the provider's stable error `type` (+ `code`
-// when present — OpenAI) and a length-capped `message`, read from `error.*` ONLY. Reading just `error.*`
-// structurally DROPS Anthropic's sibling `request_id` (an upstream correlation id we don't want in the
-// journal) and replaces the old indiscriminate 300-char raw-body slice. Safe to log: the masked path is our/
-// provider-side (key, billing, provider-down) or a model 404 — that message names OUR account state or the
-// rejected model id, never a prompt (prompt-echoing 4xx are RELAYED, not masked). Non-JSON → a short bounded
-// slice (no request_id possible); JSON without `error.*` → "" (don't slice the raw — it may hold request_id).
-export function maskedErrorDetail(text: string): string {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return text.slice(0, 120);
-  }
-  const err = parsed?.error;
-  if (!err || typeof err !== "object") return "";
-  const head = [err.type, err.code].filter((x) => typeof x === "string").join("/");
-  const msg = typeof err.message === "string" ? err.message.slice(0, 200) : "";
-  return [head, msg].filter(Boolean).join(": ");
-}
-
 // A non-OK upstream response is either the USER's fault (a request they can fix) or OURS / the provider's
 // (our key, our billing, the provider rate-limiting us, or the provider down). Relay the former verbatim so
 // the developer can fix it; MASK the latter behind an opaque nullsink error, so we never leak the provider's
@@ -89,12 +68,11 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
   // 404 chat / 400 responses). The permissive prefix gate forwards dated snapshots we can't pre-confirm, so a
   // typo'd or retired model surfaces HERE rather than at the door. Return our own clear `unsupported_model`
   // (byte-for-byte the gate's own rejection — opaque about the provider) instead of a misleading masked 503
-  // OR the raw provider body. WARN: refunded + client-visible + user/config-fixable; the logged model id is
-  // what an operator adds to the sync scrub list if a bad id recurs. Counted as `upstream:notfound` (routine —
-  // the client's bad model, not ours), so the served↔req gap stays fully itemized.
+  // OR the raw provider body. WARN: refunded + client-visible + user/config-fixable, but never journal any
+  // upstream-controlled body fields. Counted as `upstream:notfound` so the served↔req gap stays itemized.
   if (isModelNotFound(s, text)) {
     metrics.recordUpstream("notfound");
-    log.warn("upstream", `model not found upstream (refunded): ${maskedErrorDetail(text)}`);
+    log.warn("upstream", "model not found upstream (refunded)");
     return denyApi(provider, 400, "unsupported_model");
   }
   const billing = isBillingError(text);
@@ -115,11 +93,12 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
       headers: scrubRespHeaders(upstream),
     });
   }
-  // Masked: never send the upstream body. Log the real status + a snippet server-side so the operator is
-  // alerted (e.g. to top up the account). Keep a genuine throttle (429) as a 429 so clients back off, but
+  // Masked: never send or journal the upstream body. Log only the real status so the operator is alerted
+  // without retaining provider-controlled text. Keep a genuine throttle (429) as a 429 so clients back off, but
   // map an out-of-funds error to 503 even when the provider wore a 429 (OpenAI returns insufficient_quota
   // as a 429, which retrying will never clear). Preserve a numeric Retry-After for real throttles.
-  log.error("upstream", `masked ${s} (refunded, not relayed): ${maskedErrorDetail(text)}`);
+  // Status is our own finite observation; never append upstream-controlled type/code/message/body fields.
+  log.error("upstream", `masked ${s} (refunded, not relayed)`);
   const throttled = s === 429 && !billing; // a GENUINE vendor rate limit (an out-of-funds 429 is billing → 503)
   // Classify the masked outcome for the [metrics] trend (aggregate, no identity). Order matters: billing
   // wins over a 429 (out-of-funds can wear a 429), then a genuine throttle, then our key (auth), then a
@@ -355,7 +334,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // double-refund. Defined before the try so the catch can refund through it too.
     const billActual = (actual: number) => {
       if (actual > holdAmount) {
-        log.error("bill", `actual cost ${actual} exceeded hold ${holdAmount} — refund clamped to 0 (no overdraft)`);
+        log.error("bill", "actual cost exceeded hold — refund clamped to 0 (no overdraft)");
         metrics.recordBill("holdExceeded"); // trend behind the per-event ERROR (hold mis-sized if it spikes)
       }
       // Floor at 0 before refunding: a NEGATIVE cost (only reachable from a malformed/negative usage report —
@@ -538,7 +517,9 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       const timedOut = err instanceof Error && err.name === "TimeoutError";
       metrics.recordUpstream(timedOut ? "timeout" : "unreachable"); // transport-failure trend (distinct from a returned non-2xx)
       // Client-visible + already refunded → WARN, not ERROR. Greppable for an upstream/Anthropic outage.
-      log.warn("upstream", timedOut ? "request timed out" : `unreachable: ${log.errMsg(err)}`);
+      // Fetch exceptions can embed the full requested URL (including user-controlled query text) or other
+      // runtime detail. The status/category is sufficient operational signal; never journal the exception.
+      log.warn("upstream", timedOut ? "request timed out" : "request unreachable");
       // Transient (network timeout / connection failure) → genuinely retryable, so native envelope +
       // x-should-retry:true; the opaque code never names the upstream.
       const status = timedOut ? 504 : 502;
