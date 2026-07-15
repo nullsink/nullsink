@@ -29,7 +29,7 @@ export function runFinancials(args: string[]): void {
   const fromMs = parseBound(optVal(args, "--since"), 0, "--since");
   const toMs = parseBound(optVal(args, "--until"), Number.MAX_SAFE_INTEGER, "--until");
 
-  // Two DBs (opened inside run, post-guard): the sales book is payment-world state in pending.db, while
+  // Two DBs (opened inside run, post-guard): the sales book is payments trust domain state in pending.db, while
   // the outstanding-credit liability is the balance ledger in balances.db.
   const { listRevenue } = openOrderStore(PENDING_DB_PATH);
   const { liabilityTotal } = openDb(DB_PATH);

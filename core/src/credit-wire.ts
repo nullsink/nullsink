@@ -1,5 +1,5 @@
-// The ONE crossing between the two worlds: payments → proxy, `credit {hash, micros, idempotency_key}`.
-// This module is the shared wire contract only — no store, no I/O — so each world can import it without
+// The ONE crossing between the two trust domains: payments → proxy, `credit {hash, micros, idempotency_key}`.
+// This module is the shared wire contract only — no store, no I/O — so each trust domain can import it without
 // dragging the other's code into its binary.
 //
 // Transport is HTTP over a unix domain socket (Bun.serve({unix}) / fetch(url, {unix})). Authentication is the

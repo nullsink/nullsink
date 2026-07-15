@@ -1,5 +1,5 @@
 // Payments side of the credit crossing: drain the durable outbox into the proxy over the unix socket.
-// PAYMENT-world module — imports the order store, never the balance store, providers, or the metered path.
+// PAYMENTS TRUST DOMAIN module — imports the order store, never the balance store, providers, or the metered path.
 //
 // A test-only in-process drain exists too (test/support/drain.ts, driven by the settle property tests). It is
 // NOT a duplicate of this loop: delivery over a socket is ASYNC and can be AMBIGUOUS (a timeout may or may not
