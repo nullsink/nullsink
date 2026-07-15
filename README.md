@@ -199,7 +199,10 @@ On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those arti
 atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
 systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
 rolling the symlinks back to the previous release if either service is unhealthy.
-First-time bootstrap is `core/deploy/setup.sh`.
+It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
+Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
+rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
+Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.
 
 ## License
 
