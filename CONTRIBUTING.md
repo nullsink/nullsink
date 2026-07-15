@@ -41,6 +41,11 @@ write the changelog or bump versions by hand.
 
 - Land work via **squash merge** with a Conventional Commit PR title (`feat(scope): …`, `fix: …`). The
   squashed subject is the only thing release-please reads, so the title is what matters.
+- Pinned runtime dependency updates use `deps(scope): …`, appear under **Maintenance**, and are patch-release
+  units (for example, `deps(deploy): update pinned runtime dependencies`). Other operator-visible maintenance
+  may use `chore(scope): …` and will appear in that section when a release is already being cut, but `chore`
+  alone does not trigger a release PR. Keep internal CI/test/style housekeeping under its own hidden type;
+  reserve “version bump” for nullsink's own release version.
 - release-please keeps an open "release PR" that bumps the version and regenerates `CHANGELOG.md` from the
   commits since the last release. Merge it when you want to cut a release.
 - Merging the release PR tags `vX.Y.Z` and creates the GitHub Release; CI then builds and attaches the
