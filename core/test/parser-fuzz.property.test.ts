@@ -132,3 +132,15 @@ test("readJsonBody resolves to a body-or-rejection for any bytes + any content-l
     { numRuns: 500 },
   );
 });
+
+test("readJsonBody enforces actual bytes when Content-Length is absent or understated", async () => {
+  for (const headers of [new Headers(), new Headers({ "content-length": "1" })]) {
+    const req = new Request("https://x.local/buy", {
+      method: "POST",
+      headers,
+      body: '{"value":"too large"}',
+    });
+    const out = await readJsonBody(req, 4);
+    expect("rejection" in out && out.rejection.status).toBe(413);
+  }
+});

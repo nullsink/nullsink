@@ -114,7 +114,7 @@
 	# --- Credit purchase (called by the UI). Tiny JSON body. PAYMENTS TRUST DOMAIN -> :8081. ---
 	handle /buy {
 		request_body {
-			max_size 4KB
+			max_size 4KiB
 		}
 		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For
@@ -125,7 +125,7 @@
 	#     raw token). Tiny JSON body, same as /buy; reveals no balance. PAYMENTS TRUST DOMAIN -> :8081. ---
 	handle /order-status {
 		request_body {
-			max_size 4KB
+			max_size 4KiB
 		}
 		reverse_proxy 127.0.0.1:8081 {
 			header_up -X-Forwarded-For
@@ -149,29 +149,85 @@
 		file_server
 	}
 
-	# --- Edge error contract. reverse_proxy passes an upstream's 4xx/5xx response through unchanged; this
-	#     runs only when Caddy itself cannot reach a split service. SDK routes must keep their provider-native
-	#     envelope and say retryable, while site routes keep nullsink's small own-endpoint envelope. ---
+	# --- Edge error contract. request_body and reverse_proxy can both raise errors into this route, so every
+	#     response is matched by BOTH path and originating status. A body-cap 413 is terminal and keeps the
+	#     route's native envelope; only Caddy-side 5xx failures become retryable service outages. An upstream's
+	#     ordinary 4xx/5xx response is a successful proxy exchange and passes through unchanged. ---
 	handle_errors {
-		@anthropic_outage path /v1/messages
+		@anthropic_too_large {
+			path /v1/messages
+			expression {err.status_code} == 413
+		}
+		handle @anthropic_too_large {
+			header Content-Type "application/json"
+			header x-should-retry "false"
+			respond `{"type":"error","error":{"type":"request_too_large","message":"payload_too_large"}}` 413
+		}
+
+		@openai_too_large {
+			path /v1/chat/completions /v1/responses
+			expression {err.status_code} == 413
+		}
+		handle @openai_too_large {
+			header Content-Type "application/json"
+			header x-should-retry "false"
+			respond `{"error":{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"}}` 413
+		}
+
+		@payments_too_large {
+			path /buy /order-status
+			expression {err.status_code} == 413
+		}
+		handle @payments_too_large {
+			header Content-Type "application/json"
+			respond `{"error":"payload_too_large"}` 413
+		}
+
+		@anthropic_outage {
+			path /v1/messages
+			expression {err.status_code} >= 500 && {err.status_code} <600
+		}
 		handle @anthropic_outage {
+			header Content-Type "application/json"
 			header x-should-retry "true"
 			respond `{"type":"error","error":{"type":"api_error","message":"service_unavailable"}}` 503
 		}
 
-		@openai_outage path /v1/chat/completions /v1/responses
+		@openai_outage {
+			path /v1/chat/completions /v1/responses
+			expression {err.status_code} >= 500 && {err.status_code} <600
+		}
 		handle @openai_outage {
+			header Content-Type "application/json"
 			header x-should-retry "true"
 			respond `{"error":{"message":"service_unavailable","type":"server_error","code":"service_unavailable"}}` 503
 		}
 
-		@proxy_outage path /v1/models /balance
-		handle @proxy_outage {
+		@balance_outage {
+			path /balance
+			expression {err.status_code} >= 500 && {err.status_code} <600
+		}
+		handle @balance_outage {
+			header Cache-Control "no-store"
+			header Content-Type "application/json"
 			respond `{"error":"proxy_error"}` 503
 		}
 
-		@payments_outage path /buy /order-status /rails
+		@proxy_outage {
+			path /v1/models
+			expression {err.status_code} >= 500 && {err.status_code} <600
+		}
+		handle @proxy_outage {
+			header Content-Type "application/json"
+			respond `{"error":"proxy_error"}` 503
+		}
+
+		@payments_outage {
+			path /buy /order-status /rails
+			expression {err.status_code} >= 500 && {err.status_code} <600
+		}
 		handle @payments_outage {
+			header Content-Type "application/json"
 			respond `{"error":"payments_error"}` 503
 		}
 

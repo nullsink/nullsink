@@ -24,6 +24,14 @@ function upstreamFor(path: string): string | null {
   return block?.[1].match(/reverse_proxy 127\.0\.0\.1:(\d+)/)?.[1] ?? null;
 }
 
+function namedMatcher(name: string): string {
+  const startMarker = `\t\t@${name} {\n`;
+  const start = caddy.indexOf(startMarker);
+  if (start === -1) return "";
+  const end = caddy.indexOf("\n\t\t}\n", start + startMarker.length);
+  return end === -1 ? "" : caddy.slice(start, end + "\n\t\t}".length);
+}
+
 test("the two roots, setup defaults, Caddy routes, and service units agree on the split ports", () => {
   expect(proxy).toContain('numEnv("PORT", 8080');
   expect(payments).toContain('numEnv("PAYMENTS_PORT", 8081');
@@ -42,18 +50,36 @@ test("both systemd units and both roots use the one owner-authenticated credit s
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
 });
 
-test("edge outages preserve each public route's error envelope and retry contract", () => {
-  // Caddy enters handle_errors only for its own failures (such as a refused loopback connection), not for
-  // an upstream's ordinary 4xx/5xx response. Keep the app-down boundary as deliberate as the port split.
+test("edge body caps and outages are disjoint, status-aware contracts", () => {
+  // Both request_body and reverse_proxy enter handle_errors. Path-only matchers turn a terminal 413 into a
+  // retryable outage, so every native body-cap matcher is pinned to 413 and every outage matcher to 5xx.
   expect(caddy).toContain("# --- Edge error contract.");
-  expect(caddy).toMatch(/@anthropic_outage path \/v1\/messages[\s\S]*?header x-should-retry "true"[\s\S]*?respond `\{"type":"error","error":\{"type":"api_error","message":"service_unavailable"\}\}` 503/);
-  expect(caddy).toMatch(/@openai_outage path \/v1\/chat\/completions \/v1\/responses[\s\S]*?header x-should-retry "true"[\s\S]*?respond `\{"error":\{"message":"service_unavailable","type":"server_error","code":"service_unavailable"\}\}` 503/);
-  expect(caddy).toMatch(/@proxy_outage path \/v1\/models \/balance[\s\S]*?respond `\{"error":"proxy_error"\}` 503/);
-  expect(caddy).toMatch(/@payments_outage path \/buy \/order-status \/rails[\s\S]*?respond `\{"error":"payments_error"\}` 503/);
+  for (const name of ["anthropic_too_large", "openai_too_large", "payments_too_large"])
+    expect(namedMatcher(name), name).toContain("expression {err.status_code} == 413");
+  for (const name of ["anthropic_outage", "openai_outage", "balance_outage", "proxy_outage", "payments_outage"])
+    expect(namedMatcher(name), name).toContain("expression {err.status_code} >= 500 && {err.status_code} <600");
+
+  // These limits are one fixed contract, not independent operator knobs that can drift from Caddy.
+  expect(caddy).toContain("max_size 32MiB");
+  expect(caddy).toContain("max_size 4KiB");
+  expect(proxy).toContain("const MAX_MESSAGES_BODY_BYTES = 32 * 1024 * 1024;");
+  expect(payments).toContain("const MAX_BUY_BODY_BYTES = 4 * 1024;");
+  expect(proxy).not.toContain('numEnv("MAX_MESSAGES_BODY_BYTES"');
+  expect(payments).not.toContain('numEnv("MAX_BUY_BODY_BYTES"');
+
+  expect(caddy).toMatch(/header x-should-retry "false"\n\t\t\trespond `\{"type":"error","error":\{"type":"request_too_large","message":"payload_too_large"\}\}` 413/);
+  expect(caddy).toMatch(/header x-should-retry "false"\n\t\t\trespond `\{"error":\{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"\}\}` 413/);
+  expect(caddy).toContain('respond `{"error":"payload_too_large"}` 413');
+  expect(caddy).toMatch(/header x-should-retry "true"\n\t\t\trespond `\{"type":"error","error":\{"type":"api_error","message":"service_unavailable"\}\}` 503/);
+  expect(caddy).toMatch(/header x-should-retry "true"\n\t\t\trespond `\{"error":\{"message":"service_unavailable","type":"server_error","code":"service_unavailable"\}\}` 503/);
+  expect(caddy).toContain('respond `{"error":"proxy_error"}` 503');
+  expect(caddy).toContain('respond `{"error":"payments_error"}` 503');
 });
 
 test("balance responses are never stored by an intermediary", () => {
   // /balance is a GET keyed by the bearer-like x-api-key header. Caddy's deferred set means an upstream
-  // response cannot overwrite no-store while its headers are copied to the client.
+  // response cannot overwrite no-store while its headers are copied to the client. An error route is a new
+  // handler chain, so its Caddy-generated proxy outage also sets no-store explicitly.
   expect(caddy).toMatch(/handle \/balance \{[\s\S]*?header >Cache-Control "no-store"[\s\S]*?reverse_proxy 127\.0\.0\.1:8080/);
+  expect(caddy).toMatch(/handle @balance_outage \{\n\t\t\theader Cache-Control "no-store"/);
 });

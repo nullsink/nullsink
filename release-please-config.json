@@ -23,7 +23,8 @@
     { "type": "test", "section": "Tests", "hidden": true },
     { "type": "build", "section": "Build", "hidden": true },
     { "type": "ci", "section": "CI", "hidden": true },
-    { "type": "chore", "section": "Chores", "hidden": true },
+    { "type": "deps", "section": "Maintenance" },
+    { "type": "chore", "section": "Maintenance" },
     { "type": "style", "section": "Styles", "hidden": true }
   ]
 }

@@ -43,7 +43,9 @@ const POLL_INTERVAL_MS = numEnv("POLL_INTERVAL_MS", 30_000, 1000, 3_600_000);
 const POLL_FAIL_ALERT = numEnv("POLL_FAIL_ALERT", 5, 1, 1000);
 // Global in-flight ceiling (no IP tracking — privacy). Bounds total open orders, hence addresses created.
 const MAX_OPEN_ORDERS = numEnv("MAX_OPEN_ORDERS", 1000, 1, 10_000_000);
-const MAX_BUY_BODY_BYTES = numEnv("MAX_BUY_BODY_BYTES", 4096, 64, 1_048_576);
+// Fixed public body contract: Caddy and the handler both enforce exactly 4 KiB. This is intentionally not
+// an env knob; a different local value would make one layer's advertised limit ineffective.
+const MAX_BUY_BODY_BYTES = 4 * 1024;
 // Order horizons. ORDER_TTL_MS is the quoted expires_at — the buyer's "pay by" deadline. REAP_GRACE_MS is the
 // slack before the internal reap. ORDER_BACKSTOP_MS is the absolute safety net (internal only).
 const ORDER_TTL_MS = numEnv("ORDER_TTL_MS", 4 * 60 * 60 * 1000, 5 * 60 * 1000, 30 * 24 * 60 * 60 * 1000);
@@ -105,7 +107,9 @@ const handler = createPaymentsHandler({
 const server = Bun.serve({
   port: PORT,
   hostname: HOST,
-  maxRequestBodySize: MAX_BUY_BODY_BYTES * 16, // /buy + /order-status bodies are tiny; the handler caps them exactly
+  // Leave enough room for the handler to return nullsink's JSON 413 for a modest direct/chunked overage;
+  // readJsonBody enforces the exact 4 KiB actual-byte contract, while this is the hard allocation backstop.
+  maxRequestBodySize: MAX_BUY_BODY_BYTES * 16,
   fetch: handler,
   error() {
     // Last-resort only; see proxy.ts. The error object itself may contain request data, so the alertable

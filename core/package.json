@@ -20,6 +20,7 @@
     "build:proxy": "bun build --compile --target=bun-linux-x64 --reject-unresolved --metafile=nullsink-proxy.metafile.json src/proxy.ts --outfile nullsink-proxy-linux-x64",
     "build:payments": "bun build --compile --target=bun-linux-x64 --reject-unresolved --metafile=nullsink-payments.metafile.json src/payments.ts --outfile nullsink-payments-linux-x64",
     "assert:trust-domains": "bun run scripts/assert-trust-domains.ts",
+    "test:caddy": "bun run scripts/test-caddy-edge.ts",
     "build": "bun run build:proxy && bun run build:payments && bun run assert:trust-domains",
     "build:nsk": "bun build --compile --target=bun-linux-x64 cli/index.ts --outfile nsk-linux-x64",
     "e2e:capture": "bun run scripts/e2e-capture.ts",

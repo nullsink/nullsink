@@ -74,8 +74,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # release-please already created the Release (notes = the CHANGELOG section). For a manual tag
-          # push there's no Release yet, so create one. Then attach/replace the verifiable assets.
+          # push there's no Release yet, so create one. The helper emits no flags for a stable tag, and
+          # `--prerelease --latest=false` for an RC/beta tag so the fallback cannot promote it to Latest.
+          # Capture first (rather than process substitution) so an invalid tag fails the step under `set -e`.
+          release_flags_output="$(bash .github/scripts/release-create-flags.sh "$TAG")"
+          release_flags=()
+          while IFS= read -r flag; do
+            [ -n "$flag" ] && release_flags+=("$flag")
+          done <<< "$release_flags_output"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" \
+            "${release_flags[@]}" \
             --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments server binaries (install them in lockstep) + operator CLI (\`nsk\`) + deploy tree + client UI tarball. The box downloads + checksum-verifies these (no source/Bun). Verify checksums: \`sha256sum -c SHA256SUMS\`. Verify provenance (any authenticated GitHub user): \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
           gh release upload "$TAG" \
             nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
