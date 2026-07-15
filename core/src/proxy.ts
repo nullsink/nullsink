@@ -39,9 +39,9 @@ const STREAM_SETTLE_DEADLINE_MS = numEnv("STREAM_SETTLE_DEADLINE_MS", UPSTREAM_T
 // error. "byte" forces the deterministic no-extra-call bound. Either is sound.
 const HOLD_ESTIMATOR = process.env.HOLD_ESTIMATOR ?? "count_tokens";
 const COUNT_TOKENS_TIMEOUT_MS = numEnv("COUNT_TOKENS_TIMEOUT_MS", 10_000, 100, 600_000);
-// Body-size cap (DoS): /v1/messages matches the upstreams' own request ceiling. Anthropic's 32 MB limit is
-// binary MiB, so default = 32 MiB = 33_554_432 — matching their ceiling avoids 413-ing a body upstream accepts.
-const MAX_MESSAGES_BODY_BYTES = numEnv("MAX_MESSAGES_BODY_BYTES", 33_554_432, 1024, 1_000_000_000);
+// Fixed public body contract: Caddy and this direct-service backstop both enforce exactly 32 MiB.
+// Keeping this non-configurable prevents an env override from silently disagreeing with the edge.
+const MAX_MESSAGES_BODY_BYTES = 32 * 1024 * 1024;
 // Output cap applied (and injected into the forwarded request) when a client OMITS one — so stock OpenAI clients
 // that omit a cap still work. The hold is sized against it. 0 = strict (require an explicit cap).
 const DEFAULT_MAX_OUTPUT_TOKENS = numEnv("DEFAULT_MAX_OUTPUT_TOKENS", 0, 0, 1_000_000);
