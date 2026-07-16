@@ -36,6 +36,8 @@ EnvironmentFile=/etc/monero-wallet-rpc.env
 #  $MONERO_PROXY_ARG : node traffic over Tor by default (--proxy 127.0.0.1:9050); EMPTY = direct (see above).
 #  --rpc-bind-ip 127.0.0.1 --disable-rpc-login : localhost-only, so no auth; NEVER bind public.
 #  --password-file : keeps the wallet password out of the process args (ps/journal).
+#  --shared-ringdb-dir : keeps Monero's ring metadata in the writable StateDirectory; ProtectHome=true
+#    intentionally hides the default ~/.shared-ringdb path, which otherwise logs a permission error at boot.
 #  $MONERO_NET_ARG : optional network flag from the env file — EMPTY for mainnet (prod, the default),
 #    `--stagenet` (or `--testnet`) for a testnet staging box. Unbraced $VAR so an empty value adds NO
 #    argument (a braced ${VAR} would pass an empty "" that monero-wallet-rpc rejects).
@@ -43,6 +45,7 @@ ExecStart=/usr/local/bin/monero-wallet-rpc \
   $MONERO_NET_ARG \
   --wallet-file %S/nullsink-wallet/prview \
   --password-file %S/nullsink-wallet/.rpc-pw \
+  --shared-ringdb-dir %S/nullsink-wallet/.shared-ringdb \
   --daemon-address ${MONERO_NODE} \
   $MONERO_PROXY_ARG \
   --untrusted-daemon \
