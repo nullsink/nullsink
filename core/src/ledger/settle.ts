@@ -32,9 +32,10 @@ export function settle(
   orders: OrdersStore,
   now: number,
   cfg: SettleConfig,
-): void {
+): number {
   const rail = cfg.rail ?? "monero"; // rail-scope all reads/reaps below (see SettleConfig.rail)
   const open = new Map(orders.openOrders(rail).map((o) => [o.order_index, o]));
+  let enqueued = 0;
 
   // Aggregate creditable inbounds by the rail's idempotency key. The rail returns one entry per output,
   // and several can share a key (Monero: outputs of one tx to the same subaddress), so we sum per key and
@@ -68,7 +69,8 @@ export function settle(
     // (credit-sender.ts), idempotent per `key` — so this stays synchronous and the money-critical step is a
     // single atomic write on one DB (the old two-DB credit→remove zombie window is gone). Pay-once: the order
     // closes on this first confirmed payment regardless of coverage — a later top-up is a NEW order.
-    orders.commitSettlement(key, o.hash, share, now, { asset: cfg.asset, assetAtomic: g.amount, scale: cfg.scale, grossMicros }, o.order_index, rail);
+    if (orders.commitSettlement(key, o.hash, share, now, { asset: cfg.asset, assetAtomic: g.amount, scale: cfg.scale, grossMicros }, o.order_index, rail))
+      enqueued++;
   }
 
   // Absolute safety backstop: drop everything past the long horizon, including a paid-but-never-confirmed
@@ -94,4 +96,5 @@ export function settle(
   // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is never
   // purged: purging on the payments-side clock could drop a marker while an outbox retry is still in
   // flight → double-credit. It is ~50 bytes/sale; a payments→proxy safe-point watermark can prune it later.
+  return enqueued;
 }

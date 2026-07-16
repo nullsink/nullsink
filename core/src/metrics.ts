@@ -32,6 +32,18 @@
 //       buy       /buy global rate-limit 429
 //       read      /balance + /order-status + /rails read-throttle 429
 //       orders    MAX_OPEN_ORDERS "busy_try_later" 503
+//   balance.*  — GET /balance outcomes, separated from the shared free-read throttle so an operator can
+//     distinguish balance-path health without learning why a caller checked it.
+//       ok         a funded token's balance was returned
+//       unknown    missing/unrecognised token (401)
+//       throttled  the balance endpoint's share of reject.read
+//       error      an unexpected balance-read failure reached the handler
+//   credit.*   — durable payment→balance outbox throughput. Counts only outcomes, never a hash, amount,
+//     address, rail, or idempotency key.
+//       enqueued        fresh credits durably added to the outbox
+//       acked           rows acknowledged after applied or already_applied
+//       alreadyApplied  acked redeliveries the receiver had committed before (exactly-once dedupe)
+//       blocked         drain ticks stopped by an ambiguous socket outcome; rows remain durable for retry
 //   gate.*     — metered requests REJECTED before we forwarded upstream (so NOT in `requests`/`served`). All
 //     client-caused + expected, so counter-only (no per-event log) and routine INFO — but a spike is visible
 //     (e.g. `gate:auth=5000` = an unauthenticated/bad-token flood the door shed cheaply). Emitted as `gate:*`.
@@ -61,6 +73,7 @@
 //                       pages). Emitted `stream:aborted`.
 //   peakStreams / peakOpenOrders — high-water marks for concurrent live streams and open payment orders, so
 //     saturation toward the in-flight ceilings is visible before it bites.
+//   peakOutbox / maxOutboxAgeMs — maximum queued-credit count and oldest-row age observed in the window.
 //   recoveredHolds — how many stranded holds boot recoverHolds() refunded at startup (a crash/SIGKILL between
 //     debit and settle leaves them; db.ts). A boot-point money-movement gauge: non-zero only in the first
 //     window after an UNgraceful restart, behind the existing [boot] WARN. ROUTINE. Emitted `recovered:holds`.
@@ -71,17 +84,23 @@ export type UpstreamKind = "throttle" | "server" | "auth" | "billing" | "timeout
 export type RejectKind = "buy" | "read" | "orders";
 export type BillKind = "refundedInFull" | "holdExceeded";
 export type GateKind = "auth" | "request" | "model" | "premium" | "funds";
+export type BalanceKind = "ok" | "unknown" | "throttled" | "error";
+export type CreditKind = "enqueued" | "acked" | "alreadyApplied" | "blocked";
 
 const upstream = { throttle: 0, server: 0, auth: 0, billing: 0, timeout: 0, unreachable: 0, relayed4xx: 0, notfound: 0, other: 0 };
 const reject = { buy: 0, read: 0, orders: 0 };
 const bill = { refundedInFull: 0, holdExceeded: 0 };
 const gate = { auth: 0, request: 0, model: 0, premium: 0, funds: 0 }; // metered requests shed at a pre-forward gate (NOT in requests/served)
+const balance = { ok: 0, unknown: 0, throttled: 0, error: 0 };
+const credit = { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 };
 let requests = 0; // metered requests forwarded upstream (post-gates)
 let served = 0; // of those, the ones we billed cleanly (a 2xx we metered actual usage on)
 let servedPartial = 0; // streamed, client disconnected post-forward → billed input-floor only (Anthropic-granularity)
 let streamAborted = 0; // streamed 2xx that never cleanly billed — mid-flight upstream error, or shutdown drain → refunded
 let peakStreams = 0;
 let peakOpenOrders = 0;
+let peakOutbox = 0;
+let maxOutboxAgeMs = 0;
 let recoveredHolds = 0; // stranded holds boot recoverHolds() refunded (ungraceful restart) — boot-point money gauge
 let windowStart = 0;
 
@@ -104,6 +123,14 @@ export function recordBill(kind: BillKind): void {
 // One metered request REJECTED at a pre-forward gate (handler.ts denyApi sites). Client-caused + counter-only.
 export function recordGate(kind: GateKind): void {
   gate[kind] += 1;
+}
+
+export function recordBalance(kind: BalanceKind): void {
+  balance[kind] += 1;
+}
+
+export function recordCredit(kind: CreditKind, count = 1): void {
+  credit[kind] += count;
 }
 
 // One metered request forwarded upstream (handler.ts, just before the upstream fetch).
@@ -136,6 +163,10 @@ export function observeStreams(n: number): void {
 export function observeOpenOrders(n: number): void {
   if (n > peakOpenOrders) peakOpenOrders = n;
 }
+export function observeCreditOutbox(unackedCredits: number, oldestAgeMs: number): void {
+  if (unackedCredits > peakOutbox) peakOutbox = unackedCredits;
+  if (oldestAgeMs > maxOutboxAgeMs) maxOutboxAgeMs = oldestAgeMs;
+}
 
 // Boot-time: the count of stranded holds recoverHolds() refunded at startup (proxy.ts, once per start). Adds (not
 // sets) so the boot event survives into whatever window is open; a clean restart records nothing.
@@ -149,12 +180,16 @@ export type MetricsSnapshot = {
   reject: { buy: number; read: number; orders: number };
   bill: { refundedInFull: number; holdExceeded: number };
   gate: { auth: number; request: number; model: number; premium: number; funds: number };
+  balance: { ok: number; unknown: number; throttled: number; error: number };
+  credit: { enqueued: number; acked: number; alreadyApplied: number; blocked: number };
   requests: number;
   served: number;
   servedPartial: number;
   streamAborted: number;
   peakStreams: number;
   peakOpenOrders: number;
+  peakOutbox: number;
+  maxOutboxAgeMs: number;
   recoveredHolds: number;
   windowStart: number;
 };
@@ -162,7 +197,12 @@ export type MetricsSnapshot = {
 // Point-in-time read for the periodic / shutdown flush. Pure (no reset); returns copies so a caller can't
 // mutate the live counters.
 export function snapshot(): MetricsSnapshot {
-  return { upstream: { ...upstream }, reject: { ...reject }, bill: { ...bill }, gate: { ...gate }, requests, served, servedPartial, streamAborted, peakStreams, peakOpenOrders, recoveredHolds, windowStart };
+  return {
+    upstream: { ...upstream }, reject: { ...reject }, bill: { ...bill }, gate: { ...gate },
+    balance: { ...balance }, credit: { ...credit },
+    requests, served, servedPartial, streamAborted,
+    peakStreams, peakOpenOrders, peakOutbox, maxOutboxAgeMs, recoveredHolds, windowStart,
+  };
 }
 
 // Format a snapshot into the single [metrics] journald line + its level, or null when nothing happened (so
@@ -186,6 +226,8 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   if (m.reject.buy) problems.push(`reject:buy=${m.reject.buy}`);
   if (m.reject.read) problems.push(`reject:read=${m.reject.read}`);
   if (m.reject.orders) problems.push(`reject:orders=${m.reject.orders}`);
+  if (m.balance.error) problems.push(`balance:error=${m.balance.error}`);
+  if (m.credit.blocked) problems.push(`credit:blocked=${m.credit.blocked}`);
   // Routine heartbeat: any window that forwarded metered traffic emits `served=N req=M`, so a drop to
   // served=0 (the box up but serving nothing) is visible in the journal, not just inferable from silence.
   const routine: string[] = [];
@@ -207,8 +249,16 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   if (m.gate.model) routine.push(`gate:model=${m.gate.model}`); // client asked for a model we don't serve
   if (m.gate.premium) routine.push(`gate:premium=${m.gate.premium}`); // demand for a premium feature we don't price
   if (m.gate.funds) routine.push(`gate:funds=${m.gate.funds}`);
+  if (m.balance.ok) routine.push(`balance:ok=${m.balance.ok}`);
+  if (m.balance.unknown) routine.push(`balance:unknown=${m.balance.unknown}`);
+  if (m.balance.throttled) routine.push(`balance:throttled=${m.balance.throttled}`);
+  if (m.credit.enqueued) routine.push(`credit:enqueued=${m.credit.enqueued}`);
+  if (m.credit.acked) routine.push(`credit:acked=${m.credit.acked}`);
+  if (m.credit.alreadyApplied) routine.push(`credit:dedup=${m.credit.alreadyApplied}`);
   if (m.peakStreams) routine.push(`peak:streams=${m.peakStreams}`);
   if (m.peakOpenOrders) routine.push(`peak:orders=${m.peakOpenOrders}`);
+  if (m.peakOutbox) routine.push(`peak:outbox=${m.peakOutbox}`);
+  if (m.maxOutboxAgeMs) routine.push(`max:outbox-age-s=${Math.ceil(m.maxOutboxAgeMs / 1000)}`);
   // Boot-point gauge: stranded holds the last (ungraceful) restart refunded. Non-zero only in the first window
   // after a rough restart; the actionable signal is the [boot] WARN, this is the cross-restart trend.
   if (m.recoveredHolds) routine.push(`recovered:holds=${m.recoveredHolds}`);
@@ -225,12 +275,16 @@ export function reset(nowMs: number): void {
   reject.buy = reject.read = reject.orders = 0;
   bill.refundedInFull = bill.holdExceeded = 0;
   gate.auth = gate.request = gate.model = gate.premium = gate.funds = 0;
+  balance.ok = balance.unknown = balance.throttled = balance.error = 0;
+  credit.enqueued = credit.acked = credit.alreadyApplied = credit.blocked = 0;
   requests = 0;
   served = 0;
   servedPartial = 0;
   streamAborted = 0;
   peakStreams = 0;
   peakOpenOrders = 0;
+  peakOutbox = 0;
+  maxOutboxAgeMs = 0;
   recoveredHolds = 0;
   windowStart = nowMs;
 }

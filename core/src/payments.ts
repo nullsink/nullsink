@@ -150,13 +150,14 @@ async function pollRail(rail: PayRail): Promise<void> {
   if (recovered.event === "recovered")
     log.info("poll", `[${rail.name}] poll recovered after ${prevFails} consecutive failures — deposit detection restored`);
   pollFailsByRail.set(rail.name, recovered.fails);
-  settle(transfers, orders, Date.now(), {
+  const enqueued = settle(transfers, orders, Date.now(), {
     scale: rail.scale,
     asset: rail.name,
     rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
     backstopMs: ORDER_BACKSTOP_MS,
     unfundedReapMs: ORDER_TTL_MS + REAP_GRACE_MS,
   });
+  if (enqueued > 0) metrics.recordCredit("enqueued", enqueued);
   // Refresh the live /order-status view AFTER settle has removed credited/reaped orders, so closed ones drop out.
   // Unlike settle's reap guard (durable pending_orders.seen_at), this map is process-local and empty after a
   // restart — /order-status reports `detected` from seen_at until the wallet repopulates it.
@@ -170,7 +171,13 @@ async function pollRail(rail: PayRail): Promise<void> {
 async function pollOnce(): Promise<void> {
   await Promise.allSettled([...rails.values()].map((r) => pollRail(r)));
   const now = Date.now();
-  const { delivered, blocked } = await drainCreditOutboxOverSocket(orders, sendCredit, now);
+  const unackedCredits = orders.unackedCreditCount();
+  const oldestBeforeDrain = oldestUnackedAgeMs(orders, now);
+  metrics.observeCreditOutbox(unackedCredits, oldestBeforeDrain);
+  const { delivered, alreadyApplied, blocked } = await drainCreditOutboxOverSocket(orders, sendCredit, now);
+  if (delivered > 0) metrics.recordCredit("acked", delivered);
+  if (alreadyApplied > 0) metrics.recordCredit("alreadyApplied", alreadyApplied);
+  if (blocked) metrics.recordCredit("blocked");
   if (delivered > 0) log.info("credit", `delivered ${delivered} credit(s) over the socket`);
   // Ambiguous delivery (proxy restarting, socket not yet bound, timeout): the rows stay durable and we retry.
   // Say what it MEANS ourselves — the raw reason can be Bun's generic "Was there a typo in the url or port?",

@@ -16,12 +16,16 @@ test("record / observe / snapshot / reset track every counter and high-water mar
     reject: { buy: 0, read: 0, orders: 0 },
     bill: { refundedInFull: 0, holdExceeded: 0 },
     gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
+    balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
+    credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
     requests: 0,
     served: 0,
     servedPartial: 0,
     streamAborted: 0,
     peakStreams: 0,
     peakOpenOrders: 0,
+    peakOutbox: 0,
+    maxOutboxAgeMs: 0,
     recoveredHolds: 0,
     windowStart: 1000,
   });
@@ -45,6 +49,14 @@ test("record / observe / snapshot / reset track every counter and high-water mar
   metrics.recordGate("model");
   metrics.recordGate("premium");
   metrics.recordGate("funds");
+  metrics.recordBalance("ok");
+  metrics.recordBalance("unknown");
+  metrics.recordBalance("throttled");
+  metrics.recordBalance("error");
+  metrics.recordCredit("enqueued", 3);
+  metrics.recordCredit("acked", 2);
+  metrics.recordCredit("alreadyApplied");
+  metrics.recordCredit("blocked");
   metrics.recordRequest();
   metrics.recordRequest();
   metrics.recordServed();
@@ -55,17 +67,23 @@ test("record / observe / snapshot / reset track every counter and high-water mar
   metrics.observeStreams(2); // a lower value never lowers the high-water mark
   metrics.observeOpenOrders(7);
   metrics.observeOpenOrders(4);
+  metrics.observeCreditOutbox(5, 12_345);
+  metrics.observeCreditOutbox(3, 10_000); // lower values never lower either high-water mark
   expect(metrics.snapshot()).toEqual({
     upstream: { throttle: 2, server: 1, auth: 1, billing: 1, timeout: 1, unreachable: 1, relayed4xx: 1, notfound: 1, other: 1 },
     reject: { buy: 1, read: 1, orders: 1 },
     bill: { refundedInFull: 1, holdExceeded: 1 },
     gate: { auth: 1, request: 1, model: 1, premium: 1, funds: 1 },
+    balance: { ok: 1, unknown: 1, throttled: 1, error: 1 },
+    credit: { enqueued: 3, acked: 2, alreadyApplied: 1, blocked: 1 },
     requests: 2,
     served: 1,
     servedPartial: 1,
     streamAborted: 1,
     peakStreams: 3,
     peakOpenOrders: 7,
+    peakOutbox: 5,
+    maxOutboxAgeMs: 12_345,
     recoveredHolds: 5,
     windowStart: 1000,
   });
@@ -75,12 +93,16 @@ test("record / observe / snapshot / reset track every counter and high-water mar
     reject: { buy: 0, read: 0, orders: 0 },
     bill: { refundedInFull: 0, holdExceeded: 0 },
     gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
+    balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
+    credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
     requests: 0,
     served: 0,
     servedPartial: 0,
     streamAborted: 0,
     peakStreams: 0,
     peakOpenOrders: 0,
+    peakOutbox: 0,
+    maxOutboxAgeMs: 0,
     recoveredHolds: 0,
     windowStart: 2000,
   });
@@ -216,6 +238,7 @@ test("local rejections are counted by kind: /buy rate limit, read throttle, orde
     expect((await handler(balanceReq("pr_r"))).status).toBe(429);
   }
   expect(metrics.snapshot().reject.read).toBe(1);
+  expect(metrics.snapshot().balance.throttled).toBe(1);
 
   // reject:orders — at maxOpenOrders=1, the first /buy opens an order and the second is shed at the cap.
   metrics.reset(0);
@@ -225,6 +248,28 @@ test("local rejections are counted by kind: /buy rate limit, read throttle, orde
     expect((await handler(buyReq(B))).status).toBe(503);
   }
   expect(metrics.snapshot().reject.orders).toBe(1);
+});
+
+test("/balance outcomes are aggregate and endpoint-specific", async () => {
+  metrics.reset(0);
+  const { handler, balances } = makeHandler(okStream());
+  balances.credit(hashToken("pr_balance"), 5_000_000);
+  expect((await handler(balanceReq("pr_balance"))).status).toBe(200);
+  expect((await handler(balanceReq("pr_unknown"))).status).toBe(401);
+  expect(metrics.snapshot().balance).toEqual({ ok: 1, unknown: 1, throttled: 0, error: 0 });
+
+  const brokenBalances = {
+    getBalance: () => { throw new Error("disk read failed"); },
+    openHold: () => false,
+    settleHold: () => false,
+  } as any;
+  const broken = makeHandler(okStream(), { balances: brokenBalances }).handler;
+  try {
+    await broken(balanceReq("pr_broken"));
+  } catch {
+    // The production root converts this to its generic 500; this combined test router deliberately rethrows.
+  }
+  expect(metrics.snapshot().balance.error).toBe(1);
 });
 
 test("a created order bumps the open-orders high-water mark (observed at creation, not sampled)", async () => {
@@ -424,12 +469,16 @@ const EMPTY = {
   reject: { buy: 0, read: 0, orders: 0 },
   bill: { refundedInFull: 0, holdExceeded: 0 },
   gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
+  balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
+  credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
   requests: 0,
   served: 0,
   servedPartial: 0,
   streamAborted: 0,
   peakStreams: 0,
   peakOpenOrders: 0,
+  peakOutbox: 0,
+  maxOutboxAgeMs: 0,
   recoveredHolds: 0,
   windowStart: 0,
 };
@@ -442,6 +491,24 @@ test("formatMetricsLine: peaks alone are a routine heartbeat → INFO", () => {
   expect(metrics.formatMetricsLine({ ...EMPTY, peakStreams: 3, peakOpenOrders: 7 }, 5 * 60_000)).toEqual({
     level: "info",
     line: "peak:streams=3 peak:orders=7 (last 5m)",
+  });
+});
+
+test("formatMetricsLine: balance and credit delivery stay aggregate; failures drive WARN", () => {
+  expect(
+    metrics.formatMetricsLine(
+      {
+        ...EMPTY,
+        balance: { ok: 8, unknown: 2, throttled: 1, error: 1 },
+        credit: { enqueued: 4, acked: 3, alreadyApplied: 1, blocked: 2 },
+        peakOutbox: 4,
+        maxOutboxAgeMs: 12_345,
+      },
+      60_000,
+    ),
+  ).toEqual({
+    level: "warn",
+    line: "balance:error=1 credit:blocked=2 balance:ok=8 balance:unknown=2 balance:throttled=1 credit:enqueued=4 credit:acked=3 credit:dedup=1 peak:outbox=4 max:outbox-age-s=13 (last 1m)",
   });
 });
 

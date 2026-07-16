@@ -22,8 +22,10 @@ test("listUnackedCredits returns unacked rows oldest-first; ackCredit removes a 
   const o = openOrderStore(":memory:");
   o.enqueueCredit("tx:b", HASH, 2_000_000, 200);
   o.enqueueCredit("tx:a", HASH, 1_000_000, 100); // enqueued later but older created_at → sorts FIRST
+  expect(o.unackedCreditCount()).toBe(2);
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:a", "tx:b"]);
   o.ackCredit("tx:a", 500);
+  expect(o.unackedCreditCount()).toBe(1);
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]); // acked row drops out
   o.ackCredit("tx:a", 999); // re-ack is harmless
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]);
@@ -35,6 +37,7 @@ test("acking every row leaves an empty work list (the drained-clean state)", () 
   o.enqueueCredit("k2", HASH, 2, 2);
   o.ackCredit("k1", 10);
   o.ackCredit("k2", 10);
+  expect(o.unackedCreditCount()).toBe(0);
   expect(o.listUnackedCredits()).toEqual([]);
 });
 
@@ -80,7 +83,7 @@ test("commitSettlement books no second sale when the outbox key already exists (
   const store = openOrderStore(":memory:");
   store.tryAddOrder({ rail: "monero", order_index: 3, address: "a3", hash: HASH, expected_atomic: 1_000_000, credit_micros: 5_000_000, received_atomic: 0, created_at: 100, rate_usd: 0 }, Number.MAX_SAFE_INTEGER);
   store.enqueueCredit("k", HASH, 5_000_000, 100); // key already enqueued (simulate the zombie's credit)
-  store.commitSettlement("k", HASH, 5_000_000, 200, { asset: "monero", assetAtomic: 1_000_000, scale: ATOMIC_PER_XMR, grossMicros: 999 }, 3, "monero");
+  expect(store.commitSettlement("k", HASH, 5_000_000, 200, { asset: "monero", assetAtomic: 1_000_000, scale: ATOMIC_PER_XMR, grossMicros: 999 }, 3, "monero")).toBe(false);
   expect(store.listRevenue()).toHaveLength(0); // NOT booked — the enqueue wasn't fresh
   expect(store.listUnackedCredits()).toEqual([{ idempotency_key: "k", hash: HASH, micros: 5_000_000 }]); // original row intact
   expect(store.openOrders()).toHaveLength(0); // order still closed regardless

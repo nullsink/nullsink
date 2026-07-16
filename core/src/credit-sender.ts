@@ -47,15 +47,17 @@ export async function drainCreditOutboxOverSocket(
   orders: OrdersStore,
   send: CreditSender,
   now: number,
-): Promise<{ delivered: number; blocked?: string }> {
+): Promise<{ delivered: number; alreadyApplied: number; blocked?: string }> {
   let delivered = 0;
+  let alreadyApplied = 0;
   for (const c of orders.listUnackedCredits()) {
     const r = await send({ hash: c.hash, micros: c.micros, idempotency_key: c.idempotency_key });
-    if (!r.ok) return { delivered, blocked: r.reason }; // ambiguous → leave unacked, retry next tick
+    if (!r.ok) return { delivered, alreadyApplied, blocked: r.reason }; // ambiguous → leave unacked, retry next tick
+    if (r.outcome === "already_applied") alreadyApplied++;
     orders.ackCredit(c.idempotency_key, now);
     delivered++;
   }
-  return { delivered };
+  return { delivered, alreadyApplied };
 }
 
 // Age of the oldest unacked credit, in ms (0 when the outbox is drained). The real "is money still crossing?"

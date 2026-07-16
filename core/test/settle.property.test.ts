@@ -435,13 +435,13 @@ test("backstop reaps stale orders and re-scan after purge never double-credits",
 test("settle enqueues credit + books revenue + closes the order atomically; re-scan and re-drain stay exactly-once", () => {
   const { balances, store } = fresh([{ sub: 1, hash: "h1", expected: 1_000_000, credit: 5_000_000 }]);
   const pay: Incoming = { orderIndex: 1, idempotencyKey: "tx1:1", amount: 1_000_000, confirmations: CONF, final: true };
-  settle([pay], store, NOW, CFG);
+  expect(settle([pay], store, NOW, CFG)).toBe(1);
   // one outbox credit + one revenue row + the order closed, all from the single settle transaction:
   expect(store.listUnackedCredits()).toEqual([{ idempotency_key: "tx1:1", hash: "h1", micros: 5_000_000 }]);
   expect(store.listRevenue().length).toBe(1);
   expect(store.openCount()).toBe(0);
   // a poller re-scan of the same (now-closed) deposit enqueues nothing new and books no second sale:
-  settle([pay], store, NOW, CFG);
+  expect(settle([pay], store, NOW, CFG)).toBe(0);
   expect(store.listUnackedCredits().length).toBe(1);
   expect(store.listRevenue().length).toBe(1);
   // the sender delivers it to the balance ledger exactly once, even across repeated drains:
@@ -474,11 +474,11 @@ test("settle is rail-scoped: a monero tick reaps only monero orders, never the o
 
 // THE load-bearing concurrency invariant: settle() must be synchronous so the poller's per-rail settle calls
 // can't interleave on the shared DBs. If an await ever creeps in, settle returns a Promise and this fails.
-test("settle() is synchronous — returns undefined, never a thenable (the poller's serialization invariant)", () => {
+test("settle() is synchronous — returns an enqueue count, never a thenable (the poller's serialization invariant)", () => {
   const balances = openDb(":memory:");
   const store = openOrderStore(":memory:");
   const ret = settle([], store, NOW, CFG);
-  expect(ret).toBeUndefined();
+  expect(ret).toBe(0);
   expect(typeof (ret as unknown as { then?: unknown })?.then).not.toBe("function");
   store.db.close();
   balances.db.close();
