@@ -16,8 +16,9 @@ the payment→token link. The only channel between them is a unix socket at `/ru
 which payments delivers credits in one direction. They share one service user today; splitting the uids
 waits on the admin-plane redesign (see `nullsink-proxy.service` for why).
 
-See setup.sh to stand up a box, and deploy.sh / backup.sh / node-box-runbook.md for day-2 work (redeploys, backups,
-alerts, troubleshooting). This file is just the map.
+See setup.sh to stand up a box, and deploy.sh / upgrade-component.sh / backup.sh / node-box-runbook.md for
+day-2 work (app redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This file is just
+the map.
 
 ## What's here, by concern
 
@@ -26,7 +27,8 @@ alerts, troubleshooting). This file is just the map.
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
-| `lib.sh` | Shared "apply repo config" library `source`d by both of the above, so unit install, timer reconcile, and asset fetch live in one place and can't drift between bootstrap and redeploy. |
+| `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
+| `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `install-nsk.sh` | Installs the optional `nsk` operator CLI on demand (not shipped by default). |
 | `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
 | `node-box-runbook.md` | The ordered runbook for moving bitcoind to that node box — sync first, then a minutes-long drain window. |
@@ -55,12 +57,23 @@ alerts, troubleshooting). This file is just the map.
 ## Two things to know
 
 **App releases and pinned runtime dependencies have separate activation paths.** `deploy.sh <tag>` installs
-nullsink's two server binaries, optional `nsk`, client UI, and deploy configuration. Although that refreshed
-deploy tree contains the current Bitcoin Core, Monero, and `tinfoil-proxy` pins, `deploy.sh` never runs their
-installers. Pinned runtime dependency updates take effect only during a fresh setup or an applicable setup
-rerun: `setup.sh` updates dependencies for enabled app-box rails (and a local Bitcoin node), while
-`setup-nodes.sh` updates Bitcoin Core on a dedicated node box. This separation avoids silently restarting a
-rail daemon during an ordinary application deploy.
+nullsink's two server binaries, optional `nsk`, client UI, and deploy configuration. It never restarts a rail
+watcher or attestation sidecar. For an existing box, activate one refreshed dependency pin explicitly:
+
+```sh
+# Dedicated node box
+sudo /opt/nullsink/deploy/upgrade-component.sh bitcoin
+
+# App box
+sudo /opt/nullsink/deploy/upgrade-component.sh monero-wallet
+sudo /opt/nullsink/deploy/upgrade-component.sh tinfoil
+```
+
+Each command refuses the wrong box role or an inactive/unconfigured target, verifies the download before
+downtime, requires a healthy rollback baseline both before and after staging, preserves the previous binaries
+under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target service, and rolls back
+automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
+`setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
 
 **The flat layout is deliberate.** It looks like it wants subfolders, but the release tarball, the
 `install_units` glob (`deploy/*.service`/`*.timer`), every unit's `ExecStart=/opt/nullsink/deploy/...`
