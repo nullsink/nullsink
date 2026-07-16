@@ -13,6 +13,7 @@ const src = (name: string) => fileURLToPath(new URL(`../src/${name}`, import.met
 const caddy = readFileSync(deploy("Caddyfile"), "utf8");
 const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
 const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
+const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
@@ -48,6 +49,13 @@ test("both systemd units and both roots use the one owner-authenticated credit s
   expect(payments).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
   expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
+});
+
+test("the Monero wallet keeps ring metadata outside its protected home", () => {
+  expect(walletUnit).toContain("StateDirectory=nullsink-wallet");
+  expect(walletUnit).toContain("ProtectHome=true");
+  expect(walletUnit).toContain("--shared-ringdb-dir %S/nullsink-wallet/.shared-ringdb");
+  expect(walletUnit).not.toMatch(/--shared-ringdb-dir (?:~|\/home)/);
 });
 
 test("edge body caps and outages are disjoint, status-aware contracts", () => {
