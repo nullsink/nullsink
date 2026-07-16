@@ -51,7 +51,8 @@ const ORIENT = /API proxy for frontier/i; // a marker that exists ONLY in the (c
 const VALID_TOKEN = realToken.generateToken(); // passes isValidTokenFormat by construction → a top-up
 
 beforeEach(() => {
-  requestQuote.mockClear();
+  requestQuote.mockReset();
+  requestQuote.mockImplementation(() => Promise.resolve(QUOTE));
   checkBalance.mockClear();
   hashToken.mockClear();
 });
@@ -87,6 +88,30 @@ test("a blank key field routes submit to mint (no /balance call, new-key screen)
   expect(await screen.findByRole("heading", { name: /your new key/i })).toBeInTheDocument();
   expect(requestQuote).toHaveBeenCalledTimes(1);
   expect(checkBalance).not.toHaveBeenCalled(); // a mint has no baseline to capture
+});
+
+test("two same-turn form submits request only one quote", async () => {
+  let resolveQuote!: (quote: Quote) => void;
+  requestQuote.mockImplementation(() => new Promise((resolve) => { resolveQuote = resolve; }));
+
+  const { container } = render(<KeyFlow />);
+  await screen.findByRole("button", { name: /mint key/i });
+  fireEvent.click(screen.getByRole("checkbox"));
+
+  const form = container.querySelector("form")!;
+  act(() => {
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+  });
+
+  await waitFor(() => expect(requestQuote).toHaveBeenCalledTimes(1));
+  expect(hashToken).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    resolveQuote(QUOTE);
+    await Promise.resolve();
+  });
+  expect(await screen.findByRole("heading", { name: /your new key/i })).toBeInTheDocument();
 });
 
 // ROUTING — valid pasted token → TOP-UP: the CTA flips to "add credit", submit snapshots the baseline via
@@ -125,6 +150,13 @@ test("a failed top-up baseline read does not request a quote", async () => {
   expect(hashToken).not.toHaveBeenCalled();
   expect(screen.queryByRole("heading", { name: /add credit/i })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /add credit/i })).not.toBeDisabled();
+
+  checkBalance.mockImplementation(() => Promise.resolve(12));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /add credit/i }));
+  });
+  expect(await screen.findByRole("heading", { name: /add credit/i })).toBeInTheDocument();
+  expect(requestQuote).toHaveBeenCalledTimes(1);
 });
 
 // ROUTING — malformed key → BLOCKED: the typo warning shows, the CTA is disabled, and even a direct form

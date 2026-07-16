@@ -92,6 +92,10 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
   const [order, setOrder] = useState<Order | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
+  // React state does not commit synchronously, so `busy` alone cannot stop two submit events in the
+  // same browser turn. This ref closes only that tiny local race; it is released when the request ends
+  // and deliberately creates no cross-tab, server, or database lock.
+  const submitInFlight = useRef(false);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   const [finalBalance, setFinalBalance] = useState(0);
 
@@ -183,6 +187,8 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     }
     // A non-blank but malformed key blocks the purchase (the CTA is also disabled in that state).
     if (keyState.malformed) return;
+    if (submitInFlight.current) return;
+    submitInFlight.current = true;
     const useExisting = keyState.willTopUp; // blank field → mint a new key; a valid token → top it up
     const tok = useExisting ? paste : generateToken();
     const wasNew = !useExisting;
@@ -200,6 +206,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         setCheckedBalance(null);
         setCheckError(toReadFailure(error));
         setDidCheck(true);
+        submitInFlight.current = false;
         setBusy(false);
         return;
       }
@@ -213,6 +220,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     } catch (e) {
       setErrorCode((e as BuyError).code ?? "unknown");
     } finally {
+      submitInFlight.current = false;
       setBusy(false);
     }
   }
