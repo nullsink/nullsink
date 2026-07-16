@@ -5,7 +5,7 @@
 // onFunded. These tests pass an onFunded that does NOT unmount, making the stuck flag observable, and
 // assert the spinner clears. The fix moved setChecking(false) into a finally{}.
 import { test, expect, mock, beforeEach } from "bun:test";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { OrderStatus, Quote } from "../lib/api.ts";
 
 // checkNow drives exactly two network calls; stub both so we control the funded / not-yet-funded outcome.
@@ -41,11 +41,11 @@ const quote: Quote = {
   expires_at: Date.now() + 60 * 60 * 1000, // 1h out — not expired, and fits the expiry timer's setTimeout
 };
 
-function renderPay(onFunded: (b: number) => void, baseline = 0) {
+function renderPay(onFunded: (b: number) => void, baseline = 0, shownQuote = quote) {
   return render(
     <QuotePay
       token="0sink_testtoken"
-      quote={quote}
+      quote={shownQuote}
       baseline={baseline}
       busy={false}
       errorCode={null}
@@ -149,4 +149,34 @@ test("a failed final balance verification names that step, not payment status", 
   expect(await screen.findByText("credit failure: server")).toBeInTheDocument();
   expect(screen.queryByText(/status failure/i)).not.toBeInTheDocument();
   await waitFor(() => expect(button).not.toBeDisabled());
+});
+
+test("an expired quote hides payment details but remains trackable by its hash and address", async () => {
+  const expiredQuote = { ...quote, expires_at: Date.now() - 1 };
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "waiting" }));
+
+  renderPay(() => {}, 0, expiredQuote);
+
+  expect(screen.getByRole("alert")).toHaveTextContent(/already sent payment.*still checking/i);
+  expect(screen.queryByText(expiredQuote.amount)).not.toBeInTheDocument();
+  expect(screen.queryByText(new RegExp(expiredQuote.pay_to))).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /swap/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "I didn’t pay — new quote →" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "check" }));
+  await waitFor(() => expect(fetchOrderStatus).toHaveBeenCalledWith("aa".repeat(32), expiredQuote.pay_to));
+  expect(checkBalance).not.toHaveBeenCalled();
+});
+
+test("ambient hash polling continues after quote expiry", async () => {
+  const expiredQuote = { ...quote, expires_at: Date.now() - 1 };
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "waiting" }));
+
+  renderPay(() => {}, 0, expiredQuote);
+  await act(async () => {
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+
+  await waitFor(() => expect(fetchOrderStatus).toHaveBeenCalledWith("aa".repeat(32), expiredQuote.pay_to));
+  expect(checkBalance).not.toHaveBeenCalled();
 });

@@ -18,7 +18,9 @@ import { EXT } from "../lib/links.ts";
 //
 // EXPIRY is a purely local clock check against quote.expires_at (no fetch), shown as a live
 // countdown: a 30s re-render tick plus a one-shot timer at the deadline and a re-check on tab
-// refocus, so a user who left the tab open doesn't sit staring at stale payment details.
+// refocus, so a user who left the tab open doesn't sit staring at stale payment details. Expiry
+// hides every payment-initiation detail, but hash-only status tracking continues: a transfer sent
+// just before the deadline may appear later and must still reach the authoritative balance check.
 
 // Hash-poll cadence. Blocks land every couple of minutes (XMR) to ~10 (BTC), so 45s keeps the line moving without
 // hammering the order-status read path.
@@ -88,7 +90,6 @@ export function QuotePay({
     if (!quote) return;
     const tick = () => {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() >= quote.expires_at) return;
       void checkNow();
     };
     const id = window.setInterval(tick, POLL_MS);
@@ -161,22 +162,6 @@ export function QuotePay({
     );
   }
 
-  if (expired) {
-    return (
-      <div className="section">
-        <div className="notice" role="alert">
-          This quote expired. The amount and address are no longer valid. Get a fresh quote to pay.
-        </div>
-        {errorCode && <div className="notice" role="alert">{buyErrorMessage(errorCode)}</div>}
-        <button className="btn-primary" type="button" disabled={busy} onClick={onRetry}>
-          {busy ? "requesting…" : "new quote →"}
-        </button>
-      </div>
-    );
-  }
-
-  const expiry = new Date(quote.expires_at);
-
   // Status is secondary to actually paying from a wallet; the force-a-check button sits beside it.
   // Before the first poll lands (status null) we show watching copy — "watching", not "waiting",
   // because a payer who just sent money reads "waiting for your payment" as "we saw nothing". After,
@@ -202,6 +187,39 @@ export function QuotePay({
             : "not seen yet";
   // Visible text adds the transient "checking…" pulse — sighted feedback that a poll is in flight.
   const statusText = checking ? "checking…" : settledStatus;
+  const statusPanel = (
+    <>
+      <div className="status">
+        <span className="watch">{statusText}</span>
+        {statusError && <span className="watch">{paymentStatusErrorMessage(statusError)}</span>}
+        {creditError && <span className="watch">{creditVerificationErrorMessage(creditError)}</span>}
+        {/* announce only the settled status — the visible "checking…" pulse must not re-announce each poll */}
+        <span className="sr-only" role="status">{settledStatus}</span>
+        <button className="copy acid" type="button" disabled={checking} onClick={checkNow}>
+          check
+        </button>
+      </div>
+      <p className="pay-meta">progress is checked automatically using only the order&apos;s hash.</p>
+    </>
+  );
+
+  if (expired) {
+    return (
+      <div className="section">
+        <div className="notice" role="alert">
+          This quote expired. Don&apos;t pay this address. If you already sent payment, don&apos;t resend;
+          we&apos;re still checking it.
+        </div>
+        {statusPanel}
+        {errorCode && <div className="notice" role="alert">{buyErrorMessage(errorCode)}</div>}
+        <button className="btn-primary" type="button" disabled={busy} onClick={onRetry}>
+          {busy ? "requesting…" : "I didn’t pay — new quote →"}
+        </button>
+      </div>
+    );
+  }
+
+  const expiry = new Date(quote.expires_at);
 
   return (
     <section className="section">
@@ -253,17 +271,7 @@ export function QuotePay({
       {/* The line moves on its own (hash poll); the button forces an immediate cycle for the
           impatient. The fine-print line under it states the privacy split out loud — the design
           choice is a feature, so say it. */}
-      <div className="status">
-        <span className="watch">{statusText}</span>
-        {statusError && <span className="watch">{paymentStatusErrorMessage(statusError)}</span>}
-        {creditError && <span className="watch">{creditVerificationErrorMessage(creditError)}</span>}
-        {/* announce only the settled status — the visible "checking…" pulse must not re-announce each poll */}
-        <span className="sr-only" role="status">{settledStatus}</span>
-        <button className="copy acid" type="button" disabled={checking} onClick={checkNow}>
-          check
-        </button>
-      </div>
-      <p className="pay-meta">progress is checked automatically using only the order&apos;s hash.</p>
+      {statusPanel}
 
       {/* The (*) footnote for the swap link above: names the third parties and the rate caveat, kept out
           of the link itself so the escape hatch stays one short line. Framed in retention terms ("outside
