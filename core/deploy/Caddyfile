@@ -60,36 +60,62 @@
 
 	# --- Metered API. Large multimodal prompts allowed; SSE streamed through untouched. ---
 	handle /v1/messages {
-		# Caddy enforces max_size on the ACTUAL bytes received, so this also closes the
-		# chunked-transfer bypass that the app's content-length-header check misses.
-		request_body {
-			max_size 32MiB
+		# A reverse proxy may answer from headers before Caddy's streaming limiter reads the body.
+		# Short-circuit a declared oversize here so that race cannot bypass or mis-shape the native 413.
+		@anthropic_declared_too_large expression {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 33554432
+		handle @anthropic_declared_too_large {
+			header Content-Type "application/json"
+			header x-should-retry "false"
+			respond `{"type":"error","error":{"type":"request_too_large","message":"payload_too_large"}}` 413
 		}
-		reverse_proxy 127.0.0.1:8080 {
-			flush_interval -1 # stream SSE immediately, no response buffering (long generations)
-			header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+		handle {
+			# Keep enforcing the ACTUAL bytes received for requests without a trustworthy declared length,
+			# including chunked transfer encoding.
+			request_body {
+				max_size 32MiB
+			}
+			reverse_proxy 127.0.0.1:8080 {
+				flush_interval -1 # stream SSE immediately, no response buffering (long generations)
+				header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+			}
 		}
 	}
 
 	# --- Metered API (OpenAI Chat Completions + Responses). Same treatment as /v1/messages; the app 404s
 	#     these when OPENAI_API_KEY is unset, so routing them is harmless before the provider is enabled. ---
 	handle /v1/chat/completions {
-		request_body {
-			max_size 32MiB
+		@chat_declared_too_large expression {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 33554432
+		handle @chat_declared_too_large {
+			header Content-Type "application/json"
+			header x-should-retry "false"
+			respond `{"error":{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"}}` 413
 		}
-		reverse_proxy 127.0.0.1:8080 {
-			flush_interval -1 # stream SSE immediately, no response buffering (long generations)
-			header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+		handle {
+			request_body {
+				max_size 32MiB
+			}
+			reverse_proxy 127.0.0.1:8080 {
+				flush_interval -1 # stream SSE immediately, no response buffering (long generations)
+				header_up -X-Forwarded-For # don't hand the client IP to the app (no-identity thesis)
+			}
 		}
 	}
 
 	handle /v1/responses {
-		request_body {
-			max_size 32MiB
+		@responses_declared_too_large expression {http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 33554432
+		handle @responses_declared_too_large {
+			header Content-Type "application/json"
+			header x-should-retry "false"
+			respond `{"error":{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"}}` 413
 		}
-		reverse_proxy 127.0.0.1:8080 {
-			flush_interval -1
-			header_up -X-Forwarded-For
+		handle {
+			request_body {
+				max_size 32MiB
+			}
+			reverse_proxy 127.0.0.1:8080 {
+				flush_interval -1
+				header_up -X-Forwarded-For
+			}
 		}
 	}
 

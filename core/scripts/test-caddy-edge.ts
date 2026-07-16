@@ -69,7 +69,9 @@ function streamedBytes(length: number): ReadableStream<Uint8Array> {
 }
 
 function startStub(world: "proxy" | "payments") {
-  const firstPort = 20_000 + (process.pid % 20_000);
+  // Bun reports an occupied explicit port asynchronously, so two stubs cannot safely probe from
+  // the same candidate. Give each role its own non-overlapping 100-port search window.
+  const firstPort = 20_000 + (process.pid % 19_800) + (world === "payments" ? 100 : 0);
   let lastError: unknown;
   for (let offset = 0; offset < 100; offset += 1) {
     try {
@@ -78,9 +80,10 @@ function startStub(world: "proxy" | "payments") {
         port: firstPort + offset,
         maxRequestBodySize: 64 * 1024 * 1024,
         async fetch(req) {
-          // Consume the complete forwarded body. A respond-only stub can answer before reverse_proxy reads the
-          // final byte, which would make a just-over-limit request an invalid test of request_body max_size.
-          await req.arrayBuffer();
+          // Consume the complete forwarded body by default. A respond-only stub can answer before
+          // reverse_proxy reads the final byte, which exercises a separate, important race pinned below:
+          // the real proxy rejects a declared oversize or bad token from headers before reading the body.
+          if (req.headers.get("x-stub-respond-early") !== "1") await req.arrayBuffer();
           const forced = req.headers.get("x-stub-status");
           const status = forced === null ? 200 : Number(forced);
           if (!Number.isInteger(status) || status < 200 || status > 599) return new Response("bad stub status", { status: 500 });
@@ -219,6 +222,24 @@ async function exerciseHealthyEdge(): Promise<void> {
   expectHeader(got, "x-should-retry", "false", "Anthropic edge body cap");
   expectJson(got, "Anthropic edge body cap");
 
+  // The real proxy can reject from headers before consuming the body (declared oversize, missing/unknown
+  // token). A fixed Content-Length above the cap must still get the deterministic native 413 from the edge;
+  // otherwise Caddy's body limiter races the early upstream response and can emit a blank 413 or even remap
+  // it to a retryable 503. The old consuming-only stub hid that live staging failure.
+  got = await request("/v1/messages", {
+    method: "POST",
+    headers: { "x-stub-respond-early": "1", "x-stub-status": "401" },
+    body: large,
+  });
+  expectResponse(
+    got,
+    413,
+    '{"type":"error","error":{"type":"request_too_large","message":"payload_too_large"}}',
+    "Anthropic declared body cap with early upstream response",
+  );
+  expectHeader(got, "x-should-retry", "false", "Anthropic declared body cap with early upstream response");
+  expectJson(got, "Anthropic declared body cap with early upstream response");
+
   for (const path of ["/v1/chat/completions", "/v1/responses"]) {
     got = await request(path, { method: "POST", body: large });
     expectResponse(
@@ -229,6 +250,20 @@ async function exerciseHealthyEdge(): Promise<void> {
     );
     expectHeader(got, "x-should-retry", "false", `${path} edge body cap`);
     expectJson(got, `${path} edge body cap`);
+
+    got = await request(path, {
+      method: "POST",
+      headers: { "x-stub-respond-early": "1", "x-stub-status": "401" },
+      body: large,
+    });
+    expectResponse(
+      got,
+      413,
+      '{"error":{"message":"payload_too_large","type":"invalid_request_error","code":"payload_too_large"}}',
+      `${path} declared body cap with early upstream response`,
+    );
+    expectHeader(got, "x-should-retry", "false", `${path} declared body cap with early upstream response`);
+    expectJson(got, `${path} declared body cap with early upstream response`);
   }
 
   const paymentAtLimit = new Uint8Array(4 * 1024).fill(0x61);
