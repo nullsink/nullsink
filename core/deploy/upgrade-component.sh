@@ -5,6 +5,9 @@
 # restart unrelated services. It stages and checksum-verifies one component, preserves the live binaries,
 # restarts only that component, and automatically restores the preserved copy if activation or health fails.
 set -euo pipefail
+# This runs as root and invokes security-critical fetch/install tools. Do not inherit a caller-controlled
+# command search path (sudo normally resets it, but direct root shells need the same guarantee).
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
 ENV_FILE="${ENV_FILE:-/etc/nullsink.env}"
@@ -31,6 +34,13 @@ EOF
 [[ "$HEALTH_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
   { echo "HEALTH_TIMEOUT must be a positive integer" >&2; exit 2; }
 [ "$#" -eq 1 ] || { usage; exit 2; }
+command -v flock >/dev/null 2>&1 ||
+  { echo "flock is required (normally provided by util-linux)" >&2; exit 2; }
+# One global lock is intentionally simpler than per-component locks: two nominally independent upgrades still
+# share /usr/local/bin, network/disk headroom, and operator attention. Fail fast instead of interleaving backups,
+# service stops, binary copies, and rollback traps from concurrent shells.
+exec 9>/run/lock/nullsink-component-upgrade.lock
+flock -n 9 || { echo "another component upgrade is already running" >&2; exit 2; }
 
 component="$1"
 unit=""
@@ -152,13 +162,11 @@ current_description() {
   esac
 }
 
+component_healthy ||
+  { echo "refusing: $unit is active but not healthy; recover it before attempting an upgrade" >&2; exit 1; }
 if live_is_pinned; then
-  if component_healthy; then
-    echo "$desired is already installed and healthy; nothing changed"
-    exit 0
-  fi
-  echo "$desired is installed, but $unit is not healthy; refusing to mutate it" >&2
-  exit 1
+  echo "$desired is already installed and healthy; nothing changed"
+  exit 0
 fi
 
 tmp="$(mktemp -d)"
@@ -197,6 +205,11 @@ echo "staging and verifying $desired (live service remains up)"
 stage_component "$staged"
 staged_is_pinned "$staged" ||
   { echo "staged binary does not report the pinned version/hash" >&2; exit 1; }
+# A large download can take minutes. Prove the old component is STILL a known-good rollback baseline immediately
+# before preserving and stopping it; otherwise a coincident outage could be misdiagnosed as an upgrade failure
+# and "rollback" to a version that was already broken.
+component_healthy ||
+  { echo "$unit became unhealthy while staging; refusing activation" >&2; exit 1; }
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 rollback_dir="$ROLLBACK_ROOT/${component}-${stamp}"

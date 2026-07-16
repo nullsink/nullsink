@@ -70,8 +70,9 @@ sudo /opt/nullsink/deploy/upgrade-component.sh tinfoil
 ```
 
 Each command refuses the wrong box role or an inactive/unconfigured target, verifies the download before
-downtime, preserves the previous binaries under `/usr/local/lib/nullsink/component-rollbacks/`, restarts
-only its target service, and rolls back automatically if the target does not recover. `setup.sh` and
+downtime, requires a healthy rollback baseline both before and after staging, preserves the previous binaries
+under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target service, and rolls back
+automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
 `setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
 
 **The flat layout is deliberate.** It looks like it wants subfolders, but the release tarball, the

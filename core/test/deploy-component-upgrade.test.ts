@@ -61,9 +61,15 @@ test("bootstrap and day-two upgrades read one shared set of component pins", () 
 
 test("activation is staged before downtime and remains rollback-armed through its health gate", () => {
   const source = readFileSync(UPGRADER, "utf8");
+  expect(source).toContain('flock -n 9 || { echo "another component upgrade is already running"');
+  expect(source).toContain(
+    'component_healthy ||\n  { echo "refusing: $unit is active but not healthy; recover it before attempting an upgrade"',
+  );
   const activation = source.slice(source.indexOf('echo "staging and verifying'));
   const inOrder = [
     'stage_component "$staged"',
+    "staged_is_pinned",
+    "component_healthy ||",
     'install -m755 "$BIN_DIR/$name" "$rollback_dir/$name"',
     "rollback_armed=1",
     'systemctl stop "$unit"',
