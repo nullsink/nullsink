@@ -169,22 +169,28 @@ export function QuotePay({
   // The settled status — what's actually true, excluding the transient "checking…" pulse. This is what the
   // SR live region announces, so the background poll flipping `checking` on/off every 45s doesn't spam ~40
   // redundant "checking… / not seen yet" announcements across a 30-minute wait.
-  const settledStatus = !status
-    ? baseline > 0
-      ? "watching for your top-up"
-      : "watching for your payment"
-    : status.state === "confirming"
-      ? `payment seen, confirming ${status.confirmations}/${status.required}`
-      : status.state === "finalizing"
-        ? "confirmed, verifying credit…"
-        : status.state === "detected"
-          ? // Seen, but the server has no live confirmation count (it restarted; its wallet may still be
-            // resyncing). Say we have it — NEVER fall through to "not seen yet", which reads as "send again".
-            "payment seen, re-checking…"
-          : // waiting, or closed with no credit landed yet
-            baseline > 0
-            ? "no top-up landed yet"
-            : "not seen yet";
+  let settledStatus: string;
+  if (!status) {
+    settledStatus = baseline > 0 ? "watching for your top-up" : "watching for your payment";
+  } else if (status.state === "confirming") {
+    settledStatus = `payment seen, confirming ${status.confirmations}/${status.required}`;
+  } else if (status.state === "finalizing") {
+    settledStatus = "confirmed, verifying credit…";
+  } else if (status.state === "detected") {
+    // Seen, but the server has no live confirmation count (it restarted; its wallet may still be
+    // resyncing). Say we have it — NEVER fall through to "not seen yet", which reads as "send again".
+    settledStatus = "payment seen, re-checking…";
+  } else if (status.state === "closed") {
+    // The order is no longer open, but /balance has not authoritatively shown the credit yet.
+    // Never invite another payment to a single-use address while delivery may still be pending.
+    settledStatus =
+      baseline > 0
+        ? "top-up credit not verified yet — don't resend; check again shortly"
+        : "credit not verified yet — don't resend; check again shortly";
+  } else {
+    // waiting
+    settledStatus = baseline > 0 ? "no top-up landed yet" : "not seen yet";
+  }
   // Visible text adds the transient "checking…" pulse — sighted feedback that a poll is in flight.
   const statusText = checking ? "checking…" : settledStatus;
   const statusPanel = (
