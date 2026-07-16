@@ -9,7 +9,7 @@
 //      that wraps KeyFlow in `{!checkout && …}` or keys it on `checkout` fails CI instead of shipping.
 // The pure classifier keyFieldState is unit-tested in token.test.ts; this asserts the components HONOR it.
 import { test, expect, mock, beforeEach } from "bun:test";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import * as realApi from "../lib/api.ts";
 import * as realToken from "../lib/token.ts";
 import type { Quote, Rails } from "../lib/api.ts";
@@ -106,6 +106,25 @@ test("a valid pasted token routes submit to top-up (baseline snapshot, no save-g
   expect(requestQuote.mock.calls[0][0]).toBe("hash:" + VALID_TOKEN); // quote is keyed by the pasted token's hash
   expect(await screen.findByRole("heading", { name: /add credit/i })).toBeInTheDocument();
   expect(screen.queryByText(/I saved my key/i)).not.toBeInTheDocument(); // top-ups skip the mint save-gate
+});
+
+// A top-up's success is balance > baseline. If the baseline read fails, substituting zero lets an old
+// positive balance satisfy that check before the new payment is credited. Fail before /buy instead.
+test("a failed top-up baseline read does not request a quote", async () => {
+  checkBalance.mockImplementation(() => Promise.reject({ kind: "server", status: 503 }));
+  render(<KeyFlow />);
+  await screen.findByRole("button", { name: /mint key/i });
+
+  fireEvent.change(screen.getByLabelText(/leave blank to mint a new key/i), { target: { value: VALID_TOKEN } });
+  await act(async () => {
+    agreeAndClick(/add credit/i);
+  });
+
+  expect(await screen.findByText(/balance service is temporarily unavailable/i)).toBeInTheDocument();
+  expect(requestQuote).not.toHaveBeenCalled();
+  expect(hashToken).not.toHaveBeenCalled();
+  expect(screen.queryByRole("heading", { name: /add credit/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /add credit/i })).not.toBeDisabled();
 });
 
 // ROUTING — malformed key → BLOCKED: the typo warning shows, the CTA is disabled, and even a direct form

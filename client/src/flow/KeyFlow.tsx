@@ -188,14 +188,20 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
     const wasNew = !useExisting;
     setBusy(true);
     setErrorCode(null);
+    setCheckError(null);
     // Top-up: snapshot the existing balance first — the baseline a success delta is measured against.
-    // A transient failure here is non-fatal: fall back to 0 (success is still balance > baseline).
+    // A transient failure here must stop before /buy: treating an unknown baseline as zero can make an
+    // existing positive balance look like newly delivered credit before this top-up lands.
     let baseline = 0;
     if (!wasNew) {
       try {
         baseline = (await checkBalance(tok)) ?? 0;
-      } catch {
-        baseline = 0;
+      } catch (error) {
+        setCheckedBalance(null);
+        setCheckError(toReadFailure(error));
+        setDidCheck(true);
+        setBusy(false);
+        return;
       }
     }
     try {

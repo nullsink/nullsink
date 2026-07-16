@@ -126,6 +126,30 @@ test("`detected` tells the payer we have their payment, and does not spend the t
   expect(checkBalance).not.toHaveBeenCalled(); // `detected` is not `finalizing` — no premature token spend
 });
 
+test("`closed` with unchanged balance does not invite a second payment", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "closed" }));
+  checkBalance.mockImplementation(() => Promise.resolve(null));
+  renderPay(() => {});
+
+  fireEvent.click(screen.getByRole("button", { name: "check" }));
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "check" })).not.toBeDisabled());
+  expect(screen.getAllByText("credit not verified yet — don't resend; check again shortly")).toHaveLength(2);
+  expect(screen.queryByText("not seen yet")).not.toBeInTheDocument();
+});
+
+test("`closed` with unchanged top-up balance does not say no top-up landed", async () => {
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "closed" }));
+  checkBalance.mockImplementation(() => Promise.resolve(12));
+  renderPay(() => {}, 12);
+
+  fireEvent.click(screen.getByRole("button", { name: "check" }));
+
+  await waitFor(() => expect(screen.getByRole("button", { name: "check" })).not.toBeDisabled());
+  expect(screen.getAllByText("top-up credit not verified yet — don't resend; check again shortly")).toHaveLength(2);
+  expect(screen.queryByText("no top-up landed yet")).not.toBeInTheDocument();
+});
+
 test("a transient status failure warns the payer not to send again and keeps the check usable", async () => {
   fetchOrderStatus.mockImplementation(() => Promise.reject({ kind: "rate_limited", status: 429, retryAfterSec: 1 }));
   renderPay(() => {});
