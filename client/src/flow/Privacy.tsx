@@ -14,7 +14,7 @@ export function Privacy() {
       <section className="legal">
         <h1 className="legal-h1">Privacy policy</h1>
         <p className="legal-updated">
-          Last updated: <time dateTime="2026-06-08">8 June 2026</time>
+          Last updated: <time dateTime="2026-07-16">16 July 2026</time>
         </p>
 
         <p className="legal-lead">
@@ -48,8 +48,10 @@ export function Privacy() {
           <li>
             <span className="lead-term">Temporary payment details.</span> While a purchase is in progress
             we store the payment address, the expected and received coin amounts, the credit to apply,
-            and a timestamp, linked to the token hash. This record is deleted as soon as the payment settles, and otherwise
-            shortly after the quote expires.
+            and a timestamp, linked to the token hash. Settlement deletes the active order; while balance
+            delivery is still owed, a delivery row retains the token hash and credit amount. A definite
+            balance-ledger acknowledgement clears those two fields. Unpaid orders are removed after their
+            payment horizon.
           </li>
         </ul>
         <p>What we never store:</p>
@@ -86,7 +88,7 @@ export function Privacy() {
           </li>
           <li>
             The temporary payment details let us match an incoming payment to the right token and
-            credit it. Once that is done, the record is deleted.
+            credit it. Once balance delivery is acknowledged, the direct token link is cleared.
           </li>
           <li>Any email you send us is used only to answer you.</li>
         </ul>
@@ -122,9 +124,10 @@ export function Privacy() {
           <li>
             <span className="lead-term">Payment network.</span> Payments are made in Monero or Bitcoin to a
             single-use address. Our wallet keeps the addresses it generates, but they carry a fixed,
-            non-identifying label (an order number) and no link to your token — your payment and your key are
-            never tied together on our side. Bitcoin&apos;s ledger is public; Monero&apos;s is private by
-            design. Both networks are outside our control, and we tie neither to your key.
+            non-identifying label (an order number) and no token. Separately, our temporary payment database
+            links an active payment to a token hash so it can apply the credit, then clears that direct link
+            after acknowledged delivery. Bitcoin&apos;s ledger is public; Monero&apos;s is private by design.
+            Both networks are outside our control and never receive your token.
           </li>
           <li>
             <span className="lead-term">TLS certificate authority.</span> We use Let&apos;s Encrypt to
@@ -152,7 +155,12 @@ export function Privacy() {
             A balance is kept for as long as the token holds credit, because the balance is the credit. It
             carries no identity.
           </li>
-          <li>Temporary payment details are deleted as soon as the payment settles, and otherwise shortly after the quote expires.</li>
+          <li>
+            Active payment details are removed at settlement or after the unpaid horizon. A settled
+            delivery retains its token hash and credit amount only until the balance ledger acknowledges it,
+            then those live fields are cleared. SQLite storage and backups may retain older copies according
+            to their own lifecycle.
+          </li>
           <li>We keep no access logs or request logs, so there are none to retain.</li>
           <li>Email correspondence is kept only as long as needed to deal with your inquiry.</li>
         </ul>

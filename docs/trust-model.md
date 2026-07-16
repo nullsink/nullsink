@@ -12,7 +12,7 @@ than take them on faith. See [architecture.md](architecture.md) for how the piec
 | **No accounts** — just a bearer token | `token-format.ts`: a token is `0sink_` + 256 bits of randomness + a typo checksum. There is no signup; possession of the string is the only credential. |
 | **Only the hash is stored** | `ledger/db.ts` (`hashToken`): balances are keyed by the SHA-256 of the token. The raw token is read from a request header, hashed in-process, and never written to disk. A leak of the balances DB yields no usable credentials. |
 | **No request logs, no content retention** | `log.ts` records only operational lines — never a per-request entry, and never a user-linkable pair (no token hash beside a txid or address). Prompts and outputs stream straight through and are never stored; the OpenAI provider also forces `store:false` so the upstream retains nothing. (Tinfoil gets no such flag — `store` is OpenAI-specific — and its non-retention rests on enclave ephemerality; a local attesting proxy verifies, before forwarding, that we reach a genuine enclave running Tinfoil's published image — operator integrity, see [tinfoil-attestation.md](tinfoil-attestation.md).) Aggregate metrics are kept — see *What we do collect*, below. |
-| **Payment and token are unlinkable** | The payment ↔ token link lives only in `pending.db` (`ledger/orders.ts`), a separate database from balances, and is dropped the moment an order settles (`ledger/settle.ts`). The idempotency and revenue records hold no hash and no address. |
+| **Delivered payments and tokens have no retained direct link** | The payment ↔ token link lives only in `pending.db` (`ledger/orders.ts`), separate from balances. Settlement moves it from the active order to an unacknowledged delivery row; a definite ledger ack clears that row's token hash and amount. Its transaction-derived idempotency key and timestamps remain to prevent duplicate credit, and the revenue record contains no hash or address. |
 | **Your key and identity never leak upstream** | `http/headers.ts` strips the headers that identify the caller or our account before forwarding — the client's auth (we inject our own), any org/beta headers, and the client's SDK fingerprint — and scrubs our org/project headers off responses; the exact list is the `STRIP` set in the source. |
 | **Watch-only custody** | The wallets on the box are view-only (Monero) / watch-only (Bitcoin). `rails/monero.ts` and `rails/bitcoin.ts` only mint addresses and read incoming transfers — there is no spend, sweep, or withdraw call anywhere in the code. The spend key stays cold/offline. |
 | **Rate limits don't identify you** | `ratelimit.ts` is a single global bucket — no per-IP or per-token keying. The code handles no client IP at all. |
@@ -48,10 +48,15 @@ Being honest about the edges matters more than the marketing:
   checks, so we trust whatever Tinfoil publishes as its latest release; see
   [tinfoil-attestation.md](tinfoil-attestation.md).
 - **On-chain deposits are public.** The blockchain shows a payment to an address; what
-  nullsink keeps private is the *link* from that payment to a token. The privacy of the
+  nullsink limits is the *direct logical link* from that payment to a token. The active order and
+  unacknowledged delivery record temporarily hold that link so credit can land, then clear it. The privacy of the
   deposit itself depends on the coin you chose — Monero shields amounts and addresses, Bitcoin
   is transparent — while nullsink's part is only to hide the link. (The watch-only wallet keeps
   the addresses it generated, so they're identifiable as nullsink's, but never tied to a token.)
+- **Logical scrubbing reduces recovery redundancy.** SQLite pages, WAL files, and backups may retain
+  older bytes after the live columns are cleared. More importantly, a scrubbed delivery row cannot replay
+  a credit lost by restoring `balances.db` without its matching `pending.db`; the two ledgers must be backed
+  up and restored as a matched pair.
 - **The network edge sees timing and sizes.** Caddy terminates TLS and fronts the app; an
   observer at that layer — or on the network — sees that you reached nullsink, and the timing
   and byte sizes of traffic, even though bodies are never logged.

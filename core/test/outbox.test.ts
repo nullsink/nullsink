@@ -25,8 +25,43 @@ test("listUnackedCredits returns unacked rows oldest-first; ackCredit removes a 
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:a", "tx:b"]);
   o.ackCredit("tx:a", 500);
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]); // acked row drops out
+  expect(
+    o.db.query<{ hash: string; micros: number; acked_at: number }, [string]>(
+      "SELECT hash, micros, acked_at FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("tx:a"),
+  ).toEqual({ hash: "", micros: 0, acked_at: 500 }); // key remains, direct token linkage does not
   o.ackCredit("tx:a", 999); // re-ack is harmless
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]);
+});
+
+test("upgrade re-delivers legacy acknowledgements before scrubbing, repairing a mismatched ledger safely", () => {
+  const store = openOrderStore(":memory:");
+  const balances = openDb(":memory:");
+  const missingHash = "b".repeat(64);
+
+  store.enqueueCredit("already", HASH, 5_000_000, 100);
+  store.enqueueCredit("missing", missingHash, 7_000_000, 200);
+  // Pre-upgrade shape: payments marked both delivered but retained their replay payloads.
+  store.db.run("UPDATE credit_outbox SET acked_at = 300");
+  // The first balance survived; the second simulates balances.db restored behind pending.db.
+  expect(balances.creditOnce(HASH, 5_000_000, "already", 250)).toBe(true);
+
+  expect(store.rearmLegacyAckedCredits()).toBe(2);
+  expect(store.listUnackedCredits()).toEqual([
+    { idempotency_key: "already", hash: HASH, micros: 5_000_000 },
+    { idempotency_key: "missing", hash: missingHash, micros: 7_000_000 },
+  ]);
+
+  drainCreditOutbox(store, balances, 400);
+  expect(balances.getBalance(HASH)).toBe(5_000_000); // already_applied: no duplicate
+  expect(balances.getBalance(missingHash)).toBe(7_000_000); // missing marker repaired
+  expect(store.listUnackedCredits()).toEqual([]);
+  expect(
+    store.db.query<{ n: number }, []>(
+      "SELECT COUNT(*) AS n FROM credit_outbox WHERE acked_at = 400 AND hash = '' AND micros = 0",
+    ).get()?.n,
+  ).toBe(2);
+  expect(store.rearmLegacyAckedCredits()).toBe(0); // scrubbed tombstones never re-arm
 });
 
 test("acking every row leaves an empty work list (the drained-clean state)", () => {

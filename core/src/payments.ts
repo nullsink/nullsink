@@ -71,6 +71,13 @@ const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerS
 
 // The one on-disk store this service owns. The proxy opens balances.db; neither touches the other's.
 const orders = openOrderStore(PENDING_DB_PATH);
+// Rows acknowledged by an older release still retain their delivery payload. Re-arm them instead of
+// blindly scrubbing: if balances.db was restored independently, exactly-once delivery repairs the missing
+// balance; otherwise the receiver says already_applied. A definite response then writes the scrubbed
+// tombstone. This converges old state safely, but future restores must keep both databases paired.
+const rearmedCredits = orders.rearmLegacyAckedCredits();
+if (rearmedCredits > 0)
+  log.info("credit", `re-armed ${rearmedCredits} historical delivered credit(s) for verified migration`);
 
 // Ephemeral live payment progress for /order-status, fed by the poller each tick. Held here, not the DB — it's a
 // display aid, not money, and is re-derived on the next poll after a restart.

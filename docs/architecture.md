@@ -96,10 +96,10 @@ second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin H
   idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
   a row exists while a hold is outstanding, and survivors are refunded at boot).
 - **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
-  `credit_outbox` (credits owed to the balance ledger). Orders are the **only** place the payment
-  ↔ token link lives, in a separate database on purpose: a leak of `balances.db` can't reveal who
-  funded which token. The link is dropped when the order settles. Coin amounts, locked rates, and
-  transaction-derived keys stay on this side of the wall too.
+  `credit_outbox` (credits owed to the balance ledger). The payment ↔ token link lives only in this
+  database: first on the order, then on its unacknowledged outbox row while delivery is still owed.
+  A definite ledger ack clears the delivered row's hash and amount, retaining only its transaction-derived
+  idempotency key and timestamps. A leak of `balances.db` therefore can't reveal who funded which token.
 
 Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
 / `financials`) is the exception and a second writer: it opens both directly on the box, and
@@ -116,7 +116,7 @@ Settlement and crediting now live in different processes, so the hand-off is a *
 outbox** rather than a function call. `settle()` writes a `credit_outbox` row in the same
 `pending.db` transaction that closes the order: if the row exists, the sale happened. A sender
 drains unacked rows over the unix socket, and only marks a row acked once the proxy confirms the
-credit is durable.
+credit is durable. That ack clears the delivered row's token hash and amount in the same statement.
 
 That gives at-least-once delivery. The receiver makes it exactly-once: `creditOnce` commits the
 balance credit and its `applied_orders` marker in a single `balances.db` transaction, keyed by the
@@ -124,6 +124,12 @@ rail's idempotency key, so a redelivery is a no-op that still reports a definite
 anywhere — before the ack, mid-socket, during the credit — leaves a durable row that is simply
 retried. Delivery stops at the first ambiguous row rather than skipping past it, so credits cannot
 be reordered around a stuck one.
+
+On the first upgraded start, historical acknowledged rows are re-armed and sent through that same
+exactly-once path before their payloads are cleared. This repairs an older independently restored
+`balances.db` when the retained payload still exists. Once a row has been scrubbed, it cannot repair a
+future mismatched restore; backup and restore operations must therefore preserve `pending.db` and
+`balances.db` as one matched ledger pair.
 
 Authentication is the filesystem. The socket is a pathname socket bound owner-only, and Linux
 checks write permission on the socket file at `connect(2)` — an unspoofable, kernel-enforced gate
