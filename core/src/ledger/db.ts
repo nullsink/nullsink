@@ -43,8 +43,8 @@ export function openDb(path: string) {
   micros  INTEGER NOT NULL
 )`);
 
-  // The sales book (`revenue`) is PAYMENT-world state and lives in pending.db (see ledger/orders.ts),
-  // not here — so coin amounts, locked rates, and txid-derived keys never enter the prompt world. settle()
+  // The sales book (`revenue`) is PAYMENTS TRUST DOMAIN state and lives in pending.db (see ledger/orders.ts),
+  // not here — so coin amounts, locked rates, and txid-derived keys never enter the proxy trust domain. settle()
   // books it in the outbox transaction; this store only credits balances.
 
   const getStmt = db.query<{ balance: number }, [string]>(

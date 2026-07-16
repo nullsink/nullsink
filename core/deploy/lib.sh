@@ -60,7 +60,7 @@ install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop cal
   echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
 }
 
-# The two app units: one prompt-world process, one payment-world process. Every caller that means "the app"
+# The two app units: one proxy trust domain process, one payments trust domain process. Every caller that means "the app"
 # means both, in this order — the proxy binds the credit socket the payments service connects to, so it goes
 # up first and comes down last.
 PROXY_UNIT="nullsink-proxy"

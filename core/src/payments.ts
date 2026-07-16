@@ -1,12 +1,12 @@
-// Composition root for the PAYMENTS service (payment world). All side effects live here — env validation, the
+// Composition root for the PAYMENTS service (payments trust domain). All side effects live here — env validation, the
 // order store, the HTTP port, the settlement poller, the credit sender, signal handlers.
 //
 // Owns pending.db (in-flight orders, the sales book, the credit outbox), the pay rails and their watch-only
 // wallets. Serves /buy, /order-status, /rails on a loopback port behind Caddy. Credits reach the balance ledger
 // only through the credit socket — the single, one-directional crossing (payments → proxy).
 //
-// It must never import prompt-world code (no balance store, no providers, no metered path). Enforced by
-// test/world-isolation.test.ts at the module level and by scripts/assert-worlds.ts on the compiled binary.
+// It must never import proxy trust domain code (no balance store, no providers, no metered path). Enforced by
+// test/trust-domain-isolation.test.ts in the source graph and by scripts/assert-trust-domains.ts in Bun metadata + binary.
 import { openOrderStore, PENDING_DB_PATH } from "./ledger/orders";
 import { createPaymentsHandler, type RailView } from "./payments-handler";
 import { deny } from "./http";
@@ -62,9 +62,9 @@ const BUY_RATE_CAPACITY = numEnv("BUY_RATE_CAPACITY", 20, 1, 1_000_000);
 const BUY_RATE_REFILL_PER_MIN = numEnv("BUY_RATE_REFILL_PER_MIN", 60, 1, 60_000_000);
 const buyRateLimit = makeTokenBucket({ capacity: BUY_RATE_CAPACITY, refillPerSec: BUY_RATE_REFILL_PER_MIN / 60 });
 
-// Global, identity-free throttle for THIS world's free reads (/order-status, /rails). The proxy runs its
+// Global, identity-free throttle for THIS trust domain's free reads (/order-status, /rails). The proxy runs its
 // own bucket for /balance + /v1/models and reads the SAME env names, so each default is sized at half the
-// intended aggregate — raising the shared env raises BOTH worlds' caps at once.
+// intended aggregate — raising the shared env raises BOTH trust domains' caps at once.
 const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });

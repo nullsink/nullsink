@@ -1,5 +1,5 @@
 [Unit]
-Description=nullsink proxy — metered LLM proxy (prompt world)
+Description=nullsink proxy — metered LLM proxy (proxy trust domain)
 After=network-online.target
 Wants=network-online.target
 # Page Telegram if this unit enters `failed` (a clean crash, or a crash-loop that trips the start limit).

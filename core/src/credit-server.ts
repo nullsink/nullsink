@@ -1,5 +1,5 @@
 // Proxy side of the credit crossing: receive a credit over the unix socket and apply it to the balance ledger.
-// PROMPT-world module — imports the balance store, never the order store, rails, or settle.
+// PROXY TRUST DOMAIN module — imports the balance store, never the order store, rails, or settle.
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION, parseCreditRequest } from "./credit-wire";
 import * as log from "./log";

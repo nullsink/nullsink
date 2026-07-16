@@ -1,9 +1,9 @@
-// PAYMENT-world request handler: quote a payment (/buy), poll an order (/order-status), list rails (/rails).
+// PAYMENTS TRUST DOMAIN request handler: quote a payment (/buy), poll an order (/order-status), list rails (/rails).
 // A factory over an injected dependency bag, so tests supply in-memory stores and fake rate/wallet calls —
 // no port, no network. payments.ts wires production deps.
 //
-// This module must NOT import anything prompt-world (the balance store, providers, the metered path). The
-// mirror of handler.ts's rule: each binary bundles only its own world. The combined both-worlds router lives
+// This module must NOT import anything from the proxy trust domain (the balance store, providers, the metered path). The
+// mirror of handler.ts's rule: each binary bundles only its own trust domain. The combined trust-domain router lives
 // in test/support/handler-combined.ts, which neither composition root imports.
 import { makePaymentsEndpoints } from "./endpoints/payments";
 import { deny } from "./http";
@@ -13,7 +13,7 @@ import type { OrdersStore } from "./ledger/orders";
 import type { OrderProgress } from "./ledger/orderstatus";
 import type { TokenBucket } from "./ratelimit";
 
-// RailView lives in rails/types.ts (shared without a cycle); re-exported here as the payment world's public
+// RailView lives in rails/types.ts (shared without a cycle); re-exported here as the payments trust domain's public
 // handler type.
 export type { RailView } from "./rails/types";
 
@@ -32,7 +32,7 @@ export type PaymentsHandlerDeps = {
   maxOpenOrders: number;
   maxBuyBodyBytes: number;
   buyRateLimit?: TokenBucket; // global, identity-free /buy rate limit; omitted = no limit (e.g. tests)
-  // Global, identity-free throttle for this world's unauthenticated READ endpoints (/order-status, /rails).
+  // Global, identity-free throttle for this trust domain's unauthenticated READ endpoints (/order-status, /rails).
   // Fail-safe, no IP/token key (privacy thesis). Omitted = no limit (e.g. tests). Each process gets its OWN
   // bucket, so the two together must be retuned or aggregate read capacity doubles.
   readRateLimit?: TokenBucket;
@@ -41,8 +41,8 @@ export type PaymentsHandlerDeps = {
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined;
 };
 
-// Dispatch only the PAYMENT-world paths. undefined = "not mine" (the combined router already tried the
-// prompt-world routes; createPaymentsHandler turns it into the fail-closed 404).
+// Dispatch only the PAYMENTS TRUST DOMAIN paths. undefined = "not mine" (the combined router already tried the
+// proxy trust domain routes; createPaymentsHandler turns it into the fail-closed 404).
 export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
   const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress } = d.orders;
   const endpoints = makePaymentsEndpoints({
@@ -71,7 +71,7 @@ export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url:
   };
 }
 
-// The payments service's HTTP handler: payment-world routes + /healthz, fail-closed 404 on anything else.
+// The payments service's HTTP handler: payments trust domain routes + /healthz, fail-closed 404 on anything else.
 // payments.ts wires this to Bun.serve. (The credit crossing is a separate unix socket, not an HTTP route.)
 export function createPaymentsHandler(d: PaymentsHandlerDeps): (req: Request) => Promise<Response> {
   const routes = buildPaymentsRoutes(d);

@@ -1,4 +1,4 @@
-// PAYMENT-world read endpoints — /order-status and /rails. Split out of reads.ts so the attested proxy binary,
+// PAYMENTS TRUST DOMAIN read endpoints — /order-status and /rails. Split out of reads.ts so the attested proxy binary,
 // which imports only the prompt reads (/balance, /v1/models), never carries this payment-endpoint source. Both
 // are cheap reads behind the shared, identity-free read throttle (no money gate), each `(req) => Promise<Response>`.
 import { deny, readJsonBody } from "../http";

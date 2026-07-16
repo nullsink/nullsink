@@ -11,7 +11,7 @@
 #   2. Host: disk/inode headroom for the billing DBs, that the SQLite WAL sidecars are still owned by the
 #      service user (a root CLI/backup write leaves root-owned sidecars that silently break billing writes),
 #      a per-DB integrity pragma (catches silent corruption that breaks billing), and backup freshness.
-#   3. Recent app journals, one per world. Proxy: upstream BILLING errors (our prepaid account ran dry ->
+#   3. Recent app journals, one per trust domain. Proxy: upstream BILLING errors (our prepaid account ran dry ->
 #      everyone 503s) and billing anomalies. Payments: rate-source failures (/buy down), a blind settlement
 #      poller, and a STALLED CREDIT OUTBOX — paid credits that are not reaching the balance ledger, the one
 #      failure the two /healthz probes structurally cannot see. Greps the operator's own journal; emits only a
@@ -60,7 +60,7 @@ for unit in "$PROXY_UNIT" "$PAYMENTS_UNIT" caddy monero-wallet-rpc bitcoind tor 
 done
 
 # --- 1b. each service actually SERVES (only if it's running): /healthz is unauthenticated + never forwarded,
-#     so it reveals nothing; catches a process that is "active" but hung. Both worlds are checked: the proxy
+#     so it reveals nothing; catches a process that is "active" but hung. Both trust domains are checked: the proxy
 #     can serve prompts while payments is wedged (nobody can buy), and vice versa. ---
 for probe in "$PROXY_UNIT|$PROXY_HEALTHZ" "$PAYMENTS_UNIT|$PAYMENTS_HEALTHZ"; do
   unit="${probe%%|*}"; url="${probe#*|}"

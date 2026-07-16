@@ -68,11 +68,12 @@ runbook + the final box configs). The drain window is the one place a paid depos
    `/var/lib/bitcoind/nullsink.bak` on the node box, `chown nullsink:nullsink`, `restorewallet "nullsink"
    /var/lib/bitcoind/nullsink.bak`, add `wallet=nullsink` to the conf, `systemctl restart bitcoind`.
    Migrate, never re-import from the xpub: an order's PK is the wallet's derivation index — a fresh
-   keypool collides with keyed orders, a pruned node can't rescan, and a reset keypool re-issues indices
-   whose old un-swept UTXOs would match future orders after the 24h idempotency-marker purge (a
-   double-credit path, not merely an inconvenience). If a cutover attempt aborts, destroy the `.bak` and
-   take a fresh `backupwallet` inside the next attempt's drain — a stale snapshot recreates the
-   prune-window and collision failures. Afterwards delete every transient copy of the wallet backup on
+   keypool collides with keyed orders, a pruned node can't rescan, and a reset keypool re-issues indices.
+   An old output that arrived after its original order was reaped can then match a future order at the
+   reused index. The permanent `applied_orders` ledger prevents replay of credits it has already seen; it
+   cannot identify an old output that was never applied. If a cutover attempt aborts, destroy the `.bak`
+   and take a fresh `backupwallet` inside the next attempt's drain — a stale snapshot recreates the rescan
+   and index-collision failures. Afterwards delete every transient copy of the wallet backup on
    both boxes and any hop machine — it holds the xpub, which derives all past and future deposit
    addresses. Open orders freeze during the drain (reaping is rail-scoped) but render `/order-status` in
    the wrong coin's scale — cosmetic only.

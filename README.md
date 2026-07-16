@@ -188,8 +188,8 @@ Boxes run only verified release artifacts — no source, no Bun on the box. A gi
 (`vX.Y.Z`) triggers `.github/workflows/release.yml`, which builds the self-contained linux-x64
 artifacts and publishes them as a GitHub Release:
 
-- **`nullsink-proxy-linux-x64`** — the prompt world: the metered `/v1` proxy and the balance ledger.
-- **`nullsink-payments-linux-x64`** — the payment world: `/buy`, the pay rails, and the settlement poller.
+- **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
+- **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
 - **`nsk-linux-x64`** — the operator CLI (`issue` / `topup` / `balance` / `financials`).
 - **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.

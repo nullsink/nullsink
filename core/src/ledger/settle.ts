@@ -1,5 +1,5 @@
 // Settlement core, extracted from the poller so it can run on synthetic inbounds and an in-memory store (no
-// wallet-rpc, no server). I/O-pure and PAYMENT-world only: takes the already-fetched, rail-normalised inbounds
+// wallet-rpc, no server). I/O-pure and PAYMENTS TRUST DOMAIN only: takes the already-fetched, rail-normalised inbounds
 // plus the orders store and, for each confirmed deposit, ENQUEUES a credit + books the sale + closes the order
 // in one pending.db transaction (orders.commitSettlement). The actual balance credit is delivered
 // asynchronously by the sender (credit-sender.ts, over the credit socket), idempotent per idempotencyKey — so re-scanning the same

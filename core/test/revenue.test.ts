@@ -1,4 +1,4 @@
-// Revenue book (cli/financials.ts data source), PAYMENT-world state in pending.db. settle() books a
+// Revenue book (cli/financials.ts data source), PAYMENTS TRUST DOMAIN state in pending.db. settle() books a
 // sale in the SAME transaction as the outbox enqueue: booked iff a credit is requested, a re-scan double-counts
 // neither, gross (USD paid) is valued at the order's LOCKED rate so it never drifts when MARGIN changes, and
 // each row carries its coin (asset + scale) so a multi-rail book renders every coin exactly. The balance credit
