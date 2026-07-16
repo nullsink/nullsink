@@ -5,6 +5,7 @@ import { deny } from "../http";
 import { hashToken } from "../ledger/hash";
 import type { ProxyEndpointDeps } from "./types";
 import { readThrottled } from "./read-throttle";
+import * as metrics from "../metrics";
 
 // GET /v1/models: the OpenAI-compatible model catalog — every model THIS instance serves (its provider is
 // configured AND owns the id), so `data[].id` is exactly the set that won't 400 unsupported_model. Lets an
@@ -38,11 +39,26 @@ export function makeBalance(d: ProxyEndpointDeps) {
   const { getBalance, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
-    if (throttled) return throttled;
-    const token = req.headers.get("x-api-key");
-    if (!token) return deny(401, "invalid_token");
-    const micros = getBalance(hashToken(token));
-    if (micros === null) return deny(401, "invalid_token");
-    return Response.json({ balance_usd: micros / 1_000_000 });
+    if (throttled) {
+      metrics.recordBalance("throttled");
+      return throttled;
+    }
+    try {
+      const token = req.headers.get("x-api-key");
+      if (!token) {
+        metrics.recordBalance("unknown");
+        return deny(401, "invalid_token");
+      }
+      const micros = getBalance(hashToken(token));
+      if (micros === null) {
+        metrics.recordBalance("unknown");
+        return deny(401, "invalid_token");
+      }
+      metrics.recordBalance("ok");
+      return Response.json({ balance_usd: micros / 1_000_000 });
+    } catch (error) {
+      metrics.recordBalance("error");
+      throw error;
+    }
   };
 }

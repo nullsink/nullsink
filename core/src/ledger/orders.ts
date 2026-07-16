@@ -122,6 +122,9 @@ export function openOrderStore(path: string) {
   const listUnackedCreditsStmt = db.query<{ idempotency_key: string; hash: string; micros: number }, []>(
     "SELECT idempotency_key, hash, micros FROM credit_outbox WHERE acked_at IS NULL ORDER BY created_at ASC",
   );
+  const countUnackedCreditsStmt = db.query<{ n: number }, []>(
+    "SELECT COUNT(*) AS n FROM credit_outbox WHERE acked_at IS NULL",
+  );
   const ackCreditStmt = db.query("UPDATE credit_outbox SET acked_at = ? WHERE idempotency_key = ?");
   // Served by the partial index (created_at WHERE acked_at IS NULL), so it stays O(1)-ish as the book grows.
   const oldestUnackedStmt = db.query<{ at: number }, []>(
@@ -214,6 +217,10 @@ export function openOrderStore(path: string) {
     return listUnackedCreditsStmt.all();
   }
 
+  function unackedCreditCount(): number {
+    return countUnackedCreditsStmt.get()?.n ?? 0;
+  }
+
   // Mark a credit delivered (the receiver returned applied / already_applied). Idempotent; a re-ack is harmless.
   function ackCredit(key: string, atMs: number): void {
     ackCreditStmt.run(atMs, key);
@@ -250,18 +257,19 @@ export function openOrderStore(path: string) {
     revenue: { asset: string; assetAtomic: number; scale: number; grossMicros: number },
     orderIndex: number,
     rail: string,
-  ): void {
+  ): boolean {
     const apply = db.transaction(() => {
       const fresh = enqueueCreditStmt.run(key, hash, micros, atMs).changes > 0;
       if (fresh) recordRevenueStmt.run(atMs, revenue.asset, revenue.assetAtomic, revenue.scale, micros, revenue.grossMicros);
       deleteStmt.run(rail, orderIndex);
+      return fresh;
     });
-    apply();
+    return apply();
   }
 
   return {
     db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, openOrderByHashAddress, removeOrder, purgeStale, markSeen,
-    enqueueCredit, listUnackedCredits, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
+    enqueueCredit, listUnackedCredits, unackedCreditCount, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
   };
 }
 

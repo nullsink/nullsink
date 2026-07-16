@@ -133,6 +133,9 @@ The one failure this creates is silent: a wedged socket means a customer has **p
 credit, while both processes answer `/healthz` and every unit reads `active`. So payments emits a
 `CREDIT OUTBOX STALLED` error once the oldest undelivered credit ages past
 `OUTBOX_AGE_ALERT_MS`, and `deploy/status-check.sh` pages on it.
+The hourly aggregate metrics also report credits enqueued and acknowledged, deduplicated
+redeliveries, ambiguous drain ticks, peak queued rows, and maximum observed queue age. These are
+counts and high-water marks only; they never include a token hash, address, txid, or amount.
 
 ## The two flows
 

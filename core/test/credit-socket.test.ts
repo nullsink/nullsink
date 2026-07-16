@@ -141,7 +141,7 @@ test("drain acks only on definite outcomes and delivers every row", async () => 
   orders.enqueueCredit("k1", HASH, 1, 100);
   orders.enqueueCredit("k2", HASH, 2, 200);
   const r = await drainCreditOutboxOverSocket(orders, async () => ({ ok: true, outcome: "applied" }), NOW);
-  expect(r).toEqual({ delivered: 2 });
+  expect(r).toEqual({ delivered: 2, alreadyApplied: 0 });
   expect(orders.listUnackedCredits()).toEqual([]);
 });
 
@@ -150,7 +150,7 @@ test("drain STOPS at the first ambiguous result (fail-closed head-of-line); noth
   orders.enqueueCredit("k1", HASH, 1, 100);
   orders.enqueueCredit("k2", HASH, 2, 200);
   const send: CreditSender = async (c) => (c.idempotency_key === "k1" ? { ok: false, reason: "timeout" } : { ok: true, outcome: "applied" });
-  expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 0, blocked: "timeout" });
+  expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 0, alreadyApplied: 0, blocked: "timeout" });
   expect(orders.listUnackedCredits().map((x) => x.idempotency_key)).toEqual(["k1", "k2"]); // both durable, retried next tick
 });
 
@@ -167,7 +167,7 @@ test("crash before ack: the redelivered row reports already_applied and the bala
   expect(orders.listUnackedCredits()).toHaveLength(1);
 
   // The next tick redelivers the still-unacked row: applied_orders makes it a no-op, and the row finally acks.
-  expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 1 });
+  expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 1, alreadyApplied: 1 });
   expect(balances.getBalance(HASH)).toBe(5_000_000); // exactly once, not 10_000_000
   expect(orders.listUnackedCredits()).toEqual([]);
 });

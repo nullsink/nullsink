@@ -27,8 +27,9 @@ keeps **aggregate metrics**: plain counters and high-water marks, held in memory
 single periodic `[metrics]` log line and reset on restart (`metrics.ts`). Nothing is persisted.
 
 Each is a count of events — requests forwarded versus cleanly billed, upstream errors by category,
-requests turned away at the gate (bad token, insufficient funds, unsupported model), money-safety
-anomalies, and peak concurrency. None of them carries a token, hash, IP, address, txid, or any
+requests turned away at the gate (bad token, insufficient funds, unsupported model), `/balance`
+outcomes, durable credit-outbox delivery outcomes, money-safety anomalies, and peak concurrency
+or queued-credit age. None of them carries a token, hash, IP, address, txid, amount, or any
 prompt or output. A rising counter shows the operator that, say, auth checks are failing or streams
 are aborting — as a total only, with nothing that ties it to a person or a request. That's enough
 to fix outages and smooth the edges users actually hit, and too coarse to profile anyone.
