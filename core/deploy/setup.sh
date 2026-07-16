@@ -38,23 +38,9 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
 RELEASE_TAG="${RELEASE_TAG:-v1.8.2}" # x-release-please-version
-# Bitcoin Core pin + install helper live in lib.sh now (shared with setup-nodes.sh, so the pin can't drift).
-# Monero + tinfoil-proxy pins stay here — they're app-box-only (the node box installs only bitcoind).
-# Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
-# binaryFate-signed hashes.txt (gpg-verified at authoring; key 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92).
-MONERO_VERSION="0.18.5.1"
-MONERO_SHA256_X64="22a7dda7b0cb699fdd6b7674c3b4a4465b337cc98a54983523b759e1e7cc9958"
-# tinfoil-proxy: the local verifying proxy for the Tinfoil provider (enclave attestation). Pinned version + the
-# SHA-256 of the linux-amd64 binary. PROVENANCE is weaker than the Bitcoin/Monero pins above: those verify a
-# maintainer-GPG-signed hashes file, whereas tinfoil-proxy's SHA256SUMS is an unsigned CI artifact — so this is
-# trust-on-first-use (checked once at authoring) then pinned by SHA. NOTE: only the verifier BINARY is pinned;
-# the enclave measurement it checks floats with Tinfoil's latest release (Sigstore-gated) and the proxy CLI gives
-# no way to pin a measurement (see docs/tinfoil-attestation.md). Installed only when the Tinfoil rail is active.
-TINFOIL_PROXY_VERSION="v0.1.6"
-TINFOIL_PROXY_SHA256_X64="0efa144e09bcc4d68ed8b167f14e07ca46d0459158b839789ba452d6da4144cf"
-
-# --- Env/rail helpers. fetch_verified / require_x86_64 / install_verified_bitcoind (+ the Bitcoin pin) moved
-# to lib.sh, shared with setup-nodes.sh so the pin can't drift; the Monero/tinfoil installers below stay here. ---
+# All external dependency pins and verified installers live in lib.sh. setup.sh uses them for bootstrap;
+# upgrade-component.sh uses the same definitions for narrow day-two upgrades, so the two paths cannot drift.
+# --- Env/rail helpers. ---
 rail_active() {  # $1=rail — true if listed in PAY_RAILS (or legacy PAY_RAIL) in $ENV_FILE
   [ -f "$ENV_FILE" ] || return 1
   local rails
@@ -78,38 +64,6 @@ btc_node_local() {  # true when BITCOIN_RPC_URL is unset/localhost — i.e. THIS
   [ -z "$url" ] && return 0   # unset = the app's built-in localhost default
   case "$url" in http://127.0.0.1:*|http://localhost:*) return 0 ;; *) return 1 ;; esac
 }
-install_verified_monero_wallet() {  # monero-wallet-rpc (watcher) + monero-wallet-cli (one-time view-wallet creation)
-  if /usr/local/bin/monero-wallet-rpc --version 2>/dev/null | grep -q "v${MONERO_VERSION}"; then return 0; fi
-  require_x86_64 "Monero CLI"
-  local tmp; tmp="$(mktemp -d)"
-  fetch_verified "https://downloads.getmonero.org/cli/monero-linux-x64-v${MONERO_VERSION}.tar.bz2" \
-    "$MONERO_SHA256_X64" "$tmp/monero.tar.bz2"
-  tar -xjf "$tmp/monero.tar.bz2" -C "$tmp" --strip-components=1   # -> $tmp/monero-wallet-{rpc,cli}
-  install -m755 "$tmp/monero-wallet-rpc" "$tmp/monero-wallet-cli" /usr/local/bin/
-  rm -rf "$tmp"
-  echo "    monero-wallet-rpc/cli v${MONERO_VERSION} installed"
-}
-install_verified_tinfoil_proxy() {  # the Tinfoil attestation sidecar — fetch+verify+install /usr/local/bin/tinfoil-proxy
-  # Idempotent by SHA (the binary exposes no --version flag): skip the re-fetch when the pinned binary is already
-  # in place, so a setup.sh re-run does no network here.
-  if [ -x /usr/local/bin/tinfoil-proxy ] && echo "$TINFOIL_PROXY_SHA256_X64  /usr/local/bin/tinfoil-proxy" | sha256sum -c --status -; then return 0; fi
-  # This install is GUARDED (called in an `if`), so a wrong arch must `return 1` to degrade to a todo — NOT
-  # require_x86_64's `exit 1`, which would kill the whole bootstrap (the firewall, app, and rails come later).
-  if [ "$(uname -m)" != "x86_64" ]; then
-    echo "    !! tinfoil-proxy pin is x86_64-only; this box is $(uname -m) — skipping" >&2
-    return 1
-  fi
-  local tmp; tmp="$(mktemp -d)"
-  # Explicit `|| return 1` (not bare set -e): this runs guarded in an `if`, where set -e is suspended for the
-  # whole function — so a failed fetch must propagate by hand, or the caller's then-branch would start a unit
-  # with no binary behind it.
-  fetch_verified "https://github.com/tinfoilsh/tinfoil-proxy/releases/download/${TINFOIL_PROXY_VERSION}/tinfoil-proxy-linux-amd64" \
-    "$TINFOIL_PROXY_SHA256_X64" "$tmp/tinfoil-proxy" || { rm -rf "$tmp"; return 1; }
-  install -m755 "$tmp/tinfoil-proxy" /usr/local/bin/tinfoil-proxy || { rm -rf "$tmp"; return 1; }
-  rm -rf "$tmp"
-  echo "    tinfoil-proxy ${TINFOIL_PROXY_VERSION} installed"
-}
-
 step "Installing system packages"
 apt-get update -qq
 # sqlite3 CLI: required by deploy/backup.sh, restore.sh and the status-check integrity probe (the APP uses

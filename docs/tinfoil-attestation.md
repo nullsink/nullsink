@@ -47,8 +47,9 @@ Deployed entirely under `core/deploy/` (read those files for specifics — they'
 present, defaulting `TINFOIL_BASE_URL` to it; `tinfoil-proxy.service` is the hardened systemd unit;
 `status-check.sh` adds a liveness probe. Two non-obvious choices worth stating once: the unit takes
 no `IPAddress*` filter (it needs clearnet egress to the enclave + GitHub + Sigstore, like
-`nullsink-proxy.service`), and `deploy.sh` is unchanged — it refreshes the unit on redeploy but, like the
-other daemons, installs the binary only via `setup.sh`.
+`nullsink-proxy.service`), and `deploy.sh` is unchanged — it refreshes the unit on redeploy but never
+restarts the sidecar. Fresh boxes install it through `setup.sh`; existing boxes activate a refreshed pin
+explicitly with `upgrade-component.sh tinfoil`.
 
 ## Residual gaps
 
