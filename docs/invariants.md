@@ -42,7 +42,8 @@ restored `applied_orders` ledger must be re-armed before the services start.
 
 Use the repository's [`backup.sh`](../core/deploy/backup.sh) and
 [`restore.sh`](../core/deploy/restore.sh). Do not replace their SQLite snapshots, ordering, or
-reconciliation with file copies.
+reconciliation with file copies. The operator procedure is
+[Back up and restore billing state](operators/backup-restore.md).
 
 ## Why are acknowledged outbox rows kept?
 

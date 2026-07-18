@@ -201,6 +201,6 @@ Bitcoin upgrades run on the dedicated node host:
 sudo /opt/nullsink/deploy/upgrade-component.sh bitcoin
 ```
 
-Backups, restore drills, and incident diagnosis are separate operator procedures. Until those guides
-are rebuilt, use the scripts under [`core/deploy`](../../core/deploy/README.md) and do not substitute
-raw database file copies for `backup.sh` or `restore.sh`.
+For recovery configuration and drills, continue with
+[Back up and restore billing state](backup-restore.md). Incident diagnosis remains a separate operator
+procedure. Do not substitute raw database file copies for `backup.sh` or `restore.sh`.
