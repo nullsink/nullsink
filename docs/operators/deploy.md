@@ -202,5 +202,6 @@ sudo /opt/nullsink/deploy/upgrade-component.sh bitcoin
 ```
 
 For recovery configuration and drills, continue with
-[Back up and restore billing state](backup-restore.md). Incident diagnosis remains a separate operator
-procedure. Do not substitute raw database file copies for `backup.sh` or `restore.sh`.
+[Back up and restore billing state](backup-restore.md). For health warnings and live failures, use
+[Diagnose nullsink](diagnose.md). Do not substitute raw database file copies for `backup.sh` or
+`restore.sh`.

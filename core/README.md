@@ -67,6 +67,7 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 - [invariants.md](../docs/invariants.md) — review gates for money, credit delivery, and recovery
 - [operators/deploy.md](../docs/operators/deploy.md) — deploy and configure a production host
 - [operators/backup-restore.md](../docs/operators/backup-restore.md) — back up, test, and restore billing state
+- [operators/diagnose.md](../docs/operators/diagnose.md) — diagnose live service, payment, and ledger failures
 - [cli/README.md](cli/README.md) — the `nsk` operator CLI
 - [deploy/README.md](deploy/README.md) — the box runtime tree
 - [../SECURITY.md](../SECURITY.md) — reporting security issues

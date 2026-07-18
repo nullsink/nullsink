@@ -205,6 +205,9 @@ After sign-off, remove the transferred plaintext tar. Retain the `*.prerestore` 
 reconciliation and rollback window closes; they are sensitive plaintext and are not covered by
 `BACKUP_KEEP`.
 
+For unhealthy services, wallet/node probes, or credit-outbox warnings after recovery, continue with
+[Diagnose nullsink](diagnose.md).
+
 ## What happens when a backup or restore step fails?
 
 | Failure | Durable state | Safe next action |

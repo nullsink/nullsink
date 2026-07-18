@@ -160,6 +160,7 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 - [docs/payments.md](docs/payments.md) — payment status, single-use safety, and automated top-ups
 - [docs/operators/deploy.md](docs/operators/deploy.md) — deploy a release and configure providers, rails, and the public edge
 - [docs/operators/backup-restore.md](docs/operators/backup-restore.md) — configure, test, and apply billing-state recovery
+- [docs/operators/diagnose.md](docs/operators/diagnose.md) — diagnose service, provider, payment, ledger, and monitoring failures
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
