@@ -2,9 +2,10 @@
 // index (Monero subaddress minor index / Bitcoin HD derivation index) — to the token hash it funds, plus
 // the expected coin amount and USD credit, and the address itself (the rail watches it; the buyer pays it).
 //
-// The ONLY place the payment↔token link lives, so it's deliberately a SEPARATE database from balances.db —
-// a balances.db leak must never reveal who funded which token. While in-flight the index→hash link is
-// money-critical and irreplaceable (the chain shows a payment to an address, not our token hash), so this
+// All durable payment↔token links live in this payments-side database, separate from balances.db: open orders
+// hold address/index→hash while payment is pending, and credit_outbox retains key→hash after delivery for
+// restore reconciliation. A balances.db leak must never reveal who funded which token. While in flight the
+// index→hash link is money-critical and irreplaceable (the chain shows a payment to an address, not our token hash), so this
 // DB is durable (WAL, systemd StateDirectory) and belongs in backups. The link is dropped the moment an
 // order settles — under pay-once its FIRST confirmed payment (settle.ts) — or when it's reaped.
 //

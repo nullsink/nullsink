@@ -96,10 +96,11 @@ second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin H
   idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
   a row exists while a hold is outstanding, and survivors are refunded at boot).
 - **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
-  `credit_outbox` (credits owed to the balance ledger). Orders are the **only** place the payment
-  ↔ token link lives, in a separate database on purpose: a leak of `balances.db` can't reveal who
-  funded which token. The link is dropped when the order settles. Coin amounts, locked rates, and
-  transaction-derived keys stay on this side of the wall too.
+  `credit_outbox` (credits owed to the balance ledger). Both pending orders and outbox rows can hold
+  the payment ↔ token-hash link. Keeping them in this separate database means a leak of `balances.db`
+  alone cannot reveal which token a payment funded. Acknowledged outbox rows are currently retained
+  for restore reconciliation, so settlement does not erase the payment-side link; see
+  [invariants.md](invariants.md#why-are-acknowledged-outbox-rows-kept).
 
 Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
 / `financials`) is the exception and a second writer: it opens both directly on the box, and

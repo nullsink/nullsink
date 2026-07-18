@@ -59,9 +59,11 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 
 ## Docs
 
+- [getting-started.md](../docs/getting-started.md) — fund a token and make the first model request
 - [architecture.md](../docs/architecture.md) — how the pieces fit together
 - [trust-model.md](../docs/trust-model.md) — the privacy and money-safety guarantees
 - [billing-model.md](../docs/billing-model.md) — holds, settlement, no-overdraft
+- [invariants.md](../docs/invariants.md) — review gates for money, credit delivery, and recovery
 - [cli/README.md](cli/README.md) — the `nsk` operator CLI
 - [deploy/README.md](deploy/README.md) — the box runtime tree
 - [../SECURITY.md](../SECURITY.md) — reporting security issues

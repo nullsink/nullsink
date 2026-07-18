@@ -14,8 +14,8 @@ const MAX_ADDRESS_LEN = 128;
 // POST /order-status: live payment progress for an in-flight order, keyed by the token's HASH (never the raw
 // token — that goes only to /balance). The hash already crossed the wire to /buy, so this leaks nothing new;
 // it reveals only how far along a payment is, never the balance. Once an order settles the row is dropped
-// (settle.ts), so a credited/reaped/never-existed order all read `closed` — the dropped-link privacy
-// property. The client confirms the actual credit via /balance.
+// (settle.ts), so this endpoint reports `closed` for credited, reaped, and never-existing orders alike.
+// The retained outbox is not queried here. The client confirms the actual credit via /balance.
 export function makeOrderStatus(d: PaymentsEndpointDeps) {
   const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, orderStatus, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {

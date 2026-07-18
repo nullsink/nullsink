@@ -12,16 +12,18 @@ Two Bun + TypeScript workspaces:
 | [`core/`](core/) | The metered proxy, payment rails, the `nsk` operator CLI, the box deploy machinery, and the billing ledger. Zero runtime dependencies. |
 | [`client/`](client/) | The purchase UI (Vite + React), served at the edge as static files. |
 
-## Connect a client
+## Start here
 
-nullsink mirrors two wire formats, so a stock SDK or agent works once you change the base URL and key:
+[Make your first request](docs/getting-started.md) covers creating and funding a token, checking its
+balance, choosing a live model, making a runnable request, and fixing common errors.
 
-- **Anthropic Messages** — `POST /v1/messages`, `x-api-key`, serves Claude. Base URL is the **root** `https://nullsink.is` (the SDK/CLI appends `/v1/messages`).
-- **OpenAI-compatible** — `POST /v1/chat/completions` + `/v1/responses`, `Authorization: Bearer`, serves OpenAI and Tinfoil open-weight models. Base URL is `https://nullsink.is/v1`.
+For lookup rather than a walkthrough, use the live [API reference](https://nullsink.is/api/) and
+[model catalog](https://nullsink.is/models/).
 
-Full wire reference: <https://nullsink.is/api>. Model ids and prices: <https://nullsink.is/models>.
+## Client integrations
 
-**Every request must set a max output tokens** — `max_tokens` (Anthropic) or `max_completion_tokens` (OpenAI) — or it's rejected with `max_tokens_required`.
+These examples assume you already have a funded token. The base URLs and authentication rules are
+explained once in the [getting-started guide](docs/getting-started.md#which-base-url-should-an-sdk-use).
 
 ### Claude Code
 
@@ -154,9 +156,11 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 
 ## Docs
 
+- [docs/getting-started.md](docs/getting-started.md) — fund a token and make the first model request
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
+- [docs/invariants.md](docs/invariants.md) — review gates for money, credit delivery, and recovery
 
 ## Develop
 

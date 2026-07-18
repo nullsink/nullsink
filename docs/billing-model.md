@@ -83,7 +83,7 @@ stateDiagram-v2
     Quoted --> Unfunded: never seen, age past TTL + grace (default ~4.5h)
     Paying --> Credited: deposit final (rail's confirmations reached)
     Paying --> Stuck: never confirms, age past backstop (default 24h)
-    Credited --> [*]: credit the balance, drop the payment-token link
+    Credited --> [*]: credit balance, close order; retain outbox recovery record
     Unfunded --> [*]: reap the order
     Stuck --> [*]: stop watching the address
 ```
