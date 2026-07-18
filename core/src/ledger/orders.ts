@@ -6,8 +6,8 @@
 // hold address/index→hash while payment is pending, and credit_outbox retains key→hash after delivery for
 // restore reconciliation. A balances.db leak must never reveal who funded which token. While in flight the
 // index→hash link is money-critical and irreplaceable (the chain shows a payment to an address, not our token hash), so this
-// DB is durable (WAL, systemd StateDirectory) and belongs in backups. The link is dropped the moment an
-// order settles — under pay-once its FIRST confirmed payment (settle.ts) — or when it's reaped.
+// DB is durable (WAL, systemd StateDirectory) and belongs in backups. The open-order address/index→hash
+// link is dropped when an order settles or is reaped; the credit_outbox key→hash recovery record remains.
 //
 // Crediting is exactly-once via creditOnce() in db.ts, keyed by the rail's opaque idempotencyKey (Monero
 // "txid:minor", Bitcoin "txid:orderIndex") — NOT a txid alone, since one tx can pay two of our addresses.

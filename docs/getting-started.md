@@ -11,8 +11,8 @@
 5. Wait for the page to show **funded** before making a model request.
 
 The payment address is single-use. Send one transfer only. If payment status is unavailable, do not
-send again to the same address; check the existing order later. To add more credit, return to the buy
-form, paste the existing token, and create a new order.
+send again to the same address. See [Buy credit safely](payments.md) before making an irreversible
+payment. To add more credit, return to the buy form, paste the existing token, and create a new order.
 
 ## How do I check that credit arrived?
 

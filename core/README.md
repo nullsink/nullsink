@@ -60,6 +60,7 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 ## Docs
 
 - [getting-started.md](../docs/getting-started.md) — fund a token and make the first model request
+- [payments.md](../docs/payments.md) — payment status, single-use safety, and automated top-ups
 - [architecture.md](../docs/architecture.md) — how the pieces fit together
 - [trust-model.md](../docs/trust-model.md) — the privacy and money-safety guarantees
 - [billing-model.md](../docs/billing-model.md) — holds, settlement, no-overdraft

@@ -157,6 +157,7 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 ## Docs
 
 - [docs/getting-started.md](docs/getting-started.md) — fund a token and make the first model request
+- [docs/payments.md](docs/payments.md) — payment status, single-use safety, and automated top-ups
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
