@@ -65,6 +65,7 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 - [trust-model.md](../docs/trust-model.md) — the privacy and money-safety guarantees
 - [billing-model.md](../docs/billing-model.md) — holds, settlement, no-overdraft
 - [invariants.md](../docs/invariants.md) — review gates for money, credit delivery, and recovery
+- [operators/deploy.md](../docs/operators/deploy.md) — deploy and configure a production host
 - [cli/README.md](cli/README.md) — the `nsk` operator CLI
 - [deploy/README.md](deploy/README.md) — the box runtime tree
 - [../SECURITY.md](../SECURITY.md) — reporting security issues

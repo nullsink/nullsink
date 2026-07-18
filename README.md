@@ -158,6 +158,7 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 
 - [docs/getting-started.md](docs/getting-started.md) — fund a token and make the first model request
 - [docs/payments.md](docs/payments.md) — payment status, single-use safety, and automated top-ups
+- [docs/operators/deploy.md](docs/operators/deploy.md) — deploy a release and configure providers, rails, and the public edge
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
@@ -189,25 +190,9 @@ git config core.hooksPath .githooks
 
 ## Deploy
 
-Boxes run only verified release artifacts — no source, no Bun on the box. A git tag
-(`vX.Y.Z`) triggers `.github/workflows/release.yml`, which builds the self-contained linux-x64
-artifacts and publishes them as a GitHub Release:
-
-- **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
-- **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
-- **`nsk-linux-x64`** — the operator CLI (`issue` / `topup` / `balance` / `financials`).
-- **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
-- **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
-
-On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
-atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
-systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
-rolling the symlinks back to the previous release if either service is unhealthy.
-It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
-Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
-rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
-Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.
+Follow [Deploy and configure nullsink](docs/operators/deploy.md) for a fresh Ubuntu host or an
+application release update. Production hosts run checksum-verified release artifacts without a source
+checkout or Bun.
 
 ## License
 
