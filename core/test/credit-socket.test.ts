@@ -143,6 +143,7 @@ test("drain acks only on definite outcomes and delivers every row", async () => 
   const r = await drainCreditOutboxOverSocket(orders, async () => ({ ok: true, outcome: "applied" }), NOW);
   expect(r).toEqual({ delivered: 2, alreadyApplied: 0 });
   expect(orders.listUnackedCredits()).toEqual([]);
+  expect(orders.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox WHERE hash = '' AND micros = 0").get()?.n).toBe(2);
 });
 
 test("drain STOPS at the first ambiguous result (fail-closed head-of-line); nothing after it is acked", async () => {
@@ -152,6 +153,7 @@ test("drain STOPS at the first ambiguous result (fail-closed head-of-line); noth
   const send: CreditSender = async (c) => (c.idempotency_key === "k1" ? { ok: false, reason: "timeout" } : { ok: true, outcome: "applied" });
   expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 0, alreadyApplied: 0, blocked: "timeout" });
   expect(orders.listUnackedCredits().map((x) => x.idempotency_key)).toEqual(["k1", "k2"]); // both durable, retried next tick
+  expect(orders.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox WHERE hash <> '' AND micros > 0").get()?.n).toBe(2);
 });
 
 test("crash before ack: the redelivered row reports already_applied and the balance moves exactly once", async () => {
@@ -170,6 +172,11 @@ test("crash before ack: the redelivered row reports already_applied and the bala
   expect(await drainCreditOutboxOverSocket(orders, send, NOW)).toEqual({ delivered: 1, alreadyApplied: 1 });
   expect(balances.getBalance(HASH)).toBe(5_000_000); // exactly once, not 10_000_000
   expect(orders.listUnackedCredits()).toEqual([]);
+  expect(
+    orders.db.query<{ hash: string; micros: number }, [string]>(
+      "SELECT hash, micros FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("tx:1"),
+  ).toEqual({ hash: "", micros: 0 });
 });
 
 test("oldestUnackedAgeMs: 0 when drained, else the age of the oldest undelivered credit", () => {

@@ -5,8 +5,9 @@
 // The ONLY place the payment↔token link lives, so it's deliberately a SEPARATE database from balances.db —
 // a balances.db leak must never reveal who funded which token. While in-flight the index→hash link is
 // money-critical and irreplaceable (the chain shows a payment to an address, not our token hash), so this
-// DB is durable (WAL, systemd StateDirectory) and belongs in backups. The link is dropped the moment an
-// order settles — under pay-once its FIRST confirmed payment (settle.ts) — or when it's reaped.
+// DB is durable (WAL, systemd StateDirectory) and belongs in backups. Settlement removes the active order,
+// then leaves only a durable delivery payload until the balance ledger gives a definite applied / already-
+// applied response; that acknowledgement atomically scrubs the hash + amount and keeps the idempotency tombstone.
 //
 // Crediting is exactly-once via creditOnce() in db.ts, keyed by the rail's opaque idempotencyKey (Monero
 // "txid:minor", Bitcoin "txid:orderIndex") — NOT a txid alone, since one tx can pay two of our addresses.
@@ -61,7 +62,8 @@ export function openOrderStore(path: string) {
   // transaction that closes the order; the sender (credit-sender.ts) drains unacked rows into the balance
   // ledger's creditOnce over the owner-only unix socket. Keyed by the rail's opaque
   // idempotency_key — the very key creditOnce dedupes on — so a redelivery is a no-op at the receiver. acked_at
-  // stays NULL until the credit lands; the partial index keeps the sender's "what's unsent" scan O(unacked).
+  // stays NULL until the credit lands; acknowledgement atomically replaces hash/micros with an opaque tombstone.
+  // The partial index keeps the sender's "what's unsent" scan O(unacked).
   db.run(`CREATE TABLE IF NOT EXISTS credit_outbox (
   idempotency_key TEXT PRIMARY KEY,
   hash            TEXT NOT NULL,
@@ -125,7 +127,16 @@ export function openOrderStore(path: string) {
   const countUnackedCreditsStmt = db.query<{ n: number }, []>(
     "SELECT COUNT(*) AS n FROM credit_outbox WHERE acked_at IS NULL",
   );
-  const ackCreditStmt = db.query("UPDATE credit_outbox SET acked_at = ? WHERE idempotency_key = ?");
+  const ackCreditStmt = db.query(
+    "UPDATE credit_outbox SET acked_at = ?, hash = '', micros = 0 WHERE idempotency_key = ?",
+  );
+  // One-time rolling-upgrade bridge. Releases before delivered-link scrubbing left acknowledged payloads in
+  // place. Re-arm only those payload-bearing rows so the receiver can verify each idempotency key again before
+  // we scrub it. creditOnce makes an already-applied delivery a no-op. Tombstones (hash='', micros=0) must never
+  // be re-armed: they deliberately no longer contain a deliverable credit and would wedge the FIFO sender.
+  const rearmLegacyAckedCreditsStmt = db.query(
+    "UPDATE credit_outbox SET acked_at = NULL WHERE acked_at IS NOT NULL AND hash <> ''",
+  );
   // Served by the partial index (created_at WHERE acked_at IS NULL), so it stays O(1)-ish as the book grows.
   const oldestUnackedStmt = db.query<{ at: number }, []>(
     "SELECT created_at AS at FROM credit_outbox WHERE acked_at IS NULL ORDER BY created_at ASC LIMIT 1",
@@ -212,7 +223,7 @@ export function openOrderStore(path: string) {
     return enqueueCreditStmt.run(key, hash, micros, atMs).changes > 0;
   }
 
-  // Unacked outbox rows, oldest first — the sender's work list (each drained into creditOnce, then ackCredit'd).
+  // Unacked outbox rows, oldest first — the sender's work list (each drained into creditOnce, then acked + scrubbed).
   function listUnackedCredits(): { idempotency_key: string; hash: string; micros: number }[] {
     return listUnackedCreditsStmt.all();
   }
@@ -221,9 +232,19 @@ export function openOrderStore(path: string) {
     return countUnackedCreditsStmt.get()?.n ?? 0;
   }
 
-  // Mark a credit delivered (the receiver returned applied / already_applied). Idempotent; a re-ack is harmless.
+  // Mark a credit definitely delivered (the receiver returned applied / already_applied) and atomically scrub
+  // the token hash + amount. Keep the opaque key and timestamps as an idempotency/audit tombstone. Idempotent;
+  // a re-ack is harmless and never restores the payload.
   function ackCredit(key: string, atMs: number): void {
     ackCreditStmt.run(atMs, key);
+  }
+
+  // Re-deliver acknowledged rows written by releases that predate ack-time scrubbing. This is intentionally
+  // called at payments-service startup before the first drain. It is safe across a rolling deploy and safe to
+  // repeat: once a row receives a definite ledger response, ackCredit scrubs it and this predicate no longer
+  // matches. Returns the number queued for verified migration.
+  function rearmLegacyAckedCredits(): number {
+    return rearmLegacyAckedCreditsStmt.run().changes;
   }
 
   // created_at of the OLDEST undelivered credit, or null when the outbox is drained. The health signal for the
@@ -269,7 +290,8 @@ export function openOrderStore(path: string) {
 
   return {
     db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, openOrderByHashAddress, removeOrder, purgeStale, markSeen,
-    enqueueCredit, listUnackedCredits, unackedCreditCount, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
+    enqueueCredit, listUnackedCredits, unackedCreditCount, ackCredit, rearmLegacyAckedCredits, oldestUnackedCreditAt,
+    recordRevenue, listRevenue, commitSettlement,
   };
 }
 

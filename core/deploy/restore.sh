@@ -56,8 +56,50 @@ for db in "$work/balances.db" "$work/pending.db"; do
   else echo "integrity FAILED: $(basename "$db"): ${res:-sqlite3 could not open it (not a database?)}" >&2; exit 1; fi
 done
 
+# Validate the cross-database money invariant, not just each SQLite file in isolation. A delivered tombstone
+# has intentionally forgotten its hash + amount, so unlike a legacy acknowledged payload it CANNOT be re-armed
+# to repair an older/mismatched balances.db. Every tombstone in the artifact must therefore have the matching
+# applied_orders marker in the SAME artifact. Refuse poison/half-scrubbed rows too: an unacked tombstone would
+# head-of-line block every real credit behind it.
+if [ -f "$work/pending.db" ]; then
+  artifact_has_outbox="$(sqlite3 "$work/pending.db" \
+    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';")"
+  if [ "$artifact_has_outbox" = 1 ]; then
+    invalid_rows="$(sqlite3 "$work/pending.db" \
+      "SELECT COUNT(*) FROM credit_outbox
+        WHERE (acked_at IS NULL AND (hash = '' OR micros <= 0))
+           OR (acked_at IS NOT NULL AND ((hash = '' AND micros <> 0) OR (hash <> '' AND micros <= 0))); ")"
+    [ "$invalid_rows" = 0 ] || {
+      echo "billing invariant FAILED: pending.db has $invalid_rows poison or partially scrubbed credit-outbox row(s)" >&2
+      exit 1
+    }
+
+    tombstones="$(sqlite3 "$work/pending.db" \
+      "SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NOT NULL AND hash = '' AND micros = 0;")"
+    if [ "$tombstones" -gt 0 ]; then
+      artifact_has_applied="$(sqlite3 "$work/balances.db" \
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';")"
+      [ "$artifact_has_applied" = 1 ] || {
+        echo "billing invariant FAILED: pending.db has scrubbed delivery tombstones but balances.db has no applied_orders table" >&2
+        exit 1
+      }
+      missing_markers="$(sqlite3 "$work/pending.db" \
+        "ATTACH '$work/balances.db' AS bal;
+         SELECT COUNT(*) FROM credit_outbox AS outbox
+          WHERE outbox.acked_at IS NOT NULL AND outbox.hash = '' AND outbox.micros = 0
+            AND NOT EXISTS (SELECT 1 FROM bal.applied_orders AS applied
+                             WHERE applied.order_id = outbox.idempotency_key);")"
+      [ "$missing_markers" = 0 ] || {
+        echo "billing invariant FAILED: $missing_markers scrubbed credit tombstone(s) have no matching ledger marker — DB snapshots are mismatched" >&2
+        exit 1
+      }
+      echo "billing pair OK: $tombstones scrubbed delivery tombstone(s) backed by ledger markers"
+    fi
+  fi
+fi
+
 if [ "$apply" -eq 0 ]; then
-  echo "--- dry-run OK: the artifact is intact and restorable. Re-run with --apply to restore for real. ---"
+  echo "--- dry-run OK: the artifact is intact and internally consistent. Re-run with --apply to restore for real. ---"
   exit 0
 fi
 
@@ -67,6 +109,14 @@ fi
 # in, keeping the previous live DB as <db>.prerestore for recovery. The snapshots are already checkpointed,
 # so the stale -wal/-shm are dropped.
 [ "$(id -u)" -eq 0 ] || { echo "--apply must run as root (it installs files + (re)starts the services)" >&2; exit 1; }
+
+# A balances-only restore over a scrub-era pending.db can rewind the receiver below acknowledgements whose
+# payloads no longer exist. There is nothing safe to redeliver, so prohibit that partial restore. Historical
+# balances-only artifacts remain applicable only to installations that do not yet have pending.db.
+if [ ! -f "$work/pending.db" ] && [ -f "$DB_DIR/pending.db" ]; then
+  echo "unsafe partial restore refused: artifact has balances.db but no pending.db; scrub-era billing DBs must be restored as a matched pair" >&2
+  exit 1
+fi
 
 staged=()
 for db in balances.db pending.db; do
@@ -104,11 +154,11 @@ done
 # cross-DB ATTACH rather than un-acking everything, so a box with a long history redelivers only what is
 # genuinely missing instead of its entire lifetime of credits.
 #
-# NEVER un-ack a TOMBSTONE. Some outboxes carry acked marker rows with hash='' and micros=0 — seeded once per
-# already-applied key so a zombie order the old ledger had already credited could not double-book its sale;
-# the real credit landed long ago and its values were never recorded here. Un-acking one hands the sender a
-# row whose empty hash can never be delivered, wedging every genuine credit queued behind it. `hash <> ''`
-# selects real credits only: settle() always enqueues a 64-hex token hash and nothing else writes ''.
+# NEVER un-ack a TOMBSTONE. Current releases intentionally turn definitely delivered rows into hash='' and
+# micros=0; older migrations may also contain marker-only rows. Un-acking one hands the sender an empty,
+# undeliverable payload, wedging every genuine credit queued behind it. Artifact validation above already
+# proved each scrubbed tombstone has a matching ledger marker. `hash <> ''` selects real credits only:
+# settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
 # Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
 # break the services' billing writes (the same trap cli/guard.ts exists to prevent).
