@@ -8,7 +8,7 @@ backup, and restoring the two databases without credit-outbox reconciliation can
 | File | What recovery needs from it |
 | --- | --- |
 | `balances.db` | Token hashes, spendable balances, open request holds, and the `applied_orders` idempotency ledger |
-| `pending.db` | Open payment orders, revenue, and the durable credit outbox, including its payment-to-token links |
+| `pending.db` | Open payment orders, revenue, and the durable credit outbox. Open orders and unacknowledged rows can contain a payment-to-token link; acknowledged rows are scrubbed tombstones. |
 | `bitcoin-wallet-labels.json` | Best-effort Bitcoin address/label export when the configured wallet RPC answers |
 
 `backup.sh` snapshots `pending.db` first and `balances.db` second with SQLite's `.backup` command. The
@@ -86,11 +86,10 @@ bad deploy or operator mistake; it does not protect against loss or compromise o
 Setting `BACKUP_KEEP=7` keeps seven local artifacts; it does not guarantee exactly seven calendar days
 and does not delete remote copies.
 
-Backup retention is not a safe deletion clock for acknowledged `credit_outbox` rows or
-`applied_orders`. Those rows reconcile a restored payment database with a restored balance ledger. A
-deletion policy would first need one enforced maximum restore age covering local artifacts, remote
-artifacts, copied artifacts, and pre-restore files. No such policy or deletion mechanism exists today;
-see the [money and reliability invariants](../invariants.md#should-acknowledged-rows-be-deleted-after-a-fixed-period).
+The local count is not a safe deletion clock for the outbox and ledger marker rows. A pruning policy
+would need one enforced maximum restore and replay window covering local artifacts, remote copies, and
+`*.prerestore` files. No marker-pruning mechanism exists today; see the
+[money and reliability invariants](../invariants.md#can-the-marker-rows-be-deleted-after-a-fixed-period).
 
 ## How do I test an artifact without changing production?
 
@@ -103,9 +102,10 @@ BACKUP_AGE_IDENTITY=/secure/nullsink-backup.agekey \
 ```
 
 The default dry-run decrypts into a temporary directory, requires `balances.db`, and runs
-`PRAGMA integrity_check` on each included database. It does not stop services, replace files, start the
-application, or simulate credit-outbox reconciliation. For an on-host plaintext artifact, run the same
-command without `BACKUP_AGE_IDENTITY`.
+`PRAGMA integrity_check` on each included database. When `pending.db` contains the credit outbox, it
+also rejects poison rows and verifies that every scrubbed tombstone has a matching `applied_orders`
+marker. It does not stop services, replace files, start the application, or mutate the artifact. For an
+on-host plaintext artifact, run the same command without `BACKUP_AGE_IDENTITY`.
 
 Test a recent artifact on a schedule. Successful encryption and upload are not evidence that the
 identity is available or that the databases decrypt intact. The integrity check validates SQLite files,
@@ -122,10 +122,12 @@ Restoring rewinds nullsink to the artifact's state. It cannot reconstruct activi
 - the Bitcoin label JSON, when present, is not automatically imported; and
 - configuration, wallet files, and node state must be recovered separately.
 
-Credit-outbox re-arming prevents an acknowledgement inside the restored data from hiding a credit that
-the restored balance ledger lacks. It does not recreate orders or credits that never reached the backup.
-Choose the newest intact artifact that fits the incident, and retain payment-chain evidence plus the
-pre-restore databases until reconciliation is complete.
+A scrubbed tombstone cannot reconstruct a credit missing from `balances.db`, so current recovery
+requires both databases from the same artifact. The restore guard rejects a pair where a tombstone lacks
+its ledger marker. Older acknowledged rows that still carry a payload can be re-armed and delivered
+through the normal exactly-once path. Neither mechanism recreates orders or credits that never reached
+the backup. Choose the newest intact artifact that fits the incident, and retain payment-chain evidence
+plus the pre-restore databases until reconciliation is complete.
 
 ## How do I apply a restore?
 
@@ -160,17 +162,17 @@ ssh root@app-host \
 
 The apply path:
 
-1. verifies and stages the extracted databases before touching live files;
+1. verifies database integrity and the matched-pair billing invariant before touching live files;
 2. stops payments, then the proxy;
 3. installs the snapshots as service-owned mode-`0600` files and removes stale WAL sidecars;
 4. keeps the first replaced databases as `balances.db.prerestore` and `pending.db.prerestore`;
-5. re-arms real outbox rows acknowledged by `pending.db` but absent from `balances.db`'s
-   `applied_orders`; and
+5. re-arms only legacy payload-bearing outbox rows absent from `balances.db.applied_orders`; and
 6. starts the proxy and payments services.
 
-If outbox reconciliation fails, the restored databases are already installed and the application
-services are deliberately left stopped. Do not start them around the guard. Fix the reported SQLite or
-permission problem and rerun the same restore command.
+Scrubbed tombstones are never re-armed: the pre-install validation has already required their matching
+ledger markers. If legacy outbox reconciliation fails, the restored databases are already installed and
+the application services are deliberately left stopped. Do not start them around the guard. Fix the
+reported SQLite or permission problem and rerun the same restore command.
 
 `restore.sh` starts the services but does not health-gate them. Verification is a separate required step.
 

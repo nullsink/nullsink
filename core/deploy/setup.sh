@@ -37,7 +37,7 @@ todo() { PENDING+=("$1"); note "$1"; }                  # inline warning AND add
 # release WITHOUT editing this file (and without downgrading a box already past the default):
 # `sudo env RELEASE_TAG=vX.Y.Z deploy/setup.sh` — e.g. adding a setup-only component (the tinfoil-proxy
 # attestation sidecar) onto a newer box, or staging an RC.
-RELEASE_TAG="${RELEASE_TAG:-v1.8.2}" # x-release-please-version
+RELEASE_TAG="${RELEASE_TAG:-v1.9.1}" # x-release-please-version
 # All external dependency pins and verified installers live in lib.sh. setup.sh uses them for bootstrap;
 # upgrade-component.sh uses the same definitions for narrow day-two upgrades, so the two paths cannot drift.
 # --- Env/rail helpers. ---

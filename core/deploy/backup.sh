@@ -38,8 +38,9 @@ trap 'rm -rf "$work"' EXIT
 # an artifact whose outbox claims a delivery the ledger never saw, and restoring it silently destroys a
 # customer's PAID credit — the sender skips acked rows, and nothing else remembers the debt. The opposite
 # skew is harmless: a credit applied after pending's snapshot is simply redelivered on the next poll and lands
-# as already_applied (creditOnce is idempotent).
-# restore.sh re-arms the outbox regardless, which also covers restoring one DB without the other.
+# as already_applied (creditOnce is idempotent). After delivery acknowledgement, the outbox scrubs hash/micros;
+# those tombstones cannot reconstruct a credit. restore.sh therefore validates that every tombstone is backed
+# by the later ledger snapshot, and a scrub-era restore must treat these two DBs as one matched artifact.
 files=()
 if [ -f "$DB_DIR/pending.db" ]; then
   sqlite3 -cmd '.timeout 10000' "$DB_DIR/pending.db" ".backup '$work/pending.db'"

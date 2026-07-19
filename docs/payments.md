@@ -167,4 +167,4 @@ Purchase endpoints use the compact shape `{"error":"code"}`.
 
 For what payment and credit-delivery records remain after settlement, see the
 [privacy policy](https://nullsink.is/privacy/) and
-[money/reliability invariants](invariants.md#why-are-acknowledged-outbox-rows-kept).
+[money/reliability invariants](invariants.md#what-remains-after-definite-credit-delivery).

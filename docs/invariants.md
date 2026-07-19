@@ -36,50 +36,52 @@ This gives at-least-once delivery across the socket and one balance effect at th
 
 ## What must a backup preserve?
 
-`pending.db` and `balances.db` contain opposite halves of credit delivery. A backup must snapshot
-`pending.db` first and `balances.db` second. On restore, acknowledged outbox rows missing from the
-restored `applied_orders` ledger must be re-armed before the services start.
+`pending.db` and `balances.db` are a matched recovery pair. After definite delivery, the outbox
+tombstone records that a credit crossed the boundary but no longer contains the token hash or amount
+needed to reconstruct it. The matching `applied_orders` marker in `balances.db` is therefore required.
+
+A backup must snapshot `pending.db` first and `balances.db` second. That order makes the only possible
+skew safe: the later ledger snapshot contains every credit acknowledged in the earlier payments
+snapshot. Restore verifies that every scrubbed tombstone has its ledger marker and refuses a
+balances-only restore over a scrub-era payments database. Legacy acknowledged rows that still contain
+a payload may be re-armed if their marker is absent; scrubbed tombstones must never be re-armed.
 
 Use the repository's [`backup.sh`](../core/deploy/backup.sh) and
 [`restore.sh`](../core/deploy/restore.sh). Do not replace their SQLite snapshots, ordering, or
 reconciliation with file copies. The operator procedure is
 [Back up and restore billing state](operators/backup-restore.md).
 
-## Why are acknowledged outbox rows kept?
+## What remains after definite credit delivery?
 
-The current implementation marks a delivered row with `acked_at`; it never deletes or redacts that
-row. The retained row lets restore compare payment-side delivery history with the restored balance
-ledger and redeliver a paid credit that the older ledger does not contain.
+The acknowledgement transaction clears `credit_outbox.hash` and sets `micros` to zero. The row keeps
+only its payment-side idempotency key and timestamps. `balances.db.applied_orders` keeps the same
+idempotency key and a timestamp. Neither marker contains a token hash or credit amount; together they
+prove that a matched backup has both halves of the crossing.
 
-There is a privacy cost: each acknowledged row still contains the token hash, credited amount, and a
-transaction-derived idempotency key. The durable payment-to-token link therefore outlives the pending
-order. Documentation must not claim that the link disappears at settlement while this remains true.
+This is logical deletion from current rows, not a physical-erasure guarantee. SQLite pages, WAL files,
+and backups captured before acknowledgement may retain the earlier payload until they are overwritten
+or the artifact expires.
 
-### Should acknowledged rows be deleted after a fixed period?
+### Can the marker rows be deleted after a fixed period?
 
-Elapsed time alone is not a safe deletion condition. If an operator can restore a `balances.db`
-backup older than the deletion cutoff, the matching outbox row may be the only record that tells the
-system to restore the customer's paid credit.
+Not safely by elapsed time alone. The two markers also prevent an old payload-bearing delivery from
+being applied twice.
 
-| Policy | Benefit | Cost or risk | Required decision or mechanism |
-| --- | --- | --- | --- |
-| Keep rows indefinitely (current behavior) | Preserves payment-side delivery history for reconciliation with a restored balance database | Retains the payment-to-token link; table and backups grow with sales | Accept the privacy and storage cost |
-| Delete after _N_ days | Simple; bounds link retention and storage | Silently limits recovery: restoring older or independently retained backups can lose paid credit | Define and enforce a maximum restore window; ensure every usable backup pair is newer than the cutoff |
-| Redact after a cross-service safe point | Can remove the token hash and amount without relying on age alone | Requires a protocol, schema, restore changes, and failure tests | Have the proxy prove that credits through a durable watermark are present in every supported recovery state |
+| Policy | Benefit | Risk or prerequisite |
+| --- | --- | --- |
+| Keep marker rows (current behavior) | Preserves restore validation and duplicate rejection | Marker tables grow with completed credits, but retain no direct token link |
+| Delete after _N_ days | Bounds marker-table growth | Requires one enforced maximum restore and replay window across local backups, remote copies, and `*.prerestore` files |
+| Coordinated safe-point pruning | Can bound both marker tables without relying only on age | Requires a cross-database protocol and failure tests proving no payload with that key can be replayed afterward |
 
-No retention period or safe-point protocol exists today. Choosing a restore window and acceptable
-privacy exposure is a product/operations decision; implementing deletion before that decision would
-change recovery behavior.
-
-The proxy's `applied_orders` markers are also retained indefinitely. They contain the idempotency key
-and timestamp, but no token hash or amount. Removing them without a coordinated safe point can turn a
-late outbox retry into a double credit.
+The default fourteen local backup artifacts are not such a boundary: remote retention is
+operator-controlled and pre-restore copies are not pruned automatically. No marker-pruning protocol
+exists today.
 
 ## What should a money-path review reject?
 
 - Forwarding before a hold commits.
 - Splitting a hold debit from its journal entry, or a settlement from its refund.
 - Acknowledging an ambiguous credit delivery.
-- Deleting or redacting outbox rows or `applied_orders` markers without a recovery-safe boundary.
-- Backing up `balances.db` before `pending.db`.
+- Deleting idempotency tombstones or `applied_orders` markers without a coordinated safe boundary.
+- Backing up `balances.db` before `pending.db`, or restoring the two from different artifacts.
 - Starting services after restore reconciliation fails.

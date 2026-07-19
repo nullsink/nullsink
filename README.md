@@ -162,6 +162,7 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 - [docs/operators/backup-restore.md](docs/operators/backup-restore.md) — configure, test, and apply billing-state recovery
 - [docs/operators/diagnose.md](docs/operators/diagnose.md) — diagnose service, provider, payment, ledger, and monitoring failures
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
+- [docs/architecture-roadmap.md](docs/architecture-roadmap.md) — shipped topology, the next app-box boundary, and its implementation gates
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
 - [docs/invariants.md](docs/invariants.md) — review gates for money, credit delivery, and recovery

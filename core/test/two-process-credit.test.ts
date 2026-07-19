@@ -98,7 +98,7 @@ test("a seeded credit crosses the socket from payments to proxy and reads back t
   }
   expect(crossed).toBe(true); // the credit crossed the socket and is visible through the metered read path
 
-  // Exactly once + no loss: the outbox row acks (drains) right after the credit lands. The ack is a WRITE in the
+  // Exactly once + no loss: the outbox row acks, scrubs, and drains right after the credit lands. The ack is a WRITE in the
   // PAYMENTS process, so across our separate reader connection it can lag the /balance visibility by a WAL tick
   // (more so under load) — poll briefly for the drained state instead of reading once and racing it. The balance
   // being exactly 5 (not 10) across the poll ticks that ran already proves creditOnce's idempotency held.

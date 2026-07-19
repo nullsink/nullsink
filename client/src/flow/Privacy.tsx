@@ -39,9 +39,10 @@ export function Privacy() {
         <ul>
           <li>
             <span className="lead-term">A token hash.</span> Your key is generated in your own browser.
-            The purchase flow sends only its SHA-256 hash. When you check a balance or make an API request,
-            the service receives the raw key, hashes it in memory, and does not store it. We store the hash
-            together with a balance and cannot derive the key from the hash.
+            The raw bearer key is sent when you authorise an API or balance request; we hash it in
+            process and store only its SHA-256 hash together with a balance. We cannot derive your key
+            from the hash, and outside the temporary payment lifecycle below we do not link that balance
+            record to a payment or personal identity.
           </li>
           <li>
             <span className="lead-term">A balance.</span> A single number: how much prepaid credit the
@@ -50,9 +51,11 @@ export function Privacy() {
           <li>
             <span className="lead-term">Payment and credit-delivery details.</span> While a purchase is in progress
             we store the payment address, the expected and received coin amounts, the credit to apply,
-            and timestamps, linked to the token hash. The open-order record is deleted when payment settles
-            or the order is reaped. After settlement, the credit-delivery record currently retains the token
-            hash, credited amount, and transaction-derived idempotency key for backup recovery.
+            and a timestamp, linked to the token hash. When payment settles, that active order is deleted;
+            a delivery record retains the token hash and credit amount only until the balance ledger gives a
+            definite acknowledgement. We then clear those two fields and keep the payment-side idempotency key
+            and timestamps so the same deposit cannot be credited twice. An unpaid order is deleted after its
+            payment-monitoring horizon.
           </li>
         </ul>
         <p>What we never store:</p>
@@ -88,8 +91,9 @@ export function Privacy() {
             their only purpose.
           </li>
           <li>
-            Payment details let us match an incoming payment to the right token. The retained credit-delivery
-            record lets us reconcile paid credit when restoring the balance ledger from backup.
+            The temporary payment details let us match an incoming payment to the right token and
+            deliver its credit safely. After acknowledged delivery, we clear the direct payment-to-token
+            link and retain only the marker needed to prevent duplicate credit.
           </li>
           <li>Any email you send us is used only to answer you.</li>
         </ul>
@@ -106,13 +110,13 @@ export function Privacy() {
         <ul>
           <li>
             <span className="lead-term">LLM providers.</span> When you call the API, the content of your
-            request and its response are sent to the provider you address (currently Anthropic, and OpenAI
-            when enabled) so that it can answer you. We are the meter, not a store: we forward the request
+            request and its response are sent to the provider you address (currently Anthropic, OpenAI,
+            or Tinfoil when enabled) so that it can answer you. We are the meter, not a store: we forward the request
             under our own provider account and never attach your identity, because we have none to attach.
-            On the OpenAI path we force the &quot;do not store&quot; flag so the provider keeps no prompt or
-            output; the Anthropic path is stateless. Even so, a provider may retain content briefly for its
-            own trust-and-safety purposes under its policy. Your use of those models is governed by the
-            provider&apos;s terms and privacy policy:{" "}
+            On the OpenAI path we force <code>store:false</code>, which disables optional application-state
+            storage; it does not by itself disable OpenAI&apos;s separate abuse-monitoring retention. Provider
+            handling and any approved data controls remain governed by the provider&apos;s policy. Your use of
+            those models is governed by the provider&apos;s terms and privacy policy:{" "}
             <a href="https://www.anthropic.com/legal/privacy" {...EXT}>
               Anthropic
             </a>
@@ -120,14 +124,20 @@ export function Privacy() {
             <a href="https://openai.com/policies/privacy-policy" {...EXT}>
               OpenAI
             </a>
+            , and{" "}
+            <a href="https://tinfoil.sh/privacy" {...EXT}>
+              Tinfoil
+            </a>
             .
           </li>
           <li>
             <span className="lead-term">Payment network.</span> Payments are made in Monero or Bitcoin to a
-            single-use address. Our wallet keeps the addresses it generates under a fixed, non-identifying
-            label. The payments database separately links an order, and later its credit-delivery record, to
-            the token hash. Bitcoin&apos;s ledger is public; Monero&apos;s is private by design. Both networks
-            are outside our control.
+            single-use address. Our wallet keeps the addresses it generates, but they carry a fixed,
+            non-identifying label (an order number), not your token. The payments service temporarily links
+            an active order and then an undelivered credit to the token hash so it can credit the right balance;
+            it clears that link after acknowledged delivery. Neither payment network receives your token or
+            token hash. Bitcoin&apos;s ledger is public; Monero&apos;s is private by design. Both networks are
+            outside our control.
           </li>
           <li>
             <span className="lead-term">TLS certificate authority.</span> We use Let&apos;s Encrypt to
@@ -156,9 +166,9 @@ export function Privacy() {
             carries no identity.
           </li>
           <li>
-            Open-order details are deleted after settlement or reaping. Acknowledged credit-delivery records
-            currently have no automatic retention limit and remain in payment-database backups while those
-            backups are retained.
+            Active payment details are deleted when a payment settles, or after the payment-monitoring horizon
+            if it does not. A settled credit&apos;s token hash and amount remain in the delivery queue only until
+            the balance ledger definitely acknowledges them; those fields are then cleared.
           </li>
           <li>We keep no access logs or request logs, so there are none to retain.</li>
           <li>Email correspondence is kept only as long as needed to deal with your inquiry.</li>
