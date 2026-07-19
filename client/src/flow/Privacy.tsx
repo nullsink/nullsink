@@ -169,12 +169,6 @@ export function Privacy() {
             if it does not. A settled credit&apos;s token hash and amount remain in the delivery queue only until
             the balance ledger definitely acknowledges them; those fields are then cleared.
           </li>
-          <li>
-            This is logical deletion from current database rows, not guaranteed immediate physical erasure.
-            SQLite pages and write-ahead logs can retain earlier bytes until overwritten. Encrypted operational
-            backups can contain the temporary details present when they were made and retain them for the
-            configured backup-retention period.
-          </li>
           <li>We keep no access logs or request logs, so there are none to retain.</li>
           <li>Email correspondence is kept only as long as needed to deal with your inquiry.</li>
         </ul>
