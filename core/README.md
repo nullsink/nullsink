@@ -1,74 +1,86 @@
-# core
+# Core workspace
 
-The metered proxy service: an anonymous reverse proxy to Anthropic/OpenAI, metered at the
-provider's per-token price against prepaid balances, plus its billing ledger, payment rails,
-the `nsk` operator CLI, and the box deploy machinery. Bun + TypeScript, zero runtime dependencies.
+`core/` contains the two Bun services, their billing stores, payment rails, operator CLI, tests, and
+host deployment files. The compiled production binaries have no runtime package dependencies.
 
-See the [root README](../README.md) for monorepo setup, dev commands, and deploy.
+See the [root README](../README.md) for repository-wide setup.
 
-## Layout
+## Where does each kind of code live?
 
-```
+```text
 src/
-  proxy.ts        proxy trust domain composition root — boot, metered /v1, balance ledger, shutdown
-  payments.ts     payments trust domain composition root — /buy, rails, settlement poller
-  handler.ts      request-handler factory (injected deps; the metered path)
-  hold.ts         pre-flight hold sizing (count_tokens / byte bound)
-  providers/      anthropic.ts, openai.ts — upstream forwarding + usage
-  cost/           pricing.ts, prices.json, usage/ — meter the response
-  ledger/         db.ts, orders.ts, settle.ts, poll.ts, financials.ts
-  rails/          monero.ts, bitcoin.ts, rate.ts — on-chain payment backends
-  endpoints/      buy.ts, reads.ts — the non-metered nullsink endpoints
-  http/           body.ts, errors.ts, headers.ts
-  env.ts log.ts metrics.ts ratelimit.ts shutdown.ts token-format.ts
+  proxy.ts          proxy composition root: metered API, balance store, credit socket, shutdown
+  payments.ts       payments composition root: quotes, rails, order pollers, credit sender
+  handler.ts        metered request handler and settlement
+  payments-handler.ts  payment-route handler
+  hold.ts           request hold sizing
+  providers/        Anthropic, OpenAI, and Tinfoil request/usage adapters
+  cost/             price catalog and usage normalization
+  ledger/           balances, orders, revenue, polling, and settlement
+  rails/            Monero, Bitcoin, and exchange-rate adapters
+  endpoints/        proxy and payment endpoint implementations
+  http/             body, error, and header contracts
 
-cli/      the nsk operator CLI + dev tools
-deploy/   systemd units, Caddyfile, deploy.sh / setup.sh
-scripts/  e2e capture/hold, lint, trust-domain-isolation assert
-test/     bun test (mostly fast-check property tests)
+cli/                nsk operator CLI plus developer/buyer utilities
+deploy/             systemd units, edge config, bootstrap, deploy, backup, and recovery scripts
+scripts/            developer checks and live-spend probes
+test/               unit, property, boundary, and socket tests
 ```
 
-## Scripts
+Read [System boundaries](../docs/architecture.md) before moving code between the proxy and payments
+trees. The import boundary is tested and also checked in compiled binaries.
 
-| Script | What it does |
+## Which commands check a core change?
+
+| Command | Question it answers |
 | --- | --- |
-| `bun test` | run the test suite |
-| `bun run typecheck` | `tsc --noEmit` |
-| `bun run build` | compile both service binaries (`nullsink-{proxy,payments}-linux-x64`) + assert trust-domain isolation |
-| `bun run build:nsk` | compile the `nsk` CLI binary |
-| `bun run e2e:capture` | real-spend end-to-end + golden-fixture capture (operator-run) |
-| `bun run e2e:hold` | live hold-soundness check against real upstreams (operator-run) |
+| `bun test` | Do the core tests pass? |
+| `bun run typecheck` | Does TypeScript accept the workspace? |
+| `bun run build` | Can both service binaries compile without crossing trust domains? |
+| `bun run build:nsk` | Can the standalone operator CLI compile? |
+| `bun run e2e:capture` | Does a controlled real-spend request still match the golden capture? |
+| `bun run e2e:hold` | Does live upstream behavior still respect the hold bound? |
 
-### Mutation testing (on-demand)
+The two end-to-end commands spend real provider credit and are operator-run, not routine test commands.
 
-`bun test --coverage` shows which lines run; mutation testing shows whether the tests would actually *catch* a
-regression — high value for the billing/ledger core. The config is committed (`stryker.config.json`), but
-Stryker itself is **not** a dependency (it pulls a large Node tree), so install it on demand:
+## When should I use mutation testing?
+
+Use it as an occasional check on billing or ledger tests, not as a per-change gate. Stryker is deliberately
+not installed in the repository.
 
 ```sh
-# whole core — slow (~25 min; runs the full suite per mutant, so it's a periodic probe, not a per-PR gate)
 bunx --package @stryker-mutator/core stryker run
-
-# scope to what you changed — fast
 bunx --package @stryker-mutator/core stryker run --mutate "src/ledger/**/*.ts"
 ```
 
-It uses Stryker's built-in `command` runner (`bun test`, judged by exit code) — the community Bun test-runner
-plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON reports land in
-`reports/mutation/` (gitignored).
+Reports are written to the ignored `reports/mutation/` directory.
 
-## Docs
+## How do I run both services locally?
 
-- [architecture.md](../docs/architecture.md) — how the pieces fit together
-- [trust-model.md](../docs/trust-model.md) — the privacy and money-safety guarantees
-- [billing-model.md](../docs/billing-model.md) — holds, settlement, no-overdraft
-- [cli/README.md](cli/README.md) — the `nsk` operator CLI
-- [deploy/README.md](deploy/README.md) — the box runtime tree
-- [../SECURITY.md](../SECURITY.md) — reporting security issues
-
-## Run locally
+Copy the environment template and set at least one provider key. A payment rail also needs its wallet RPC
+configuration before the payments service can start.
 
 ```sh
-cp .env.example .env   # set at least one provider key (ANTHROPIC_API_KEY or OPENAI_API_KEY)
-bun run dev:proxy      # the metered /v1 proxy trust domain on :8080; dev:payments runs the payments trust domain on :8081
+cp .env.example .env
+bun run dev:proxy
 ```
+
+In another terminal:
+
+```sh
+bun run dev:payments
+```
+
+The proxy listens on `127.0.0.1:8080` and payments on `127.0.0.1:8081` by default. For client-only work,
+use the mock backend described in [client/README.md](../client/README.md).
+
+## Where are the behavioral documents?
+
+- [Make your first request](../docs/getting-started.md)
+- [Buy credit safely](../docs/payments.md)
+- [Billing model](../docs/billing-model.md)
+- [Money and reliability invariants](../docs/invariants.md)
+- [Deploy and configure](../docs/operators/deploy.md)
+- [Back up and restore](../docs/operators/backup-restore.md)
+- [Diagnose nullsink](../docs/operators/diagnose.md)
+- [`nsk` operator CLI](cli/README.md)

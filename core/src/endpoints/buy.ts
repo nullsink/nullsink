@@ -99,8 +99,8 @@ export function makeBuy(d: PaymentsEndpointDeps) {
       try {
         // Label is a FIXED, non-identifying tag — never token-derived. The rail's wallet persists labels
         // in its own file, OUTSIDE this app's two-DB privacy boundary and not dropped at settle; a
-        // hash-derived label would be a durable address→token link surviving the very deletion (settle.ts)
-        // the design relies on. The real link lives only in pending.db while needed.
+        // hash-derived label would add a second durable address→token link outside the payments database.
+        // Application-side payment links stay confined to pending.db (orders + the credit outbox).
         addr = await r.createAddress("ns");
       } catch (err) {
         log.warn("buy", `createAddress failed: ${log.errMsg(err)}`);

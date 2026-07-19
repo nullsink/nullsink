@@ -1,10 +1,9 @@
 # Tinfoil attestation
 
-The Tinfoil provider forwards to confidential-compute enclaves that host open-weight
-models. The initial integration forwarded over plain HTTPS with no enclave verification;
-this adds a local verifying proxy that attests the enclave before any request leaves the box.
+The Tinfoil path uses a local verifying proxy to attest the upstream enclave before forwarding a model
+request.
 
-## Scope — operator integrity
+## What does attestation prove?
 
 Attestation proves, cryptographically, that we route to a genuine SEV-SNP enclave running
 Tinfoil's published model image. It closes the hole where a spoofed or compromised endpoint
@@ -18,7 +17,7 @@ confidentiality would require a different architecture (the user attesting the e
 themselves, with nullsink a blind tunnel billing off the enclave's signed usage), which gives
 up sound holds and cap enforcement — a different product. See [trust-model.md](trust-model.md).
 
-## How it works — the verifying-proxy sidecar
+## How does the verifying sidecar work?
 
 `tinfoil-proxy` ([tinfoilsh/tinfoil-proxy](https://github.com/tinfoilsh/tinfoil-proxy)) runs as
 a systemd daemon on `127.0.0.1:3301`, alongside the rail daemons. The app points
@@ -40,7 +39,7 @@ in-process library in the security-critical hot path. The Tinfoil API key stays 
 `/etc/nullsink.env` — the app injects it and the proxy forwards it, so the key never enters the
 proxy unit's environment.
 
-## Wiring
+## How is the sidecar deployed?
 
 Deployed entirely under `core/deploy/` (read those files for specifics — they're commented):
 `setup.sh` pins + checksum-verifies the binary and installs/enables the proxy when a Tinfoil key is
@@ -51,7 +50,7 @@ no `IPAddress*` filter (it needs clearnet egress to the enclave + GitHub + Sigst
 restarts the sidecar. Fresh boxes install it through `setup.sh`; existing boxes activate a refreshed pin
 explicitly with `upgrade-component.sh tinfoil`.
 
-## Residual gaps
+## Which gaps remain?
 
 - **No measurement/version pinning.** We pin the proxy *binary* by SHA-256, but the proxy then
   trusts whatever Tinfoil publishes as its *latest* release (gated only by Sigstore transparency)
@@ -66,7 +65,7 @@ explicitly with `upgrade-component.sh tinfoil`.
   does not affect the other providers.
 - **Loopback hop.** app→proxy is plain HTTP on `127.0.0.1` (it carries the bearer key, loopback-only).
 
-## Why we don't pin the measurement
+## Why is the enclave measurement not pinned?
 
 We considered pinning a specific reviewed measurement (and refusing any other), but it's
 impractical against Tinfoil's deployment: the fleet serves only the latest release and the

@@ -5,8 +5,8 @@
 //   POST /order-status  { hash, address? }               -> live payment progress (no balance)
 //   GET  /balance       header x-api-key: <raw token>    -> { balance_usd }
 //
-// The raw token is sent over the wire exactly once, to /balance, on our own origin.
-// /buy and /order-status only ever see the SHA-256 hash. See lib/token.ts for the invariant.
+// This purchase flow sends the raw token only to /balance, for an existing-token baseline and final credit
+// verification. /buy and /order-status only ever see the SHA-256 hash. See lib/token.ts for the invariant.
 import { DEFAULT_MARGIN } from "../../../core/src/pricing-config.ts";
 
 // --- limits -----------------------------------------------------------------

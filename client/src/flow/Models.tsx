@@ -5,8 +5,8 @@ import { EXT } from "../lib/links.ts";
 import models from "../models.json";
 
 // The supported-models page. Models are grouped by the question that actually matters for a privacy proxy:
-// WHO CAN READ YOUR MESSAGES. A sealed TEE (Tinfoil) can't read your text at all — privacy by silicon; a
-// frontier provider (Anthropic, OpenAI) still processes it, under a no-logs policy — privacy by policy. The
+// WHO OPERATES THE MODEL RUNTIME. Tinfoil runs the model inside an attested TEE; a frontier provider
+// (Anthropic, OpenAI) processes it under its own data controls. The
 // ids come from the vendored models.json snapshot (sync-models.ts ← core prices.json, newest-first), so the
 // page can't list a model the proxy would reject. Each id is a copy-on-click chip. The page prerenders and
 // reads with JS off: it ships the preview chips as plain text; the "all N models" reveal needs JS.
@@ -39,11 +39,11 @@ const modelCount = (n: number): string => `${n} model${n === 1 ? "" : "s"}`;
 // The two trust tiers, in display order. Each names the providers it holds (looked up in models.json); a
 // provider missing from the snapshot is simply skipped, so the page degrades to whatever the proxy prices.
 const TIERS = [
-  { key: "sealed", label: "Sealed", tagline: "privacy by silicon", sealed: true, providers: ["tinfoil"] },
+  { key: "sealed", label: "Attested enclave", tagline: "operator-verified runtime", sealed: true, providers: ["tinfoil"] },
   {
     key: "policy",
     label: "Closed source",
-    tagline: "privacy by policy",
+    tagline: "provider-operated runtime",
     sealed: false,
     providers: ["anthropic", "openai"],
   },
@@ -117,7 +117,7 @@ export function Models() {
   return (
     <Layout nav="models">
       <section className="section models">
-        <h1 className="page-h1">Supported models</h1>
+        <h1 className="page-h1">Which models can I use?</h1>
 
         <p className="note">
           <span className="marker" aria-hidden="true">$</span>
@@ -148,7 +148,7 @@ export function Models() {
         })}
 
         <section className="tier roadmap">
-          <h2 className="roadmap-head">On the roadmap</h2>
+          <h2 className="roadmap-head">Which providers are planned?</h2>
           {ROADMAP.map(({ id, name, meta, Logo }) => (
             <div className="rm-row" key={id}>
               <Logo className="rm-logo" />

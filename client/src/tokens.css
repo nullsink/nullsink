@@ -4,7 +4,7 @@
   --ns-void: #0B0B0C;        /* base / background (near-black) */
   --ns-acid: #E5FF00;        /* the one accent. use sparingly. */
   --ns-red: #FF453A;         /* danger hue. ONLY for what can cost money: the no-refunds + lose-the-key warnings and the UNRECOVERABLE tag. */
-  --ns-seal: #9D7BFF;        /* sealed-enclave (TEE) marker — "privacy by silicon". The one accent beyond acid/red, semantic only: a provider that literally can't read your text. */
+  --ns-seal: #9D7BFF;        /* attested-enclave marker: the model runtime is hardware-isolated and verified by the local sidecar. */
   --ns-gh: #58A6FF;          /* GitHub link blue — used ONLY for GitHub issue/PR links (e.g. the roadmap link). Not a palette accent. */
   --ns-bone: #ECECE6;        /* primary text on dark */
   --ns-paper: #F1EFE7;       /* light surface */

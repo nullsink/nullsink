@@ -1,11 +1,9 @@
 # Billing model
 
-This is the money path: how a request is priced, how nullsink reserves credit up front,
-and how it settles — and why a balance can never go negative. It's the deep-dive behind the
-no-overdraft promise in [trust-model.md](trust-model.md); see [architecture.md](architecture.md)
-for where these steps sit in the request lifecycle.
+This is the canonical description of request pricing, holds, and settlement. The review gates are in
+[Money and reliability invariants](invariants.md).
 
-## Money is integer micro-dollars
+## How is money represented?
 
 All balances and prices are integers in micro-dollars (millionths of a dollar; 1,000,000 =
 $1.00) — no floats. Rates are micro-dollars per million tokens, so `cost = tokens × rate /
@@ -18,7 +16,7 @@ for the credit you receive (`endpoints/buy.ts`).
 A token's balance is permanent: credit never expires, and a refund — the unused part of a hold,
 or a request that ends up billing nothing — always returns to the same token.
 
-## The rate card
+## Where do model prices come from?
 
 `cost/pricing.ts` imports `prices.json` once at startup, so billing is deterministic — never a
 live price fetch mid-request. Each model lists input, output, cache-read, and cache-write rates.
@@ -32,7 +30,7 @@ A request's model is matched by exact id or dated suffix, longest match first �
 matches `claude-opus-4-1-20250805` but not `claude-opus-4-12345`. Each provider reports usage in
 its own shape, so nullsink normalizes them into one canonical form (`cost/usage/`) before pricing.
 
-## Caching
+## How does prompt caching change the charge?
 
 Prompt caching is the biggest lever you have on what a request costs. Reusing a large, stable
 prefix — a long system prompt, a document, a tool schema — lets the provider serve those repeated
@@ -53,7 +51,7 @@ input count excludes cached tokens, OpenAI's includes them, and Anthropic report
 slice in a nested field), so nullsink normalizes both before pricing: the cache total is never
 double-counted, and the 1-hour slice is billed at its own 2× tier (`cost/pricing.ts`).
 
-## Outside the flat card
+## Which features are rejected before spend?
 
 The card prices standard input, output, and cache tokens. Anything that bills on a different
 axis is rejected at the gate, before any spend — a request nullsink can't price correctly never
@@ -70,23 +68,18 @@ reaches the provider (`providers/`):
 Request *betas* are stripped before forward; only the flat-rate-safe ones (e.g. Anthropic
 context editing) are re-added.
 
-## Order lifecycle
+## What happens to a payment order?
 
 `POST /buy` quotes a coin amount, locks the USD rate, and mints a single-use watch-only address,
-storing the order in `pending.db`. The poller (`ledger/settle.ts`) then moves that order through
-a small state machine:
+storing the order in `pending.db`. The poller (`ledger/settle.ts`) applies these transitions:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Quoted
-    Quoted --> Paying: a deposit appears (any confirmations)
-    Quoted --> Unfunded: never seen, age past TTL + grace (default ~4.5h)
-    Paying --> Credited: deposit final (rail's confirmations reached)
-    Paying --> Stuck: never confirms, age past backstop (default 24h)
-    Credited --> [*]: ack the credit, scrub hash + amount
-    Unfunded --> [*]: reap the order
-    Stuck --> [*]: stop watching the address
-```
+| State | What establishes it | What happens next |
+| --- | --- | --- |
+| Quoted | `/buy` stores the order | Wait for an inbound transfer |
+| Paying | Any inbound transfer is durably observed | Keep watching until the rail's finality rule is met |
+| Credited | The transfer is final | Close the order, book revenue, enqueue credit, then scrub the delivered payload after acknowledgement |
+| Unfunded | No transfer was ever seen before TTL plus grace, about 4.5 hours by default | Reap the order and stop watching its address |
+| Stuck | A transfer was seen but never became final before the 24-hour default backstop | Reap the order and stop automatic credit handling |
 
 Crediting is exactly-once (idempotent per deposit) and proportional to the coin actually received
 against the locked quote; a confirmed payment closes the order on first sight, so a later top-up
@@ -99,7 +92,7 @@ spared the fast reap and held all the way to the backstop. That extra time is wh
 pays at the very edge of their window still get credited; the quoted `expires_at` is the pay-by
 deadline, and nullsink keeps watching past it to the reap horizons above.
 
-## The up-front hold
+## Why is credit reserved before forwarding?
 
 Before forwarding, nullsink debits a **hold**: an upper bound on what the request could cost. It
 forwards only if the hold clears, then refunds the difference once the real cost is known. The
@@ -118,23 +111,18 @@ estimators (`hold.ts`, selected by `HOLD_ESTIMATOR`):
   timeout, a count below 1, or an OpenAI chat-completions body the endpoint won't count — it falls
   back to the byte bound. The byte cap and settle-time clamp are what keep it sound.
 
-## Settle, and why a balance can't go negative
+## How does every held request finish?
 
-Once the hold is debited, every outcome converges on one settle — charge some amount, refund the
-rest:
+Once the hold is debited, every outcome converges on one settlement:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Gate: POST /v1/...
-    Gate --> [*]: reject - no spend (400 / 401 / 402 / 413)
-    Gate --> Held: checks pass - debit the hold (atomic, journaled)
-    Held --> Forwarding: forward upstream with our key
-    Forwarding --> Settled: usage metered - charge actual
-    Forwarding --> Settled: client disconnect - charge the input floor
-    Forwarding --> Settled: upstream error / cancel / drain - full refund
-    Held --> Settled: crash before settle - refunded at next boot
-    Settled --> [*]: refund the rest (clamped between 0 and the hold)
-```
+| Outcome | Charge | Durable action |
+| --- | --- | --- |
+| Request rejected at the gate | None | No hold is opened |
+| Normal provider response | Metered usage | Delete the hold and refund the unused reservation in one transaction |
+| Client disconnect after forwarding | Metered partial when available; otherwise the estimated input with zero output | Delete the hold and refund the remainder |
+| Upstream error, cancellation, or graceful drain before any usage frame | None | Delete the hold and refund it in full |
+| Graceful drain after usage was metered | Metered partial | Delete the hold and refund the remainder |
+| Proxy crash before settlement | None | The journaled hold survives and is refunded at the next boot |
 
 Three invariants carry the no-overdraft guarantee:
 
@@ -154,7 +142,7 @@ Three invariants carry the no-overdraft guarantee:
    first — so a double-settle (say, a shutdown drain racing the natural finish) is a no-op and a
    refund happens at most once.
 
-## Streaming and disconnects
+## What is charged when a stream disconnects?
 
 For SSE responses the bytes are relayed untouched while a scanner meters usage off the stream.
 Settlement runs once, on whichever happens first: a clean finish (bill exact usage), an upstream
@@ -170,7 +158,7 @@ needs no special case either: its scanner reads the running output count, thinki
 off the stream.) Graceful shutdown drains still-open streams, billing the
 metered partial and refunding the rest.
 
-## Invariants
+## Why can the balance not go negative?
 
 A balance can't go negative — the conditional debit and the bounded refund guarantee that on
 their own, whatever the hold estimate happens to be.

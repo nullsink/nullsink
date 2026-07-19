@@ -1,193 +1,103 @@
-# Architecture
+# System boundaries
 
-nullsink is a metered proxy in front of Anthropic, OpenAI, and Tinfoil. A user prepays with
-Monero or Bitcoin, gets a bearer token, and spends it against a balance. Each request
-is forwarded upstream with *our* provider key and billed for exact usage. We keep no
-identity and no request logs: a token is a bearer secret, and only its SHA-256 hash is
-ever stored.
+## What runs in the shipped topology?
 
-This doc maps how the shipped pieces fit. The current-versus-next diagram and staged
-implementation gates live in [architecture-roadmap.md](architecture-roadmap.md). For the
-privacy and money-safety guarantees see [trust-model.md](trust-model.md); for the billing
-math see [billing-model.md](billing-model.md).
+Two application binaries run behind Caddy. `nullsink-proxy` owns model traffic and the balance
+ledger. `nullsink-payments` owns purchase traffic, payment settlement, and the durable credit
+outbox. The ledger is a module inside the proxy process, not a third service. Enabled providers and
+rails remain deployment configuration.
 
-## The shape: two processes over a pure core
+```mermaid
+flowchart TB
+    User["API user or browser"]
+    Edge["Caddy public edge<br/>TLS · static UI · exact-path routing"]
 
-nullsink runs as two processes on one box, split by responsibility and runtime capability rather
-than by scale. Each is a composition root — the only place that binds a port, starts timers,
-opens a database, and installs signal handlers. Here, **trust domain** means an application-level
-code and data-flow boundary enforced by separate entrypoints, dependency closures, and binaries.
-The services currently share an OS user and environment file, so this is not a separate-UID or
-OS-sandbox boundary.
+    subgraph App["Application box — shared User=nullsink today"]
+        subgraph Proxy["nullsink-proxy :8080"]
+            Meter["metering proxy<br/>providers · holds · streaming"]
+            Ledger["embedded balance ledger"]
+            Balances[("balances.db<br/>tokens · holds · applied_orders")]
+            Meter <--> Ledger
+            Ledger --> Balances
+        end
 
-- **`src/proxy.ts`** (the *proxy trust domain*) serves the metered `/v1` paths and `GET /balance`,
-  and owns `balances.db`. It installs the SIGTERM/SIGINT handler that drains in-flight requests
-  before exit, force-settling live streams by billing the metered partial and refunding the rest,
-  and at boot it refunds holds an ungraceful crash left stranded. Those are the two recovery
-  paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that skipped it.
-- **`src/payments.ts`** (the *payments trust domain*) serves `/buy`, `/order-status`, `/rails`, runs the
-  settlement poller, and owns `pending.db` and the watch-only rail wallets.
+        subgraph Payments["nullsink-payments :8081"]
+            Pay["quotes · orders · rail poller · settlement"]
+            Pending[("pending.db<br/>pending_orders · revenue · credit_outbox")]
+            Pay --> Pending
+        end
 
-A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
-The two meet at exactly one place: a unix socket over which payments delivers credits to the
-proxy, in one direction, with one verb. Neither router imports the other's code.
-`test/trust-domain-isolation.test.ts` derives exhaustive runtime closures from the TypeScript AST;
-`scripts/assert-trust-domains.ts` cross-checks them against Bun's bundled-input metadata and distinctive
-symbols in the compiled executables. The proxy binary is the unit the sealed tier attests, so it
-must stay payments-free structurally, not by hoping a bundler tree-shakes.
+        Wallets["watch-only wallet RPCs<br/>Monero wallet RPC · Bitcoin Core RPC"]
+        Pay --> Wallets
+        Pay -- "credit only · pathname Unix socket" --> Ledger
+    end
 
-Everything both roots wire up — the handlers, settlement, pricing, the providers and endpoints —
-is pure factories and functions: import-safe and testable in isolation. Nothing opens a database
-or binds a port at import time; the roots pass those in.
+    Providers["Anthropic and OpenAI<br/>direct TLS"]
+    Tinfoil["tinfoil-proxy<br/>verifies Tinfoil's enclave only"]
+    Nodes["Monero node via Tor or direct<br/>Bitcoin Core local or over WireGuard"]
 
-## Request path
-
-```
-client
-  │
-  ├─ /v1/... /balance ──► nullsink-proxy    :8080 ──┬─ GET  /healthz
-  │                                                 ├─ GET  /balance     ┐ endpoints/proxy.ts
-  │                                                 ├─ GET  /v1/models   ┘ (not metered)
-  │                                                 └─ POST /v1/...  → exact-path provider(s) → handleMetered
-  │                                                        │
-  │                                                        ▼  balances.db
-  │                                            ┌──────────────────────┐
-  │                                            │  credit socket       │  payments → proxy, one direction
-  │                                            └──────────▲───────────┘
-  │                                                       │
-  └─ /buy /order-status /rails ──► nullsink-payments :8081 ──┬─ GET  /healthz
-                                                             ├─ POST /buy          ┐ endpoints/payments.ts
-                                                             ├─ POST /order-status │ (not metered)
-                                                             └─ GET  /rails        ┘
-                                                                    │
-                                                                    ▼  pending.db + the rails
+    User --> Edge
+    Edge -- "/v1/*" --> Meter
+    Edge -- "/balance" --> Ledger
+    Edge -- "/buy · /order-status · /rails" --> Pay
+    Meter --> Providers
+    Meter --> Tinfoil
+    Wallets --> Nodes
 ```
 
-Caddy fronts both, routing each public path to exactly one of them. Each router fails closed:
-an unmatched path is a 404, so a path routed to the wrong trust domain is a hard error rather than a
-silent cross-trust-domain call.
+The arrows describe application ownership. Caddy still sends `/balance` to port 8080, where the
+proxy router calls the embedded ledger.
 
-The `/v1` branch matches an **exact-path** registry, not a prefix (so
-`/v1/messages/batches` isn't silently admitted); an unmatched path is denied — the router
-fails closed. `GET /v1/models` is the one non-metered `/v1` path: it lists the served
-models (those an active provider owns) with their prices, read straight from the price
-book with no upstream call, so an SDK or agent framework can enumerate models the standard way. A path can map to more than one provider (OpenAI + Tinfoil both speak
-`/v1/chat/completions`); `handleMetered` then resolves the one a request means by its model.
+## Who owns each public route and durable store?
 
-## The two seams
+| Owner | Public responsibility | Durable state | Sensitive configuration |
+| --- | --- | --- | --- |
+| Caddy | TLS, static UI, exact routing | Release files and certificates; no billing database | Public domain and certificate state |
+| `nullsink-proxy` | `/v1/messages`, `/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/balance` | `balances.db`: token hashes, balances, holds, and applied-credit markers | Provider credentials |
+| `nullsink-payments` | `/buy`, `/order-status`, `/rails` | `pending.db`: open orders, revenue, outbox payloads, and delivered tombstones | Rail RPC and rate-source credentials |
+| Watch-only wallet RPCs | Mint addresses and report incoming transfers; no public HTTP route | Watch-only wallet files and generated-address metadata | Node and wallet RPC credentials; no spend key |
 
-**Provider seam** (`providers/types.ts`) — what it takes to forward to an upstream LLM:
-read the token, reject premium features outside the flat per-token card, resolve the
-output cap, check the model is ours, inject our key, normalize usage from both buffered and
-streaming responses. Each provider is registered only when its key is set — Anthropic
-(`/v1/messages`) on `ANTHROPIC_API_KEY`, the OpenAI pair (`/v1/chat/completions`,
-`/v1/responses`) on `OPENAI_API_KEY`, and Tinfoil (open-weight models, OpenAI-compatible) on
-`TINFOIL_API_KEY` — and at least one is required. Tinfoil shares `/v1/chat/completions` with
-OpenAI, so that path holds more than one provider: a request resolves to the provider that owns
-its model, or to an explicit `provider/model` prefix (stripped before forwarding upstream).
+The optional `nsk` CLI is the deliberate exception to single ownership: its issue, top-up, balance,
+and financial commands open one or both live databases directly. Retiring that exception is a target
+architecture step.
 
-**Rail seam** (`rails/types.ts`) — what it takes to accept a coin: mint a per-order address
-and detect confirmed deposits. A rail is **watch-only**: it observes incoming payments
-but never holds spend authority — custody stays cold. Active rails come from `PAY_RAILS`
-(comma list, first is the default). Monero is the reference implementation; Bitcoin is the
-second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin HD index).
+## What crosses the proxy/payments boundary?
 
-## The ledger: two databases, one per process
+One application message crosses from payments to the embedded ledger:
 
-- **`balances.db`** (proxy) — `tokens` (hash → balance, in micro-dollars), `applied_orders` (an
-  idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
-  a row exists while a hold is outstanding, and survivors are refunded at boot).
-- **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
-  `credit_outbox` (credits owed to the balance ledger). The payment ↔ token link lives only in this
-  database: first on the open order, then on its durable, unacknowledged outbox row. A definite ledger
-  acknowledgement atomically clears that row's token hash and credit amount while preserving its
-  idempotency key and timestamps as a tombstone. Coin amounts, locked rates, and transaction-derived
-  keys stay on the payment side of the wall.
-
-Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
-/ `financials`) is the exception and a second writer: it opens both directly on the box, and
-SQLite's WAL mode lets that run alongside the servers' reads.
-
-`ledger/settle.ts` is the coin-agnostic settlement core. It closes each confirmed deposit's order,
-books the sale, and enqueues the credit — all three in one transaction — and reaps orders that
-expire unfunded. It is deliberately **synchronous and await-free** so that settlements across
-different rails can't interleave on the shared database — keep it that way.
-
-## The credit crossing
-
-Settlement and crediting now live in different processes, so the hand-off is a **transactional
-outbox** rather than a function call. `settle()` writes a `credit_outbox` row in the same
-`pending.db` transaction that closes the order: if the row exists, the sale happened. A sender
-drains unacked rows over the unix socket, and only marks a row acked once the proxy confirms the
-credit is durable.
-
-That gives at-least-once delivery. The receiver makes it exactly-once: `creditOnce` commits the
-balance credit and its `applied_orders` marker in a single `balances.db` transaction, keyed by the
-rail's idempotency key, so a redelivery is a no-op that still reports a definite outcome. A crash
-anywhere — before the ack, mid-socket, during the credit — leaves a durable row that is simply
-retried. Delivery stops at the first ambiguous row rather than skipping past it, so credits cannot
-be reordered around a stuck one.
-
-On the first start after upgrading from a pre-scrub release, payments re-arms every acknowledged
-row that still carries a payload. Normal exactly-once delivery then verifies or repairs the ledger
-before the row is scrubbed; an existing `applied_orders` marker makes the replay a no-op. This avoids
-turning a historical, independently restored `balances.db` into silent lost credit.
-
-Scrubbing changes the restore contract. A tombstone no longer has enough data to reconstruct a
-credit, so `pending.db` and `balances.db` are a matched backup pair. `backup.sh` snapshots pending
-first and balances second, ensuring every captured acknowledgement has its later receiver marker;
-`restore.sh` verifies that every scrubbed tombstone has that marker and refuses a balances-only
-restore over a scrub-era pending database.
-
-Authentication is the filesystem. The socket is a pathname socket bound owner-only, and Linux
-checks write permission on the socket file at `connect(2)` — an unspoofable, kernel-enforced gate
-that an abstract-namespace socket (no file, no permissions) would not have.
-
-The one failure this creates is silent: a wedged socket means a customer has **paid** and holds no
-credit, while both processes answer `/healthz` and every unit reads `active`. So payments emits a
-`CREDIT OUTBOX STALLED` error once the oldest undelivered credit ages past
-`OUTBOX_AGE_ALERT_MS`, and `deploy/status-check.sh` pages on it.
-The hourly aggregate metrics also report credits enqueued and acknowledged, deduplicated
-redeliveries, ambiguous drain ticks, peak queued rows, and maximum observed queue age. These are
-counts and high-water marks only; they never include a token hash, address, txid, or amount.
-
-## The two flows
-
-**Buy** — turning a deposit into balance:
-
-```
-POST /buy {hash, credit_usd, rail?}                              [payments]
-  → quote the coin's USD rate, lock it
-  → mint a per-order address
-  → store the pending order (pending.db)
-  → return {pay_to, amount, expires_at, ...}
-  ─ ─ ─ ─ ─ (user pays on-chain) ─ ─ ─ ─ ─
-poller tick → rail.incomingTransfers() → settle()               [payments]
-  → one transaction: drop the order, book the sale, enqueue the credit
-  → drain the outbox over the credit socket
-       → creditOnce(hash) → definite ack                        [proxy]
-       → scrub hash + amount; retain idempotency tombstone      [payments]
+```text
+credit { hash, micros, idempotency_key }
 ```
 
-**Spend** — billing a request:
+It travels over the owner-only pathname socket at `/run/nullsink/credit.sock`. Prompts, model
+responses, provider credentials, payment addresses, coin amounts, and wallet credentials do not
+cross that socket. The payment-derived idempotency key does cross and remains in both marker tables;
+the token hash and credit amount are scrubbed from the payments row after a definite ledger
+acknowledgement.
 
-```
-POST /v1/... with token
-  → gate: token present? model ours? premium rejected? balance covers it?
-  → size a hold (an upper bound on the cost) and debit it atomically
-  → forward upstream with our injected key
-  → meter actual usage (buffered response, or a streaming scanner)
-  → settle the hold: charge actual, refund the rest
-```
+The delivery and retry contract has one canonical home:
+[Money and reliability invariants](invariants.md#how-does-a-confirmed-payment-become-spendable-credit).
 
-The client confirms a buy via `POST /order-status` and checks a balance via `GET /balance`.
+## Which boundaries are enforced today?
 
-## Money and metering
+| Boundary | Current enforcement | What it does not provide |
+| --- | --- | --- |
+| HTTP ownership | Separate routers, ports, binaries, and exact Caddy routes; unmatched paths fail closed | A separate operating-system identity |
+| Code ownership | Dependency-closure tests prevent payment modules entering the proxy binary and provider/metering modules entering payments | Protection from a process already running as the shared `nullsink` user |
+| Database ownership | Each application process opens only its own database | File isolation: both units share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink` |
+| Credit socket | Pathname socket created owner-only; one wire version and one `credit` endpoint | Authentication between separate users; both services currently connect as the same UID |
+| Upstream verification | `tinfoil-proxy` verifies Tinfoil's published enclave | Attestation of nullsink itself, or verification of Anthropic/OpenAI traffic |
 
-`cost/` reads the price book (`prices.json`) at startup and does all billing in integer
-micro-dollars, truncating in the user's favor. `hold.ts` sizes the up-front hold either from
-a deterministic byte bound or from the provider's free token counter (falling back to the
-byte bound on any error). The hold is a sound upper bound and settle clamps the refund to
-`[0, hold]`, so a balance can't go negative — the heart of
-[billing-model.md](billing-model.md); upstream errors are relayed or masked per the rules in
-[trust-model.md](trust-model.md).
+Treat the proxy/payments split as an application trust boundary, not an OS sandbox. The target that
+adds separate service identities and extracts the ledger is tracked in
+[Target architecture](architecture-roadmap.md).
+
+## Where is the behavior documented canonically?
+
+| Question | Canonical document |
+| --- | --- |
+| How are requests priced and held? | [Billing model](billing-model.md) |
+| What happens when credit delivery fails? | [Money and reliability invariants](invariants.md#what-happens-when-credit-delivery-fails) |
+| What must backup and restore preserve? | [Back up and restore billing state](operators/backup-restore.md) |
+| What privacy claims follow from these boundaries? | [Trust model](trust-model.md) |
+| What changes before the proxy becomes stateless? | [Target architecture](architecture-roadmap.md) |

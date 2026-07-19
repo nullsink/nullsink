@@ -1,66 +1,78 @@
-# cli/ — operator + dev command-line tools
+# Use the operator CLI
 
-Two kinds of thing live here: the **operator CLI** (`nsk`, run on the box) and a couple of **dev/buyer
-tools** (run with Bun off the box).
+`nsk` is an optional, standalone binary for deliberate ledger inspection and manual credit operations on
+the application host. CI builds it from the same release tag as both services; production hosts do not need
+Bun or a source checkout to run it.
 
-## `nsk` — the operator CLI (on the box)
+## Which command answers my question?
 
-`cli/index.ts` compiles to a single self-contained binary, **`nsk`**, via `bun run build:nsk`
-(`bun build --compile … cli/index.ts --outfile nsk-linux-x64`). It bundles the bits of `src/` it needs
-(`src/ledger/db`, `src/ledger/orders`, `src/ledger/financials`, `src/rails/catalog`), so it runs with no Bun or source tree present. The release workflow builds it
-from the **same tag** as the server binary, so the two can't drift.
+| Task | Command |
+| --- | --- |
+| Create a funded token and print it once | `nsk issue <dollars>` |
+| Add credit to an existing token hash | `nsk topup <hash> <dollars>` |
+| Read one balance | `nsk balance <hash>` |
+| List token hashes and balances | `nsk balances [--format table\|csv\|json]` |
+| Reconcile sales and liability | `nsk financials [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--format table\|csv\|json]` |
+| List open, unpaid payment orders | `nsk orders [--rail monero\|bitcoin] [--format table\|csv\|json]` |
+| Check the CLI build | `nsk version` |
 
+`topup` and `balance` require the full 64-character lowercase token hash. Table output abbreviates hashes
+and payment addresses for reading; CSV and JSON preserve full values.
+
+## How do I run it without damaging database ownership?
+
+Run `nsk` as the service user:
+
+```sh
+sudo -u nullsink nsk balance <64-character-token-hash>
 ```
-nsk issue <dollars>             mint a token worth $N, print it once
-nsk topup <hash> <dollars>      add $N to an existing token
-nsk balance <hash>              print a token's remaining balance
-nsk balances [--format table|csv|json]   list every token's hash + remaining balance (largest first)
-nsk financials [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--format table|csv|json]
-nsk orders [--rail monero|bitcoin] [--format table|csv|json]   in-flight (unpaid) payment orders, oldest first
+
+The CLI refuses root because opening SQLite as root can leave `-wal` or `-shm` files that the services
+cannot write. `NSK_ALLOW_ROOT=1` is a break-glass override, not a routine shortcut.
+
+`issue`, `topup`, `balance`, `balances`, and `financials` open `balances.db`. `orders` opens its sibling
+`pending.db`. Override the balance path with `DB_PATH`; the orders command derives the pending-store path
+the same way the service does.
+
+## What does `nsk orders` include?
+
+It lists only open `pending_orders`: quotes that are still being watched for payment. It does not show
+settled revenue, acknowledged idempotency tombstones, or credit-outbox rows.
+
+An open row contains its rail, derivation index, address, token hash, quoted credit, expected coin amount,
+and creation time. The row is sensitive because it directly links a payment address to a token hash. That
+link may also remain in an unacknowledged credit-outbox payload after settlement; it is scrubbed only after
+the balance ledger returns a definite acknowledgement. See
+[What remains after credit delivery](../../docs/invariants.md#what-remains-after-definite-credit-delivery).
+
+For current confirmation progress, call `/order-status` with the token hash and exact quote address.
+
+## When is manual credit safe?
+
+`nsk topup` bypasses on-chain settlement. Use it only after proving that no original outbox delivery can
+still arrive; otherwise a later retry can double-credit the buyer. The paid-but-uncredited procedure is in
+[Diagnose nullsink](../../docs/operators/diagnose.md#how-do-i-investigate-a-paid-but-uncredited-report).
+
+`nsk issue` and `nsk topup` are bootstrap or incident tools. The public `/buy` flow is the normal purchase
+path.
+
+## How do I install or update `nsk`?
+
+Install it explicitly on a host:
+
+```sh
+sudo /opt/nullsink/deploy/install-nsk.sh
 ```
 
-`topup` and `balance` take the full 64-char token hash. `nsk balances --format csv|json` prints hashes in
-full (the `table` view abbreviates them for reading); the buyer also gets their hash from the `/buy` flow.
+The installer defaults to the running application tag. Once installed, later `deploy.sh` runs keep the CLI
+at the same release tag as the two services.
 
-`orders` is the **live** view — the in-flight `pending_orders` (quoted by `/buy`, awaiting payment). It reads
-a *different* DB, `pending.db` (the only place the payment↔token-hash link lives), and follows the `balances`
-convention: the `table` view abbreviates the hash **and** the pay-to address for reading, while `csv`/`json`
-carry both in full for export (rows to stdout, summary to stderr). That link is the operator's to see and is
-transient (rows self-clear at the reaper); the isolation guarantee is about a *balances.db* leak, not this
-on-box view. It shows what's durable (rail, index, credit, expected coin, age); for one order's live
-confirmation depth, query `/order-status` by hash.
+## Which utilities are not part of `nsk`?
 
-It opens the on-disk SQLite ledger (`/var/lib/nullsink/balances.db` by default; override with `DB_PATH`;
-`orders` instead reads its sibling `pending.db`),
-so it runs **on the box, as the service user**: `sudo -u nullsink nsk issue 17`. A root open would leave
-root-owned WAL sidecars the service can't write, so `nsk` **refuses to run as root** (override with
-`NSK_ALLOW_ROOT=1` for a deliberate break-glass run).
+| File | Use |
+| --- | --- |
+| `gen-token.ts` | Generate a buyer-side token and SHA-256 hash without opening a database |
+| `sync-prices.ts` | Refresh the committed provider/model price catalog for developer review |
 
-`nsk` is **optional and opt-in**: the box does not ship it by default. Install it on demand with
-`sudo deploy/install-nsk.sh` (defaults to the running server's tag; pass a tag to choose one). Once
-installed, `deploy/deploy.sh` keeps it in lockstep with the server on each redeploy. Manual issuance is a
-break-glass / bootstrap path — `/buy` is the primary purchasing flow.
-
-| subcommand | source |
-|---|---|
-| `issue` | `issue.ts` |
-| `topup` | `topup.ts` |
-| `balance` | `balance.ts` |
-| `balances` | `balances.ts` (the listing comes from `src/ledger/db.ts` `listBalances()`; its total reuses `liabilityTotal()`, so it reconciles with `financials`) |
-| `financials` | `financials.ts` (per-coin summarisation lives in `src/ledger/financials.ts`, unit-tested) |
-| `orders` | `orders.ts` (reads `pending_orders` via `src/ledger/orders.ts` `openOrders()`; renders coin amounts from the pure `src/rails/catalog.ts`; the `age` formatter `cli/age.ts` is unit-tested) |
-
-## Dev / buyer tools (NOT in `nsk`, NOT on the box)
-
-- **`gen-token.ts`** — buyer-side: prints a token + its hash for the hash-only buy flow (the buyer keeps
-  the token, sends only the hash to `/buy`). DB-free by design (imports only `cli/mint`). Run with Bun.
-- **`sync-prices.ts`** — dev-only: fetches models.dev and rewrites `src/cost/prices.json` (the committed
-  price catalog the app reads at startup). Run on a dev checkout, review the diff, commit, then cut a release.
-  Never on the box (it needs the network + writes the source tree).
-
-## Shared libraries (not subcommands)
-
-- **`mint.ts`** — token minting (`0sink_` + base64url(32 random bytes) + a 4-char checksum). Kept
-  byte-identical to the client's `token.ts` so a CLI-minted token validates in the UI.
-- **`money.ts`** — dollar↔micro-dollar conversion + positive-dollar arg validation.
-- **`format.ts`** — `--format table|csv|json` parsing (one allow-list) + the `optVal` flag reader, shared by `balances` and `financials`.
+Run those files with Bun from a development checkout. Do not install or run `sync-prices.ts` on a production
+host.

@@ -4,7 +4,8 @@ import { EXT } from "../lib/links.ts";
 
 // The privacy policy. A formal, prose policy (numbered sections) rendered in the legal-page style. The
 // claims here are NOT marketing — they are what the system actually does, so every statement must stay true
-// to the code: token hashed in-browser (lib/token.ts), only the hash stored (core/src/ledger/db.ts), no IP at the edge
+// to the code: token hashed in-browser for /buy and in-process for authenticated calls, only the hash stored
+// (core/src/ledger/db.ts), no IP at the edge
 // or app (Caddyfile strips X-Forwarded-For, keeps no access log), no request logs (core/src/log.ts privacy
 // invariant), prompts forwarded to the upstream provider (core/src/handler.ts). If the behaviour changes, change
 // this. Static content: prerenders to plain HTML, reads with JS off, no third-party origin (CSP-clean).
@@ -48,7 +49,7 @@ export function Privacy() {
             hash has left.
           </li>
           <li>
-            <span className="lead-term">Temporary payment details.</span> While a purchase is in progress
+            <span className="lead-term">Payment and credit-delivery details.</span> While a purchase is in progress
             we store the payment address, the expected and received coin amounts, the credit to apply,
             and a timestamp, linked to the token hash. When payment settles, that active order is deleted;
             a delivery record retains the token hash and credit amount only until the balance ledger gives a
