@@ -7,7 +7,7 @@
 // It encodes the crediting CONTRACT those tests assert. Idempotent end-to-end: creditOnce dedupes on the
 // same idempotency_key the outbox is keyed by, so a redelivery (a crash between creditOnce committing and
 // ackCredit) credits AT MOST once. Ack on applied OR already_applied — both mean the credit is durably in
-// the ledger — so an already-applied redelivery still clears the outbox row.
+// the ledger — so an already-applied redelivery still clears the row from the work list and scrubs its payload.
 //
 // Synchronous (no await), like settle(): creditOnce is a local SQLite transaction, so a full drain runs to
 // completion within one tick. If creditOnce throws (e.g. disk full), the row stays unacked and is retried —

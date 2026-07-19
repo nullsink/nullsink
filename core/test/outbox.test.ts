@@ -1,7 +1,7 @@
 // credit_outbox + payments trust domain revenue accessors on the orders store. These are the
 // durable-crossing primitives the settle() rewrite builds on: enqueue is at-most-once per idempotency_key
-// (INSERT OR IGNORE, never throws), the sender drains unacked rows oldest-first and acks them, and revenue
-// now books here in pending.db instead of balances.db.
+// (INSERT OR IGNORE, never throws), the sender drains unacked rows oldest-first and acks + scrubs them, and
+// revenue now books here in pending.db instead of balances.db.
 import { test, expect } from "bun:test";
 import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
@@ -27,8 +27,18 @@ test("listUnackedCredits returns unacked rows oldest-first; ackCredit removes a 
   o.ackCredit("tx:a", 500);
   expect(o.unackedCreditCount()).toBe(1);
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]); // acked row drops out
+  expect(
+    o.db.query<{ hash: string; micros: number; acked_at: number }, [string]>(
+      "SELECT hash, micros, acked_at FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("tx:a"),
+  ).toEqual({ hash: "", micros: 0, acked_at: 500 }); // opaque tombstone remains; direct link is gone
   o.ackCredit("tx:a", 999); // re-ack is harmless
   expect(o.listUnackedCredits().map((r) => r.idempotency_key)).toEqual(["tx:b"]);
+  expect(
+    o.db.query<{ hash: string; micros: number; acked_at: number }, [string]>(
+      "SELECT hash, micros, acked_at FROM credit_outbox WHERE idempotency_key = ?",
+    ).get("tx:a"),
+  ).toEqual({ hash: "", micros: 0, acked_at: 999 });
 });
 
 test("acking every row leaves an empty work list (the drained-clean state)", () => {
@@ -74,6 +84,37 @@ test("crash before ack: re-delivery credits exactly once (applied_orders dedupes
   drainCreditOutbox(store, balances, 200);
   expect(balances.getBalance(HASH)).toBe(5_000_000); // credited exactly once, not 10_000_000
   expect(store.listUnackedCredits()).toEqual([]); // outbox drained clean
+  expect(store.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM credit_outbox WHERE hash = '' AND micros = 0").get()?.n).toBe(1);
+});
+
+test("upgrade re-delivers legacy acknowledgements before scrubbing, repairing a mismatched ledger safely", () => {
+  const store = openOrderStore(":memory:");
+  const balances = openDb(":memory:");
+  const missingHash = "b".repeat(64);
+
+  store.enqueueCredit("already", HASH, 5_000_000, 100);
+  store.enqueueCredit("missing", missingHash, 7_000_000, 200);
+  // Simulate rows acknowledged by a release that retained their payloads.
+  store.db.run("UPDATE credit_outbox SET acked_at = 300");
+  // One marker exists; the other is missing as if balances.db had been restored independently.
+  expect(balances.creditOnce(HASH, 5_000_000, "already", 250)).toBe(true);
+
+  expect(store.rearmLegacyAckedCredits()).toBe(2);
+  expect(store.listUnackedCredits()).toEqual([
+    { idempotency_key: "already", hash: HASH, micros: 5_000_000 },
+    { idempotency_key: "missing", hash: missingHash, micros: 7_000_000 },
+  ]);
+
+  drainCreditOutbox(store, balances, 400);
+  expect(balances.getBalance(HASH)).toBe(5_000_000); // verified but not duplicated
+  expect(balances.getBalance(missingHash)).toBe(7_000_000); // missing half repaired before scrub
+  expect(store.listUnackedCredits()).toEqual([]);
+  expect(
+    store.db.query<{ n: number }, []>(
+      "SELECT COUNT(*) AS n FROM credit_outbox WHERE acked_at = 400 AND hash = '' AND micros = 0",
+    ).get()?.n,
+  ).toBe(2);
+  expect(store.rearmLegacyAckedCredits()).toBe(0); // tombstones are never re-armed
 });
 
 // Double-booking defense at the row level: commitSettlement books revenue ONLY when the outbox enqueue is fresh. If the key

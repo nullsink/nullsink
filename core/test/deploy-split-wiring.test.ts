@@ -15,6 +15,8 @@ const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
 const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
+const backup = readFileSync(deploy("backup.sh"), "utf8");
+const restore = readFileSync(deploy("restore.sh"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
 
@@ -90,4 +92,19 @@ test("balance responses are never stored by an intermediary", () => {
   // handler chain, so its Caddy-generated proxy outage also sets no-store explicitly.
   expect(caddy).toMatch(/handle \/balance \{[\s\S]*?header >Cache-Control "no-store"[\s\S]*?reverse_proxy 127\.0\.0\.1:8080/);
   expect(caddy).toMatch(/handle @balance_outage \{\n\t\t\theader Cache-Control "no-store"/);
+});
+
+test("backup and restore preserve the scrubbed-outbox money invariant", () => {
+  // The outbox snapshot must precede the ledger snapshot: any tombstone/ack captured in pending.db is then
+  // guaranteed to have its applied_orders marker captured in the later balances.db snapshot.
+  expect(backup.indexOf(".backup '$work/pending.db'")).toBeGreaterThan(-1);
+  expect(backup.indexOf(".backup '$work/balances.db'")).toBeGreaterThan(backup.indexOf(".backup '$work/pending.db'"));
+
+  // A tombstone has no payload to replay. Restore must verify its receiver marker, never re-arm it, and reject
+  // a balances-only restore over a deployment that already has pending.db.
+  expect(restore).toContain("scrubbed credit tombstone(s) have no matching ledger marker");
+  expect(restore).toContain("WHERE acked_at IS NOT NULL\n          AND hash <> ''");
+  expect(restore).toContain("UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';");
+  expect(restore).toContain("unsafe partial restore refused");
+  expect(restore).not.toMatch(/SET acked_at = NULL WHERE hash = ''/);
 });
