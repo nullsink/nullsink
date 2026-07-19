@@ -70,23 +70,18 @@ reaches the provider (`providers/`):
 Request *betas* are stripped before forward; only the flat-rate-safe ones (e.g. Anthropic
 context editing) are re-added.
 
-## Order lifecycle
+## What happens to a payment order?
 
 `POST /buy` quotes a coin amount, locks the USD rate, and mints a single-use watch-only address,
-storing the order in `pending.db`. The poller (`ledger/settle.ts`) then moves that order through
-a small state machine:
+storing the order in `pending.db`. The poller (`ledger/settle.ts`) applies these transitions:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Quoted
-    Quoted --> Paying: a deposit appears (any confirmations)
-    Quoted --> Unfunded: never seen, age past TTL + grace (default ~4.5h)
-    Paying --> Credited: deposit final (rail's confirmations reached)
-    Paying --> Stuck: never confirms, age past backstop (default 24h)
-    Credited --> [*]: ack the credit, scrub hash + amount
-    Unfunded --> [*]: reap the order
-    Stuck --> [*]: stop watching the address
-```
+| State | What establishes it | What happens next |
+| --- | --- | --- |
+| Quoted | `/buy` stores the order | Wait for an inbound transfer |
+| Paying | Any inbound transfer is durably observed | Keep watching until the rail's finality rule is met |
+| Credited | The transfer is final | Close the order, book revenue, enqueue credit, then scrub the delivered payload after acknowledgement |
+| Unfunded | No transfer was ever seen before TTL plus grace, about 4.5 hours by default | Reap the order and stop watching its address |
+| Stuck | A transfer was seen but never became final before the 24-hour default backstop | Reap the order and stop automatic credit handling |
 
 Crediting is exactly-once (idempotent per deposit) and proportional to the coin actually received
 against the locked quote; a confirmed payment closes the order on first sight, so a later top-up
@@ -118,23 +113,18 @@ estimators (`hold.ts`, selected by `HOLD_ESTIMATOR`):
   timeout, a count below 1, or an OpenAI chat-completions body the endpoint won't count — it falls
   back to the byte bound. The byte cap and settle-time clamp are what keep it sound.
 
-## Settle, and why a balance can't go negative
+## How does every held request finish?
 
-Once the hold is debited, every outcome converges on one settle — charge some amount, refund the
-rest:
+Once the hold is debited, every outcome converges on one settlement:
 
-```mermaid
-stateDiagram-v2
-    [*] --> Gate: POST /v1/...
-    Gate --> [*]: reject - no spend (400 / 401 / 402 / 413)
-    Gate --> Held: checks pass - debit the hold (atomic, journaled)
-    Held --> Forwarding: forward upstream with our key
-    Forwarding --> Settled: usage metered - charge actual
-    Forwarding --> Settled: client disconnect - charge the input floor
-    Forwarding --> Settled: upstream error / cancel / drain - full refund
-    Held --> Settled: crash before settle - refunded at next boot
-    Settled --> [*]: refund the rest (clamped between 0 and the hold)
-```
+| Outcome | Charge | Durable action |
+| --- | --- | --- |
+| Request rejected at the gate | None | No hold is opened |
+| Normal provider response | Metered usage | Delete the hold and refund the unused reservation in one transaction |
+| Client disconnect after forwarding | Metered partial when available; otherwise the estimated input with zero output | Delete the hold and refund the remainder |
+| Upstream error, cancellation, or graceful drain before any usage frame | None | Delete the hold and refund it in full |
+| Graceful drain after usage was metered | Metered partial | Delete the hold and refund the remainder |
+| Proxy crash before settlement | None | The journaled hold survives and is refunded at the next boot |
 
 Three invariants carry the no-overdraft guarantee:
 

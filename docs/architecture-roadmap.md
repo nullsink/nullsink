@@ -1,119 +1,85 @@
-# Architecture roadmap
+# Target architecture
 
-Status source for [issue #58](https://github.com/nullsink/nullsink/issues/58). The
-diagram source is [`architecture-roadmap.html`](architecture-roadmap.html); the rendered
-artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
+[Issue #58](https://github.com/nullsink/nullsink/issues/58) tracks the app-box decomposition. This
+document is the code-verified status companion: the issue states the goal, while this page separates
+released behavior, changes on `main`, and work that has not started.
 
-![nullsink architecture: shipped today and the next app-box boundary](architecture-roadmap.png)
+## What is the target app box?
 
-## Status — 2026-07-18, v1.9.1
+The target keeps three OS-isolated services on one application box:
 
-| Milestone | State | Evidence / remaining boundary |
+| Service | Owns | May call |
 | --- | --- | --- |
-| Dedicated Bitcoin node box | **Shipped** in v1.4.x | `deploy/node-box-runbook.md`; RPC crosses WireGuard. |
-| Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
-| Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
-| Delivered-link scrubbing | **Implemented for next release** | Definite ack atomically clears hash/amount; legacy acknowledgements replay once; restores verify tombstones against the ledger. |
-| Financial and backup egress | **In design** | Define the permitted off-box view before shipping operator tooling. |
-| Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
-| Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
-| Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
-| nullsink proxy TEE | **Later feasibility work** | Distinct from the live Tinfoil verifier, which attests only Tinfoil's remote enclave. |
-| Public onion / geographic relay | **Later network work** | Not part of the five app-box steps below. |
+| Stateless metering proxy | Public `/v1/*` and `/balance` handling, provider credentials, and in-flight requests only | Ledger operations for balance, hold, and settlement; configured upstream providers |
+| Ledger service | `balances.db`, token balances, holds, crash recovery, and `applied_orders` | No payment rail or model provider |
+| Payments service | Purchase routes, `pending.db`, revenue, the durable credit outbox, and watch-only rail access | Ledger's credit-only interface; rate and wallet/node RPCs |
 
-## Current boundary
+Caddy remains the public edge. `pending.db` remains payment-side; the phrase “ledger service owns the
+DBs” in issue #58 should be read as ownership of the balance ledger, not both application databases.
+The payments-to-ledger message remains `credit`; proxy-to-ledger balance/hold/settle operations use a
+separate internal interface.
 
-Production is two application processes on one box:
+## What has shipped, and what has not?
 
-- `nullsink-proxy` serves `/v1/*` and `/balance`, holds provider credentials, and owns
-  `balances.db` (`tokens`, `holds`, `applied_orders`).
-- `nullsink-payments` serves `/buy`, `/order-status`, and `/rails`, runs the rail poller,
-  and owns `pending.db` (`pending_orders`, `revenue`, `credit_outbox`).
-- Payments delivers one command—`credit { hash, micros, idempotency_key }`—to the proxy.
-  The durable outbox makes delivery retryable; the receiving ledger makes replay harmless.
-- Runtime dependency-closure tests keep prompt code out of the payments binary and payment
-  code out of the proxy binary.
+Status checked against the repository on 2026-07-19; the latest release is v1.9.1.
 
-This is an application-level trust boundary, not yet an OS security boundary. Both units run
-under the same Linux identity and read the same environment file. `nsk` is the explicit
-cross-boundary exception: operator commands may open both databases directly.
+| Boundary | Status | Evidence or remaining work |
+| --- | --- | --- |
+| Dedicated Bitcoin node-box option | Released in v1.4.x | Watch-only Bitcoin RPC can cross WireGuard; same-host Bitcoin Core remains supported. |
+| Proxy/payments process split | Released in v1.8.0 | Separate binaries, ports, routers, databases, and runtime dependency closures. |
+| Durable credit crossing | Released in v1.8.0 | Payments outbox retries over a pathname Unix socket; `applied_orders` makes redelivery harmless. |
+| Delivered-link scrubbing | On `main` after v1.9.1 via #124 | Definite acknowledgement clears the outbox hash and amount; legacy acknowledged payloads replay once. |
+| Matched backup recovery | On `main` after v1.9.1 via #124 | Restore verifies scrubbed tombstones against `applied_orders` and rejects unsafe partial recovery. |
+| Encrypted backup egress | Present in the repository | Coordinated SQLite snapshots can be age-encrypted and sent with an operator-supplied push command; financial reporting egress is not yet defined. |
+| Retire direct database access by `nsk` | Not started | Issue/top-up need an administrative credit path; balance and financial reads need narrow interfaces or offline reporting. |
+| Separate service users, environments, and state roots | Not started | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
+| Standalone ledger service | Not started | The proxy still opens `balances.db` and performs holds, credit application, and boot recovery. |
+| Stateless metering proxy | Blocked on ledger extraction | The proxy cannot become stateless until every balance and hold operation crosses the ledger interface. |
 
-Provider routing is deliberately asymmetric. Anthropic and OpenAI are reached directly over
-TLS. Only Tinfoil traffic traverses the local `tinfoil-proxy`, which attests Tinfoil's remote
-enclave. That upstream verification is not attestation of nullsink itself.
+The Monero and Bitcoin implementations already share the rail interface and public discovery. Whether
+both are enabled in a particular deployment is operator configuration, not a repository guarantee.
 
-## The five app-box steps
+## In what order can the remaining boundary ship?
 
-Each step should ship independently and retain the money-safety invariants.
+1. **Define financial egress.** Specify the permitted aggregate fields, access path, retention, and
+   recovery evidence without rebuilding a delivered payment-to-token history.
+2. **Retire live cross-database `nsk` access.** Send issue/top-up through an administrative outbox and
+   replace direct reads with narrow internal reads or offline reports.
+3. **Separate OS principals.** Give proxy and payments different users, environment files, and state
+   roots; grant the credit socket explicitly through a group or ACL.
+4. **Extract the ledger.** Move `balances.db`, holds, `applied_orders`, and boot recovery behind two
+   internal interfaces: proxy balance/hold/settle and payments credit-only.
+5. **Make the proxy stateless.** Prove that a ledger outage rejects inference before upstream forwarding
+   and that shutdown/crash hold recovery still preserves the no-overdraft invariant.
 
-### 1. Fix the privacy lifecycle — implemented for next release
+Each step must preserve the [money and reliability invariants](invariants.md). No broker or distributed
+transaction is required: the payments outbox remains the durable queue.
 
-Retain the payment→token link only while an order is open or a credit is still owed. After a
-definite ledger acknowledgement, scrub the delivered outbox payload while retaining the
-idempotency tombstone required to reject duplicate delivery. Document the exact live-data and
-backup-retention guarantees before shipping forensic tooling.
+## Is the diagram attached to issue #58 still accurate?
 
-Gate: an ambiguous delivery still replays safely; a definite acknowledgement leaves no direct
-delivered payment→token link in current database rows. Covered by outbox, socket-drain, migration,
-and backup/restore contract tests.
+No. Its central three-service direction remains useful, but these details are stale or too broad:
 
-### 2. Define financial and backup egress
+| Issue #58 diagram claim | Verified position now |
+| --- | --- |
+| A generic enclave verifier sits between the proxy and all upstream LLM APIs | Anthropic and OpenAI use direct TLS. Only Tinfoil traffic passes through `tinfoil-proxy`, which verifies Tinfoil's remote enclave. |
+| The metering proxy is labelled “stateless → TEE” | Statelessness is blocked on ledger extraction. A nullsink proxy TEE is separate feasibility work, not a current guarantee or one of the remaining app-box steps. |
+| The credit crossing is labelled “queued · exactly-once” | Socket delivery is at least once and can be ambiguous. The balance effect is exactly once because the receiving ledger stores an idempotency marker. |
+| The proxy/payments process split is drawn as a planned upgrade | The split is released in v1.8.0; only extraction of the embedded ledger remains planned. |
+| Delivered-link scrubbing and matched restore behavior are absent | Both are on `main` after v1.9.1 via #124. |
+| A self-hosted monerod and onion mirror appear in the same target | Neither is required for the three-service app-box decomposition. The current Monero path supports a remote node over Tor; public onion/relay work is a separate network decision. |
+| “Ledger service owns the DBs” | The target ledger owns `balances.db`. Payments continues to own `pending.db`, revenue, orders, and the credit outbox. |
+| Backups and operator tooling are omitted | They are boundary-relevant: backups already form an optional encrypted egress path, while `nsk` remains the explicit live cross-database exception. |
 
-Treat backups as a control-plane path, not an application API: create a coordinated SQLite
-snapshot, encrypt it to an offline `age` recipient, and optionally push the ciphertext off-box.
-Off-box reporting should expose revenue, liability, snapshot integrity, and open/undelivered
-credit diagnostics without rebuilding a permanent delivered-payment→token history.
+The compact ownership map in [System boundaries](architecture.md#what-runs-in-the-shipped-topology) is the
+canonical current-state diagram. This page is canonical for target status; the historical issue image
+should not be used as a deployment or security reference.
 
-Gate: matched-pair restore succeeds; plaintext is private and temporary; reports contain only
-the fields allowed by the privacy lifecycle.
+## Which choices still need an owner decision?
 
-### 3. Retire direct database access by `nsk`
-
-Move issue/top-up onto an operator-authenticated administrative outbox that uses the same one-way
-credit crossing. Replace balance and financial direct reads with narrow read interfaces or
-offline snapshot reporting. The raw token is minted locally; only its hash crosses the admin path.
-
-Gate: no operator command needs write access to both live databases.
-
-### 4. Enforce OS privilege separation
-
-Run proxy and payments under different Linux users, with separate environment files and state
-directories. Grant socket access explicitly with a dedicated group or ACL. A compromised payments
-process must not be able to read provider keys or `balances.db`; a compromised proxy must not be
-able to read wallet credentials or `pending.db`.
-
-Gate: deployment tests prove the file and socket permission matrix, not only the TypeScript import
-matrix.
-
-### 5. Extract the ledger service
-
-Create a third process that exclusively owns `balances.db`, hold recovery, and `applied_orders`.
-Give the proxy a narrow balance/hold/settle socket and give payments a distinct credit-only socket.
-The proxy then becomes stateless: provider keys and in-flight requests are its only sensitive
-runtime material.
-
-Gate: no-overdraft and hold-recovery tests run through the socket-backed store; a ledger outage
-fails inference before upstream forwarding; payments keeps paid credits queued until recovery.
-
-After Step 5 the app box has the target three units: stateless metering proxy, ledger service, and
-payments service. Putting the proxy in a TEE and changing the public network edge remain later,
-separate decisions.
-
-## Equal primary rails
-
-Monero and Bitcoin already share the rail interface, `/rails` discovery, checkout picker, and
-coin-agnostic settlement core. The remaining code slice is small: optional per-rail buy limits,
-limits returned by `/rails`, selected-rail client validation, and symmetric tests. Completion also
-needs an operational gate—both rails enabled in production, health checks passing, and a small
-end-to-end deposit on each—so enabling both should not become a repository default for boxes that
-have no Bitcoin node configured.
-
-## Invariants that survive every step
-
-- No broker and no distributed transaction: the payments outbox is the queue.
-- Revenue stays payment-side; balances and `applied_orders` stay ledger-side.
-- Payment→prompt traffic has one semantic verb: `credit`.
-- The proxy never imports payment endpoints, orders, rails, or revenue code.
-- The payments service never imports providers, metering, holds, or the balance store.
-- Watch-only wallets remain incapable of spending.
-- Tinfoil's external enclave verification is never presented as nullsink proxy attestation.
+- What financial fields may leave the app box, through which authenticated path, and for how long.
+- Whether read-only `nsk` commands become internal service calls or operate only on verified snapshots.
+- Whether a nullsink proxy TEE is still a goal after ledger extraction.
+- Whether to operate a self-hosted Monero node box or a public onion/geographic relay; neither is needed
+  to finish issue #58's app-box boundary.
+- What operational evidence is required before declaring Bitcoin and Monero equal primary rails in
+  production.

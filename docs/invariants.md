@@ -17,22 +17,49 @@ No. The proxy must preserve all three parts of the hold protocol:
 The implementation lives in
 [`ledger/db.ts`](../core/src/ledger/db.ts) and [`handler.ts`](../core/src/handler.ts).
 
-## Can a confirmed payment disappear between services?
+## How does a confirmed payment become spendable credit?
 
-The credit crossing is designed so a delivered credit may be retried, but not lost or applied twice:
+```mermaid
+sequenceDiagram
+    participant Pay as nullsink-payments
+    participant Pending as pending.db
+    participant Ledger as proxy ledger
+    participant Balances as balances.db
 
-- Payments closes the order, books revenue, and creates a `credit_outbox` row in one `pending.db`
-  transaction.
-- The sender retries the oldest unacknowledged row and acknowledges it only after the proxy reports a
-  durable result. A missing or ambiguous response is not an acknowledgement.
-- The proxy commits the balance increase and its `applied_orders` marker in one `balances.db`
-  transaction. Repeating the same idempotency key is a successful no-op.
-- The sender stops at an ambiguous row. Later credits wait rather than pass an uncertain earlier credit.
+    Pay->>Pending: one transaction: close order, book revenue, enqueue credit
+    Note right of Pending: durable unacknowledged payload
+    Pay->>Ledger: credit(hash, micros, idempotency_key) over owner-only socket
+    Ledger->>Balances: one transaction: add balance and insert applied_orders marker
+    Balances-->>Ledger: applied or already_applied
+    Ledger-->>Pay: definite acknowledgement
+    Pay->>Pending: one transaction: set acked_at, clear hash, set micros=0
+    Note right of Pending: durable idempotency tombstone
+```
 
-This gives at-least-once delivery across the socket and one balance effect at the receiver. See
-[`ledger/orders.ts`](../core/src/ledger/orders.ts),
+The socket delivery is at least once. The ledger effect is exactly once because the balance increase
+and `applied_orders` marker commit together. Payments acknowledges and scrubs an outbox row only after
+the ledger returns `applied` or `already_applied`.
+
+See [`ledger/orders.ts`](../core/src/ledger/orders.ts),
 [`credit-sender.ts`](../core/src/credit-sender.ts), and
 [`credit-server.ts`](../core/src/credit-server.ts).
+
+## What happens when credit delivery fails?
+
+| Failure point | What is retried? | Ambiguous to the sender? | What remains durable? |
+| --- | --- | --- | --- |
+| Settlement transaction fails | The rail observes the still-open order again on a later poll | No credit attempt occurred | The open order remains; revenue and outbox are both absent because the transaction rolled back |
+| Payments stops after settlement commits but before sending | The oldest outbox row is sent on startup or the next poll | No send attempt occurred | Closed order, revenue row, and unacknowledged payload in `pending.db` |
+| Socket is unavailable, resets, times out, or returns an unrecognised response | The same oldest row is sent again on the next poll | Yes—the ledger may have committed without returning a usable response | Unacknowledged payload; possibly also the balance and `applied_orders` marker |
+| Proxy rejects a wire-version or payload mismatch | The same oldest row is attempted again; later rows wait behind it | Treated as ambiguous because no accepted acknowledgement was returned | The complete outbox row and every later queued row; the stall-age alert keeps increasing |
+| Ledger commits, then the response or payments process is lost before outbox acknowledgement | The unacknowledged row is sent again | Yes | Both halves: complete outbox row plus credited balance and `applied_orders` marker |
+| Redelivery reaches an existing `applied_orders` marker | Payments receives `already_applied`, then acknowledges and scrubs the row | No | Balance is unchanged; marker remains; outbox becomes a scrubbed tombstone |
+| Payments receives `applied` | Nothing further is delivered for that row after acknowledgement succeeds | No | Credited balance and marker in `balances.db`; scrubbed tombstone in `pending.db` |
+
+The sender drains oldest first and stops at the first non-definite result. This deliberately trades
+availability for money safety: a poison or incompatible head row blocks later credits instead of letting
+them pass an unresolved delivery. `/healthz` does not detect that condition; outbox age and the
+`CREDIT OUTBOX STALLED` log marker do.
 
 ## What must a backup preserve?
 
