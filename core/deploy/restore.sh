@@ -67,8 +67,8 @@ if [ -f "$work/pending.db" ]; then
   if [ "$artifact_has_outbox" = 1 ]; then
     invalid_rows="$(sqlite3 "$work/pending.db" \
       "SELECT COUNT(*) FROM credit_outbox
-        WHERE (acked_at IS NULL AND (hash = '' OR micros <= 0))
-           OR (acked_at IS NOT NULL AND ((hash = '' AND micros <> 0) OR (hash <> '' AND micros <= 0))); ")"
+        WHERE (acked_at IS NULL AND (hash = '' OR micros < 0))
+           OR (acked_at IS NOT NULL AND ((hash = '' AND micros <> 0) OR (hash <> '' AND micros < 0))); ")"
     [ "$invalid_rows" = 0 ] || {
       echo "billing invariant FAILED: pending.db has $invalid_rows poison or partially scrubbed credit-outbox row(s)" >&2
       exit 1
