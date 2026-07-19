@@ -1,53 +1,56 @@
-# nullsink client
+# Client workspace
 
-The purchase UI: a React 19 + Vite app where a user mints a prepaid bearer key in the
-browser, funds it with Monero or Bitcoin, and copies integration snippets. Every route is
-prerendered to static HTML (works with JS off) and fully self-contained — no CDN — to
-satisfy a strict `default-src 'self'` CSP. It talks to `core/` over plain HTTP/JSON.
+`client/` is the React purchase site. It mints tokens in the browser and prerenders every public route to
+self-contained static HTML. The production build loads no CDN resources and works without JavaScript except
+for interactive actions such as minting, copying, and polling.
 
-See the [root README](../README.md) for monorepo setup and dev commands.
+See the [root README](../README.md) for repository-wide setup.
 
-## Run
+## Which command should I run?
 
-Dependencies install once at the repo root (`bun install`); run these from `client/`:
+Run these from `client/` after one repository-root `bun install`.
 
-| Script | What it does |
+| Command | Result |
 | --- | --- |
-| `bun run dev` | dev server; proxies `/buy` + `/order-status` + `/rails` to a local `dev:payments` (`:8081`) and `/balance` + `/v1` to a local `dev:proxy` (`:8080`) |
-| `bun run dev:mock` | dev server with no backend — serves an in-process mock (`dev-mock.ts`) |
-| `bun run build` | typecheck, bundle, then prerender to `dist/` |
-| `bun run preview` | serve the built `dist/` |
-| `bun run sync:models` | regenerate `src/models.json` from core's prices (manual) |
-| `bun run typecheck` | `tsc` for app + tests |
-| `bun test` | run the test suite (happy-dom + testing-library) |
+| `bun run dev` | Start Vite and proxy API routes to local core services |
+| `bun run dev:mock` | Start the UI with the in-process mock backend |
+| `bun run build` | Typecheck, bundle, and prerender `dist/` |
+| `bun run preview` | Serve the built static site |
+| `bun run sync:models` | Regenerate `src/models.json` from the core price catalog |
+| `bun run typecheck` | Check the app and tests with TypeScript |
+| `bun test` | Run the happy-dom/testing-library suite |
 
-## Source map
+The normal development proxy expects payments on `127.0.0.1:8081` and the metered proxy on
+`127.0.0.1:8080`.
 
-```
-index.html       the shell; holds the <!-- route:head:start/end --> markers
-vite.config.ts   dev proxy, mock gate, CSP-driven build options
-prerender.tsx    build-time SSG — one static HTML file per route
-sync-models.ts   regenerates src/models.json from core
-dev-mock.ts      dev-only mock backend (MOCK=1)
+## Where does each client concern live?
+
+```text
+index.html          document shell and prerender head markers
+vite.config.ts      development proxies, mock selection, and build policy
+prerender.tsx       one static HTML output per route
+sync-models.ts      core price catalog -> src/models.json
+dev-mock.ts         development-only backend
 
 src/
-  main.tsx        browser entry — hydrate or render
-  routes.tsx      the route table (drives both prerender and main)
-  App.tsx         landing + buy page
-  Layout.tsx      shared shell (header, footer)
-  ui.tsx          shared presentational bits
-  flow/           the page views + quote/pay flow (KeyFlow, QuotePay, ...)
-  lib/            api.ts, token.ts (in-browser minting), links.ts, qr.ts
-  models.json     committed snapshot rendered by /models
+  routes.tsx        route metadata shared by prerender and browser entry
+  App.tsx           landing and purchase page
+  Layout.tsx        shared header and footer
+  flow/             public pages and purchase flow
+  lib/              API client, token minting, links, and QR generation
+  models.json       committed model snapshot rendered by /models
 ```
 
-## Things to know
+## What must stay synchronized with core?
 
-- **No router.** `routes.tsx` drives both `prerender.tsx` (build) and `main.tsx` (hydrate); navigation is plain `<a href>` full-page loads. The `<!-- route:head:start/end -->` markers in `index.html` are load-bearing — prerender fails without them.
-- **`lib/api.ts` and `lib/token.ts` import from `../../../core/src/`** (`pricing-config.ts`, `token-format.ts`) so the UI and server agree on markup and token format. Those core files are bundled into the page, so they must stay pure and browser-safe.
-- **`src/models.json` is a committed snapshot;** regenerate and commit it when core's prices change.
-- **The production origin is hardcoded** in `src/routes.tsx` — change it if you self-host.
+- `src/lib/api.ts` and `src/lib/token.ts` import pure modules from `core/src/` so purchase markup and token
+  validation cannot drift.
+- Regenerate and commit `src/models.json` whenever the core price catalog changes.
+- `routes.tsx` is the source for both prerendering and browser hydration; there is no client router.
+- Keep the `<!-- route:head:start/end -->` markers in `index.html`; the prerender build requires them.
+- The production origin is explicit in `src/routes.tsx`; self-hosted forks must change it.
 
-## License
+## What license applies?
 
-AGPL-3.0-or-later — see [LICENSE](./LICENSE) (and the root README for the §13 network clause).
+AGPL-3.0-or-later; see the repository [LICENSE](../LICENSE) and the network-use note in the
+[root README](../README.md#what-license-and-contribution-rules-apply).

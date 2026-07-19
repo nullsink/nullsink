@@ -1,11 +1,9 @@
 # Billing model
 
-This is the money path: how a request is priced, how nullsink reserves credit up front,
-and how it settles — and why a balance can never go negative. It's the deep-dive behind the
-no-overdraft promise in [trust-model.md](trust-model.md); see [architecture.md](architecture.md)
-for where these steps sit in the request lifecycle.
+This is the canonical description of request pricing, holds, and settlement. The review gates are in
+[Money and reliability invariants](invariants.md).
 
-## Money is integer micro-dollars
+## How is money represented?
 
 All balances and prices are integers in micro-dollars (millionths of a dollar; 1,000,000 =
 $1.00) — no floats. Rates are micro-dollars per million tokens, so `cost = tokens × rate /
@@ -18,7 +16,7 @@ for the credit you receive (`endpoints/buy.ts`).
 A token's balance is permanent: credit never expires, and a refund — the unused part of a hold,
 or a request that ends up billing nothing — always returns to the same token.
 
-## The rate card
+## Where do model prices come from?
 
 `cost/pricing.ts` imports `prices.json` once at startup, so billing is deterministic — never a
 live price fetch mid-request. Each model lists input, output, cache-read, and cache-write rates.
@@ -32,7 +30,7 @@ A request's model is matched by exact id or dated suffix, longest match first �
 matches `claude-opus-4-1-20250805` but not `claude-opus-4-12345`. Each provider reports usage in
 its own shape, so nullsink normalizes them into one canonical form (`cost/usage/`) before pricing.
 
-## Caching
+## How does prompt caching change the charge?
 
 Prompt caching is the biggest lever you have on what a request costs. Reusing a large, stable
 prefix — a long system prompt, a document, a tool schema — lets the provider serve those repeated
@@ -53,7 +51,7 @@ input count excludes cached tokens, OpenAI's includes them, and Anthropic report
 slice in a nested field), so nullsink normalizes both before pricing: the cache total is never
 double-counted, and the 1-hour slice is billed at its own 2× tier (`cost/pricing.ts`).
 
-## Outside the flat card
+## Which features are rejected before spend?
 
 The card prices standard input, output, and cache tokens. Anything that bills on a different
 axis is rejected at the gate, before any spend — a request nullsink can't price correctly never
@@ -94,7 +92,7 @@ spared the fast reap and held all the way to the backstop. That extra time is wh
 pays at the very edge of their window still get credited; the quoted `expires_at` is the pay-by
 deadline, and nullsink keeps watching past it to the reap horizons above.
 
-## The up-front hold
+## Why is credit reserved before forwarding?
 
 Before forwarding, nullsink debits a **hold**: an upper bound on what the request could cost. It
 forwards only if the hold clears, then refunds the difference once the real cost is known. The
@@ -144,7 +142,7 @@ Three invariants carry the no-overdraft guarantee:
    first — so a double-settle (say, a shutdown drain racing the natural finish) is a no-op and a
    refund happens at most once.
 
-## Streaming and disconnects
+## What is charged when a stream disconnects?
 
 For SSE responses the bytes are relayed untouched while a scanner meters usage off the stream.
 Settlement runs once, on whichever happens first: a clean finish (bill exact usage), an upstream
@@ -160,7 +158,7 @@ needs no special case either: its scanner reads the running output count, thinki
 off the stream.) Graceful shutdown drains still-open streams, billing the
 metered partial and refunding the rest.
 
-## Invariants
+## Why can the balance not go negative?
 
 A balance can't go negative — the conditional debit and the bounded refund guarantee that on
 their own, whatever the hold estimate happens to be.

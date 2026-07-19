@@ -1,8 +1,9 @@
 # Open WebUI
 
-Open WebUI reaches nullsink over two routes: an OpenAI **connection** for the gpt and open-weight models, and a bundled **pipe function** for Claude. One `0sink_` key serves both.
+Open WebUI needs an OpenAI **connection** for GPT and open-weight models, plus a bundled **pipe
+function** for Claude. One `0sink_` token serves both.
 
-## gpt + open-weight models: the connection
+## How do I add GPT and open-weight models?
 
 ⚙️ **Admin Settings → Connections → OpenAI → ＋ Add Connection** — URL `https://nullsink.is/v1`, API Key `0sink_YOUR_KEY`. Or by env:
 
@@ -12,7 +13,7 @@ OPENAI_API_BASE_URLS=https://nullsink.is/v1
 OPENAI_API_KEYS=0sink_YOUR_KEY
 ```
 
-## Claude: the pipe function
+## How do I add Claude models?
 
 Open WebUI connections speak the OpenAI wire format; Claude answers on nullsink's Anthropic path (`/v1/messages`). A [pipe function](https://docs.openwebui.com/getting-started/quick-start/connect-a-provider/starting-with-functions) bridges that: a Python plugin whose models join the regular model picker.
 
@@ -26,11 +27,11 @@ Claude models appear in the picker as `anthropic/claude-…`.
 
 Valves are stored per function in Open WebUI's database. Pasting updated code into the same function keeps the key; a freshly created function starts blank.
 
-## Tidy the model picker
+## How do I remove unusable duplicate model entries?
 
 The connection lists every id from nullsink's `/v1/models`, including bare `claude-*` ids that answer only on the Anthropic path — picking one returns `unsupported_model`. Hide them in ⚙️ **Admin Settings → Models**, or restrict the connection's **Model IDs** allowlist to the OpenAI-format ids.
 
-## Troubleshooting
+## Why is Open WebUI rejecting the request?
 
 | Symptom | Fix |
 | --- | --- |

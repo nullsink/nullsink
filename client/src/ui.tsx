@@ -89,7 +89,7 @@ export function TinfoilMark({ className }: { className?: string }) {
 }
 
 // The square glyph the /models tiers are built on: a hairline square = a frontier provider that reads your
-// text; `sealed` fills an inner square — the enclave/TEE mark, "can't read it at all". 1em + currentColor,
+// text; `sealed` fills an inner square — the attested enclave/TEE mark. 1em + currentColor,
 // so it scales and tints to its context (a tier header, a status badge, the trust diagram). Decorative —
 // the visible text label always carries the meaning, so it's aria-hidden.
 export function SquareGlyph({ sealed = false, className }: { sealed?: boolean; className?: string }) {

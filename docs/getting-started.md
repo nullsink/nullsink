@@ -57,7 +57,8 @@ Tinfoil-owned model for `/v1/chat/completions`.
 ## How do I call a model?
 
 Choose the wire format your model uses. Set an explicit output limit so nullsink can reserve a maximum
-charge before forwarding the request.
+charge before forwarding the request. The standard configuration rejects an omitted cap; an operator can
+instead configure and inject a deployment-wide default.
 
 Anthropic Messages:
 

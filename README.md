@@ -1,211 +1,67 @@
 # nullsink
 
-An anonymous, account-less metered reverse proxy for Anthropic and OpenAI, paid in
-Monero or Bitcoin. Mint a bearer key in your browser,
-fund it on-chain, and call it from the official Anthropic/OpenAI SDKs by overriding the
-base URL. No account, no IP, no request logs.
+An account-less, prepaid reverse proxy for Anthropic, OpenAI, and Tinfoil models. A user creates a
+bearer token in the browser, funds it with Monero or Bitcoin, and calls the provider-compatible API.
+nullsink keeps no IP or request logs.
 
-Two Bun + TypeScript workspaces:
-
-| Package | What it is |
+| Package | What it owns |
 | --- | --- |
-| [`core/`](core/) | The metered proxy, payment rails, the `nsk` operator CLI, the box deploy machinery, and the billing ledger. Zero runtime dependencies. |
-| [`client/`](client/) | The purchase UI (Vite + React), served at the edge as static files. |
+| [`core/`](core/) | Metered model proxy, payment rails, billing stores, operator CLI, and host deployment files |
+| [`client/`](client/) | Static purchase UI, API reference, model catalog, privacy policy, and terms |
 
-## Start here
+## How do I start using the API?
 
-[Make your first request](docs/getting-started.md) covers creating and funding a token, checking its
-balance, choosing a live model, making a runnable request, and fixing common errors.
+- [Make your first request](docs/getting-started.md) — create and fund a token, check its balance, and run `curl`
+- [Connect a client](docs/client-integrations.md) — configure Claude Code, Hermes, OpenClaw, Pi, or Open WebUI
+- [Use the live API reference](https://nullsink.is/api/) — look up endpoints, authentication, limits, and error shapes
+- [Choose a model](https://nullsink.is/models/) — copy a model id supported by the live service
 
-For lookup rather than a walkthrough, use the live [API reference](https://nullsink.is/api/) and
-[model catalog](https://nullsink.is/models/).
+## How do I buy and protect credit?
 
-## Client integrations
+- [Buy credit safely](docs/payments.md) — quote safety, payment status, failures, and automated top-ups
+- [Read the billing model](docs/billing-model.md) — pricing, request holds, settlement, and disconnects
+- [Read the trust model](docs/trust-model.md) — privacy and money-safety claims, including their limits
 
-These examples assume you already have a funded token. The base URLs and authentication rules are
-explained once in the [getting-started guide](docs/getting-started.md#which-base-url-should-an-sdk-use).
+## How do I operate nullsink?
 
-### Claude Code
+- [Deploy and configure](docs/operators/deploy.md) — bootstrap a host, configure providers and rails, and deploy releases
+- [Back up and restore](docs/operators/backup-restore.md) — create, test, retain, and apply billing-state backups
+- [Diagnose a live service](docs/operators/diagnose.md) — isolate edge, provider, payment, ledger, and monitoring failures
 
-```sh
-export ANTHROPIC_BASE_URL=https://nullsink.is       # root; the CLI appends /v1/messages
-export ANTHROPIC_AUTH_TOKEN=0sink_YOUR_KEY          # AUTH_TOKEN, not API_KEY — a logged-in subscription shadows API_KEY
-export ANTHROPIC_MODEL=claude-opus-4-8
-claude
-```
+## How do I understand or change the system?
 
-### Hermes agent
+- [System boundaries](docs/architecture.md) — current processes, stores, routes, and enforced boundaries
+- [Target architecture](docs/architecture-roadmap.md) — what issue #58 still proposes and what has already changed
+- [Money and reliability invariants](docs/invariants.md) — the review gates that must survive any redesign
+- [Core workspace](core/README.md) and [client workspace](client/README.md) — source layout and package-specific commands
 
-OpenAI-compatible custom endpoint ([Hermes docs](https://hermes-agent.nousresearch.com/docs/integrations/providers#general-setup)):
+## How do I run the repository locally?
 
-```sh
-hermes model              # choose "Custom endpoint"
-#   base url   https://nullsink.is/v1
-#   api key    0sink_YOUR_KEY
-#   model      gpt-5.5
-hermes chat -q "hello"
-```
-
-### OpenClaw
-
-OpenClaw ([docs](https://docs.openclaw.ai/concepts/model-providers#providers-via-modelsproviders-custombase-url)) speaks both formats — add one provider per format in `~/.openclaw/openclaw.json`.
-
-OpenAI-compatible (OpenAI + open-weight):
-
-```json5
-{
-  models: {
-    providers: {
-      nullsink: {
-        baseUrl: "https://nullsink.is/v1",
-        apiKey: "0sink_YOUR_KEY",
-        api: "openai-completions",
-        models: [{ id: "gpt-5.5", name: "gpt-5.5", reasoning: true }],
-      },
-    },
-  },
-  agents: { defaults: { model: { primary: "nullsink/gpt-5.5" } } },
-}
-```
-
-Anthropic (Claude):
-
-```json5
-{
-  models: {
-    providers: {
-      "nullsink-claude": {
-        baseUrl: "https://nullsink.is",              // root — the client appends /v1/messages
-        apiKey: "0sink_YOUR_KEY",
-        api: "anthropic-messages",
-        models: [
-          {
-            id: "claude-opus-4-8",
-            name: "claude-opus-4-8",
-            reasoning: true,
-            thinkingLevelMap: { xhigh: "max" },
-            compat: { forceAdaptiveThinking: true }, // REQUIRED for a custom Claude reasoning provider
-          },
-        ],
-      },
-    },
-  },
-  agents: { defaults: { model: { primary: "nullsink-claude/claude-opus-4-8" } } },
-}
-```
-
-### Pi
-
-Pi ([docs](https://pi.dev/docs/latest/custom-provider)) — the same two providers in `~/.pi/agent/models.json`.
-
-OpenAI-compatible:
-
-```json
-{
-  "providers": {
-    "nullsink": {
-      "baseUrl": "https://nullsink.is/v1",
-      "api": "openai-completions",
-      "apiKey": "0sink_YOUR_KEY",
-      "models": [{ "id": "gpt-5.5", "reasoning": true }]
-    }
-  }
-}
-```
-
-Anthropic (Claude):
-
-```json
-{
-  "providers": {
-    "nullsink-claude": {
-      "baseUrl": "https://nullsink.is",
-      "api": "anthropic-messages",
-      "apiKey": "0sink_YOUR_KEY",
-      "models": [
-        {
-          "id": "claude-opus-4-8",
-          "name": "claude-opus-4-8",
-          "reasoning": true,
-          "thinkingLevelMap": { "xhigh": "max" },
-          "compat": { "forceAdaptiveThinking": true }
-        }
-      ]
-    }
-  }
-}
-```
-
-### Open WebUI
-
-[Open WebUI](https://github.com/open-webui/open-webui) reaches gpt-5.5 and the open-weight models through an OpenAI connection — ⚙️ **Admin Settings → Connections → OpenAI → ＋ Add Connection** (URL `https://nullsink.is/v1`, key `0sink_YOUR_KEY`), or by env:
+Use [Bun](https://bun.sh) 1.3.14, the version CI builds and tests with.
 
 ```sh
-ENABLE_OPENAI_API=true
-OPENAI_API_BASE_URLS=https://nullsink.is/v1
-OPENAI_API_KEYS=0sink_YOUR_KEY
+bun install
+bun run dev
+bun run typecheck
+bun run test
+bun run lint
+bun run build
 ```
 
-Claude rides a bundled pipe function. Full walkthrough — connection, pipe install, model-picker cleanup, troubleshooting: **[docs/openwebui.md](docs/openwebui.md)**.
+`bun run dev` starts the client. Run the two core processes separately with `bun run dev:proxy` and
+`bun run dev:payments` from `core/`. Preview the client without a backend with
+`bun --filter './client' dev:mock`.
 
-### Gotchas
-
-- A **reasoning** model needs `reasoning: true` on its entry, or the client treats it as non-reasoning and the thinking controls never appear.
-- A **custom Claude** reasoning provider must set `compat.forceAdaptiveThinking: true`, or Opus 4.8 rejects the request with `thinking.type 'enabled' is not supported`. Built-in Claude models set this automatically; a custom nullsink provider does not.
-- Anthropic-format base URL is the **root** (`https://nullsink.is`); OpenAI-format is `https://nullsink.is/v1`. Getting this wrong doubles the path (`/v1/v1/messages`).
-
-## Docs
-
-- [docs/getting-started.md](docs/getting-started.md) — fund a token and make the first model request
-- [docs/payments.md](docs/payments.md) — payment status, single-use safety, and automated top-ups
-- [docs/operators/deploy.md](docs/operators/deploy.md) — deploy a release and configure providers, rails, and the public edge
-- [docs/operators/backup-restore.md](docs/operators/backup-restore.md) — configure, test, and apply billing-state recovery
-- [docs/operators/diagnose.md](docs/operators/diagnose.md) — diagnose service, provider, payment, ledger, and monitoring failures
-- [docs/architecture.md](docs/architecture.md) — how the pieces fit together
-- [docs/architecture-roadmap.md](docs/architecture-roadmap.md) — shipped topology, the next app-box boundary, and its implementation gates
-- [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
-- [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
-- [docs/invariants.md](docs/invariants.md) — review gates for money, credit delivery, and recovery
-
-## Develop
-
-Requires [Bun](https://bun.sh) 1.3.14 (the version CI builds and tests with).
-
-```sh
-bun install        # one hoisted node_modules + one root bun.lock for both packages
-
-bun run dev        # run the client (vite); core watchers are per-process: cd core && bun run dev:proxy / dev:payments
-bun run typecheck  # tsc across both packages
-bun run test       # bun test across both packages
-bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
-bun run build      # core service binaries (proxy + payments) + client static bundle
-bun run build:nsk  # the nsk operator-CLI binary
-```
-
-Target one package with `bun --filter`, e.g. `bun --filter './client' dev`. To preview just the
-purchase UI with no backend, run `bun --filter './client' dev:mock`.
-
-Install the pre-push hook so the checks CI runs happen locally first:
+Install the repository's pre-push checks with:
 
 ```sh
 git config core.hooksPath .githooks
 ```
 
-## Deploy
+## What license and contribution rules apply?
 
-Follow [Deploy and configure nullsink](docs/operators/deploy.md) for a fresh Ubuntu host or an
-application release update. Production hosts run checksum-verified release artifacts without a source
-checkout or Bun.
+nullsink is AGPL-3.0-or-later; see [LICENSE](LICENSE). AGPL §13 applies when a modified version is
+offered as a network service. The name and marks are covered by [TRADEMARK.md](TRADEMARK.md).
 
-## License
-
-AGPL-3.0-or-later — see [LICENSE](LICENSE) (each package carries a copy). As a hosted
-network service, AGPL §13 applies: run a **modified** nullsink for others and you must
-offer them your source.
-
-See [TRADEMARK.md](TRADEMARK.md) for the name and marks.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-Report security issues privately via [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) before sending a change. Report vulnerabilities privately as
+described in [SECURITY.md](SECURITY.md).

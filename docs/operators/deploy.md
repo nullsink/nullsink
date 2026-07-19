@@ -67,7 +67,7 @@ sudoedit /etc/nullsink.env
 Keep comments on their own lines. systemd treats everything after `=` as the value, including an
 inline `# comment`.
 
-### Public service and providers
+### Which public and provider settings matter?
 
 | Setting | Decision |
 | --- | --- |
@@ -77,6 +77,7 @@ inline `# comment`.
 | `NULLSINK_DOMAIN` | Set to the public hostname. Leave empty only for a private, loopback-only deployment. |
 | `HOST` | Keep `127.0.0.1` on a deployed host. |
 | `PORT`, `PAYMENTS_PORT` | Keep `8080` and `8081` unless you also maintain matching Caddy routes. Release deploys refresh the committed Caddyfile. |
+| `DEFAULT_MAX_OUTPUT_TOKENS` | Keep `0` to require an explicit request cap. A positive value is injected when a client omits its cap and must not exceed the smallest output limit of any served model. |
 
 With no provider variable set, `nullsink-proxy` exits at startup. The generated `replace-me` value
 does let the process boot, but Anthropic rejects requests made with it; configure at least one real
@@ -84,7 +85,7 @@ key before treating the service as ready. When Tinfoil is enabled and `TINFOIL_B
 the setup rerun sets it to the local attesting proxy at `http://127.0.0.1:3301`. An explicit public
 Tinfoil URL bypasses that local attestation path.
 
-### Payment rails
+### Which payment settings matter?
 
 | Setting | Decision |
 | --- | --- |
@@ -94,6 +95,10 @@ Tinfoil URL bypasses that local attestation path.
 | `BITCOIN_RPC_URL` | Wallet-scoped watch-only RPC endpoint, for example `http://127.0.0.1:8332/wallet/nullsink`. |
 | `BITCOIN_RPC_USER`, `BITCOIN_RPC_PASSWORD` | The credentials paired with bitcoind's `rpcauth` entry. |
 | `BITCOIN_CONFIRMATIONS` | Required BTC confirmation depth. The code default is 3. |
+
+Removing a rail from `PAY_RAILS` prevents new quotes for it **and stops polling its existing orders**.
+Keep the rail enabled while repairing a wallet or node when possible. To pause only new purchases while
+payment monitoring continues, block `/buy` at the edge; there is no dedicated purchase-maintenance switch.
 
 Do not add `bitcoin` to `PAY_RAILS` until the live node reports a complete sync and its watch-only
 wallet is loaded. For a dedicated Bitcoin node, follow the ordered

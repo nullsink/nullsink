@@ -7,7 +7,7 @@ import { EXT, GITHUB_URL } from "../lib/links.ts";
 // Messages, the right rail is always OpenAI-compatible; each format-specific concept (auth, endpoints,
 // max-tokens, models, quickstart, errors) renders as a two-up <FormatPair> so a caller can scan one format
 // straight down. Format-agnostic facts (base url, catalog, error codes) render as full-width <SharedBand>
-// bands. Per-client setup (Claude Code / Hermes / OpenClaw / Pi) is the README's "Connect a client" guide;
+// bands. Per-client setup (Claude Code / Hermes / OpenClaw / Pi) is the task-oriented integration guide;
 // this page links out to it rather than carry a second, tutorial-shaped document. Every fact mirrors the
 // proxy's real contract (core src/handler.ts + providers/) — if the served surface changes, change this
 // page. Static: prerenders and reads with JS off (the copy buttons are the only JS). CodeBlock `highlights`
@@ -56,7 +56,7 @@ const OPENAI_ERROR_SHAPE = `{
 }`;
 
 // A representative slice of each format's served ids — the full, live catalog is GET /v1/models and the
-// /models page. Tinfoil's open-weight set is sealed (a TEE that can't read your text), so it takes the seal.
+// /models page. Tinfoil's open-weight set runs in an attested enclave, so it takes the seal.
 const CLAUDE_IDS = ["claude-opus-4-8", "claude-haiku-4-5", "claude-fable-5"];
 const OPENAI_IDS = ["gpt-5.5", "gpt-5.5-pro"];
 const TINFOIL_IDS = ["gpt-oss-120b", "glm-5-2", "kimi-k2-6"];
@@ -186,7 +186,7 @@ export function Api() {
     <Layout nav="api">
       <div className="api-doc">
       <section className="section">
-        <h1 className="page-h1">api</h1>
+        <h1 className="page-h1">API reference</h1>
         <div className="note-cols">
           <p className="note">
             <span className="marker" aria-hidden="true">→</span>
@@ -199,9 +199,10 @@ export function Api() {
           <p className="note">
             <span className="marker" aria-hidden="true">!</span>
             <span>
-              <span className="hl">Every request must set a max output tokens</span> — <code>max_tokens</code>{" "}
-              (Anthropic) or <code>max_completion_tokens</code> (OpenAI), or it&apos;s rejected with{" "}
-              <code>max_tokens_required</code>.
+              <span className="hl">Set a maximum output token count</span> — <code>max_tokens</code>{" "}
+              (Anthropic), <code>max_completion_tokens</code> (OpenAI chat), or{" "}
+              <code>max_output_tokens</code> (OpenAI responses). The standard strict configuration rejects
+              an omission with <code>max_tokens_required</code>.
             </span>
           </p>
         </div>
@@ -224,7 +225,7 @@ export function Api() {
         </div>
       </div>
 
-      <SharedBand title="base url" sub="identical in both formats">
+      <SharedBand title="Which base URL do I use?">
         <dl className="kv">
           <KvRow k="base url" values={["https://nullsink.is"]} />
         </dl>
@@ -237,7 +238,7 @@ export function Api() {
       </SharedBand>
 
       <FormatPair
-        concept="auth"
+        concept="How do I authenticate?"
         left={
           <>
             <CodeBlock label="request headers" code={ANTHROPIC_HEADERS} highlights={["0sink_YOUR_KEY"]} />
@@ -257,7 +258,7 @@ export function Api() {
       />
 
       <FormatPair
-        concept="endpoints"
+        concept="Which model endpoint do I call?"
         hint="native request/response schema each"
         left={<EpRow method="POST" path="/v1/messages" />}
         right={
@@ -268,18 +269,19 @@ export function Api() {
         }
       />
 
-      <SharedBand title="catalog & balance">
+      <SharedBand title="How do I list models or check balance?">
         <EpRow method="GET" path="/v1/models" />
         <EpRow method="GET" path="/balance" />
         <p className="band-note">
           <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price;{" "}
-          <code>GET /balance</code> returns a key&apos;s remaining credit. Full catalog on the{" "}
+          <code>GET /balance</code> returns a key&apos;s remaining credit and specifically requires the token in
+          <code> x-api-key</code>. The model catalog is unauthenticated. Full catalog on the{" "}
           <a href="/models/">models</a> page.
         </p>
       </SharedBand>
 
       <FormatPair
-        concept="served models"
+        concept="Which model ids are served?"
         left={
           <>
             <Chips ids={CLAUDE_IDS} />
@@ -294,7 +296,7 @@ export function Api() {
             <div className="subgroup seal">
               <span className="subgroup-label seal">
                 <SquareGlyph sealed className="tee-mark" />
-                tinfoil · sealed enclave
+                tinfoil · attested enclave
               </span>
               <Chips ids={TINFOIL_IDS} />
             </div>
@@ -306,7 +308,7 @@ export function Api() {
       />
 
       <FormatPair
-        concept="quickstart"
+        concept="How do I make a request?"
         left={
           <CodeBlock label="curl" code={ANTHROPIC_CURL} highlights={["0sink_YOUR_KEY", "claude-opus-4-8"]} />
         }
@@ -318,9 +320,9 @@ export function Api() {
           <span className="marker" aria-hidden="true">→</span>
           <span>
             Wiring up an agent? Setup for <strong>Claude Code</strong>, <strong>Hermes</strong>,{" "}
-            <strong>OpenClaw</strong> and <strong>Pi</strong> — including the Claude adaptive-thinking config —
+            <strong>OpenClaw</strong> and <strong>Pi</strong> — including both wire formats —
             is in the{" "}
-            <a href={`${GITHUB_URL}#connect-a-client`} {...EXT}>
+            <a href={`${GITHUB_URL}/blob/main/docs/client-integrations.md`} {...EXT}>
               integration guide
             </a>
             .
@@ -329,7 +331,7 @@ export function Api() {
       </section>
 
       <FormatPair
-        concept="error shape"
+        concept="Where is the error reason?"
         hint="each format's native envelope"
         left={
           <>
@@ -350,16 +352,16 @@ export function Api() {
         }
       />
 
-      <SharedBand title="error codes & limits">
+      <SharedBand title="What does a rejected request mean?">
         <div className="band-cols">
           <ul className="err-list">
-            <Err code="max_tokens_required">set a max output tokens on the request</Err>
+            <Err code="max_tokens_required">set the endpoint&apos;s maximum output token field</Err>
             <Err code="unsupported_model">the id isn&apos;t served — see /models</Err>
-            <Err code="unsupported_endpoint">that path or method isn&apos;t proxied</Err>
+            <Err code="unsupported_option / unsupported_tool">remove a feature outside the token rate card</Err>
           </ul>
           <ul className="err-list">
             <Err code="insufficient_balance">the key is out of credit — top up</Err>
-            <Err code="invalid_token">the key is unknown or malformed</Err>
+            <Err code="missing_api_key / invalid_token">send the complete funded token</Err>
             <Err code="rate_limited">too many requests right now — retry shortly</Err>
           </ul>
         </div>
@@ -374,7 +376,11 @@ export function Api() {
           </li>
         </ul>
         <p className="band-note">
-          Need a stripped feature or an unlisted model? Open a{" "}
+          Status codes, retry headers, and transient upstream failures are listed in the{" "}
+          <a href={`${GITHUB_URL}/blob/main/docs/getting-started.md#what-does-a-rejected-model-request-mean`} {...EXT}>
+            model-request error table
+          </a>
+          . Need a stripped feature or an unlisted model? Open a{" "}
           <a href={GITHUB_URL} {...EXT}>
             GitHub issue
           </a>

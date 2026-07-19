@@ -1,11 +1,9 @@
 # Trust model
 
-nullsink is a prepaid, account-less LLM proxy paid in Monero or Bitcoin. This doc states
-what it guarantees, how the code enforces each guarantee, and — honestly — what it does
-**not** protect against. The point is to let you verify the claims against the source rather
-than take them on faith. See [architecture.md](architecture.md) for how the pieces fit.
+This page is the canonical list of privacy and security claims that the current implementation supports.
+See [System boundaries](architecture.md) for the runtime topology.
 
-## What we guarantee, and how
+## Which guarantees does the code enforce?
 
 | Guarantee | How the code enforces it |
 | --- | --- |
@@ -19,7 +17,7 @@ than take them on faith. See [architecture.md](architecture.md) for how the piec
 | **Your balance can't go negative** | The debit is an atomic conditional update (`ledger/db.ts`), and settlement bounds every refund to the hold it releases (`handler.ts`, `billActual`). See [billing-model.md](billing-model.md). |
 | **Errors don't leak our key, billing, or provider state** | `handler.ts` (`relayOrMaskUpstream`) relays only clearly user-fixable errors verbatim and masks everything else (our key status, our billing state, provider outages) behind an opaque code. |
 
-## What we do collect
+## Which operational data is collected?
 
 Running a service this data-light still needs *some* operational signal — without it an operator
 can't tell a healthy box from a broken one, or see where users are hitting friction. So nullsink
@@ -34,7 +32,7 @@ prompt or output. A rising counter shows the operator that, say, auth checks are
 are aborting — as a total only, with nothing that ties it to a person or a request. That's enough
 to fix outages and smooth the edges users actually hit, and too coarse to profile anyone.
 
-## What this does not protect against
+## What is outside the protection boundary?
 
 Being honest about the edges matters more than the marketing:
 
@@ -65,7 +63,7 @@ Being honest about the edges matters more than the marketing:
   everyone equally. That's deliberate: a per-user bucket would mean identifying everyone just to
   target an abuser.
 
-## Verifiability
+## What can a user verify today?
 
 nullsink is AGPL-3.0-or-later, and under §13 the running source is offered to you — so the
 guarantees above are checkable in this repo rather than promised. Released artifacts ship with a `SHA256SUMS` file, so a box can confirm it runs the
