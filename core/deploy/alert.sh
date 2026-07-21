@@ -28,7 +28,7 @@ if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
 fi
 
 # parse_mode=HTML below: every dynamic string must be escaped or one stray '>' (e.g. the backup-age WARN
-# "(> 28h)") 400s the whole message.
+# "(> 6h)") 400s the whole message.
 esc() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' <<<"$1"; }
 
 # Only the health-check report is safe to forward (it is operational-only by construction): WARN lines

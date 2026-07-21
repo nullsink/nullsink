@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Consistent, optionally-encrypted backup of the billing DBs. Run daily by backup.timer AS THE SERVICE USER
+# Consistent, optionally-encrypted backup of the billing DBs. Run every four hours by backup.timer AS THE SERVICE USER
 # (User=nullsink in backup.service), so the SQLite sidecars it touches stay service-owned — a root
 # `.backup` leaves root-owned -wal/-shm that break the service's billing writes.
 #
 # Uses sqlite3 `.backup`, which snapshots a CONSISTENT copy even while the service is writing under WAL (a
-# plain `cp` is NOT safe). Produces ONE timestamped artifact in BACKUP_DIR:
+# plain `cp` is NOT safe). Validates the matched pair, then atomically publishes ONE timestamped recovery
+# artifact and ONE aggregate-only JSON report in BACKUP_DIR:
 #   - if BACKUP_AGE_RECIPIENT is set: an age-encrypted tar (`.tar.age`) — REQUIRED posture for OFF-BOX
 #     copies: the box holds only the public recipient, so a box compromise can't decrypt past backups.
 #   - else: a plain tar (fine for an on-box copy; do NOT push an unencrypted tar off-box).
@@ -19,12 +20,30 @@ command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqli
 
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"
-BACKUP_KEEP="${BACKUP_KEEP:-14}"
+BACKUP_KEEP="${BACKUP_KEEP:-84}"   # six four-hour snapshots/day ≈ fourteen days
+[[ "$BACKUP_KEEP" =~ ^[0-9]+$ ]] && [ "$BACKUP_KEEP" -gt 0 ] || {
+  echo "BACKUP_KEEP must be a positive integer" >&2
+  exit 1
+}
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+SNAPSHOT_EPOCH_MS="$(( $(date -u +%s) * 1000 ))"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
 
 mkdir -p "$BACKUP_DIR"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+artifact_tmp=""
+report_tmp=""
+# Invoked indirectly by trap.
+# shellcheck disable=SC2329
+cleanup() {
+  status=$?
+  rm -rf -- "$work"
+  [ -z "$artifact_tmp" ] || rm -f -- "$artifact_tmp"
+  [ -z "$report_tmp" ] || rm -f -- "$report_tmp"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' HUP INT TERM
 
 # Consistent snapshots via .backup (NOT cp). The CLI opens its OWN connection, so set a busy_timeout (the
 # app's PRAGMA doesn't apply here) — else a concurrent settler write lock returns SQLITE_BUSY and aborts the
@@ -72,15 +91,29 @@ fi
 # Archive the named snapshots only (not `.`), so the in-progress tar can't include itself.
 tar -C "$work" -cf "$work/backup.tar" "${files[@]}"
 
+# Validate the exact artifact we are about to encrypt. This checks each SQLite snapshot AND the cross-database
+# delivered-credit invariant. A corrupt or mismatched pair must never acquire a final backup-* name for an
+# off-box collector to trust. restore.sh's default is read-only and extracts into its own private temp dir.
+"$script_dir/restore.sh" "$work/backup.tar" >/dev/null
+echo "backup: coordinated snapshots validated"
+
 if [ -n "${BACKUP_AGE_RECIPIENT:-}" ]; then
   command -v age >/dev/null || { echo "BACKUP_AGE_RECIPIENT set but 'age' is not installed (apt-get install age)" >&2; exit 1; }
   artifact="$BACKUP_DIR/backup-$STAMP.tar.age"
-  age -r "$BACKUP_AGE_RECIPIENT" -o "$artifact" "$work/backup.tar"
+  artifact_tmp="$BACKUP_DIR/.backup-$STAMP.tar.age.partial.$$"
+  age -r "$BACKUP_AGE_RECIPIENT" -o "$artifact_tmp" "$work/backup.tar"
 else
   artifact="$BACKUP_DIR/backup-$STAMP.tar"
-  cp "$work/backup.tar" "$artifact"
+  artifact_tmp="$BACKUP_DIR/.backup-$STAMP.tar.partial.$$"
+  cp "$work/backup.tar" "$artifact_tmp"
 fi
-chmod 600 "$artifact"
+chmod 600 "$artifact_tmp"
+[ ! -e "$artifact" ] || { echo "refusing to replace existing backup artifact: $artifact" >&2; exit 1; }
+# A same-directory rename is atomic: pullers see either no final name or the complete closed artifact, never
+# age's in-progress output. `-n` closes the check→rename race with an accidental concurrent manual run.
+mv -n "$artifact_tmp" "$artifact"
+[ ! -e "$artifact_tmp" ] || { echo "backup artifact name collision: $artifact" >&2; exit 1; }
+artifact_tmp=""
 echo "backup: $artifact ($(stat -c %s "$artifact" 2>/dev/null || echo '?') bytes)"
 
 # Ship off-box (operator-configured; destination-agnostic). $ARTIFACT is the finished file. REFUSE to push
@@ -96,6 +129,22 @@ if [ -n "${BACKUP_PUSH_CMD:-}" ]; then
   ARTIFACT="$artifact" bash -c "$BACKUP_PUSH_CMD"
 fi
 
+# The routine off-box view is generated from the same private snapshots as the validated artifact—not from
+# live DBs—and is an explicit aggregate allowlist. Publish it only after the recovery artifact is durable.
+# If reporting fails, set -e makes the service page while leaving the valid recovery artifact in place.
+report="$BACKUP_DIR/report-$STAMP.json"
+report_tmp="$BACKUP_DIR/.report-$STAMP.json.partial.$$"
+pending_arg="-"
+[ -f "$work/pending.db" ] && pending_arg="$work/pending.db"
+"$script_dir/backup-report.sh" "$pending_arg" "$work/balances.db" "$report_tmp" \
+  "$STAMP" "$(basename "$artifact")" "$SNAPSHOT_EPOCH_MS"
+chmod 600 "$report_tmp"
+[ ! -e "$report" ] || { echo "refusing to replace existing backup report: $report" >&2; exit 1; }
+mv -n "$report_tmp" "$report"
+[ ! -e "$report_tmp" ] || { echo "backup report name collision: $report" >&2; exit 1; }
+report_tmp=""
+echo "report: $report ($(stat -c %s "$report" 2>/dev/null || echo '?') bytes)"
+
 # Retention: keep the BACKUP_KEEP most-recent artifacts, prune older ones. Collect via mapfile (NOT a
 # bare `ls | tail` pipeline): under `set -euo pipefail`, one of the two globs is ALWAYS unmatched (a box has
 # only .tar OR .tar.age), so `ls` exits non-zero and pipefail would abort the whole script AFTER a perfectly
@@ -103,6 +152,12 @@ fi
 arts=()
 while IFS= read -r f; do arts+=("$f"); done < <(ls -1t "$BACKUP_DIR"/backup-*.tar "$BACKUP_DIR"/backup-*.tar.age 2>/dev/null)
 if [ "${#arts[@]}" -gt "$BACKUP_KEEP" ]; then
-  for old in "${arts[@]:$BACKUP_KEEP}"; do rm -f "$old" && echo "pruned: $(basename "$old")"; done
+  for old in "${arts[@]:$BACKUP_KEEP}"; do
+    old_name="$(basename "$old")"
+    old_stamp="${old_name#backup-}"
+    old_stamp="${old_stamp%.tar.age}"
+    old_stamp="${old_stamp%.tar}"
+    rm -f -- "$old" "$BACKUP_DIR/report-$old_stamp.json" && echo "pruned: $old_name (+ matching report, if present)"
+  done
 fi
 exit 0

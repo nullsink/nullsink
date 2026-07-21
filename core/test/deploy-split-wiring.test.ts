@@ -16,6 +16,8 @@ const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
+const backupReport = readFileSync(deploy("backup-report.sh"), "utf8");
+const backupTimer = readFileSync(deploy("backup.timer"), "utf8");
 const restore = readFileSync(deploy("restore.sh"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
@@ -107,4 +109,25 @@ test("backup and restore preserve the scrubbed-outbox money invariant", () => {
   expect(restore).toContain("UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';");
   expect(restore).toContain("unsafe partial restore refused");
   expect(restore).not.toMatch(/SET acked_at = NULL WHERE hash = ''/);
+});
+
+test("backup publication and routine reporting follow the Step 2 egress contract", () => {
+  const validation = backup.indexOf('"$script_dir/restore.sh" "$work/backup.tar"');
+  const encryption = backup.indexOf('age -r "$BACKUP_AGE_RECIPIENT"');
+  const publication = backup.indexOf('mv -n "$artifact_tmp" "$artifact"');
+  const reporting = backup.indexOf('"$script_dir/backup-report.sh"');
+  expect(validation).toBeGreaterThan(-1);
+  expect(encryption).toBeGreaterThan(validation);
+  expect(publication).toBeGreaterThan(encryption);
+  expect(reporting).toBeGreaterThan(publication);
+  expect(backup).toContain('BACKUP_KEEP="${BACKUP_KEEP:-84}"');
+  expect(backupTimer).toContain("OnCalendar=*-*-* 00/4:00:00 UTC");
+
+  // The report queries sensitive tables only through fixed aggregate projections. These forbidden column
+  // names should appear solely in the privacy comment, never in SQL/output construction.
+  const reportBody = backupReport.slice(backupReport.indexOf("set -euo pipefail"));
+  expect(reportBody).not.toMatch(/\b(?:hash|address|idempotency_key|order_index|asset_atomic)\b/);
+  expect(backupReport).toContain("GROUP BY day, asset");
+  expect(backupReport).toContain("WHERE acked_at IS NULL");
+  expect(backupReport).toContain("SUM(balance)");
 });

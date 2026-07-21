@@ -1,5 +1,6 @@
-# One-shot DB backup, run daily by backup.timer. Snapshots balances.db + pending.db via sqlite3 .backup,
-# optionally age-encrypts, and (if BACKUP_PUSH_CMD is set) ships the artifact off-box. Runs AS THE SERVICE
+# One-shot DB backup, run every four hours by backup.timer. Snapshots balances.db + pending.db via sqlite3
+# .backup, validates the pair, optionally age-encrypts it, then atomically publishes the recovery artifact +
+# aggregate report and (if BACKUP_PUSH_CMD is set) ships the artifact off-box. Runs AS THE SERVICE
 # USER so the SQLite sidecars it touches stay service-owned (a root .backup breaks billing writes).
 [Unit]
 Description=nullsink billing-DB backup (one-shot; run by backup.timer)

@@ -145,11 +145,13 @@ TELEGRAM_CHAT_ID=
 # disabled. The health check pings this on success so an OFF-BOX monitor alerts if the ping STOPS (a dead
 # box/network/timer that OnFailure can't catch). Keep bare (no inline # comment).
 HEARTBEAT_URL=
-# --- Backups (deploy/backup.sh, run daily by backup.timer; restore/verify with deploy/restore.sh) ---
+# --- Backups (deploy/backup.sh, run every four hours by backup.timer; restore/verify with deploy/restore.sh) ---
 # OFF-BOX copies MUST be encrypted: set BACKUP_AGE_RECIPIENT to an age PUBLIC key whose private key you keep
 # OFFLINE, so the box can only ENCRYPT, never decrypt past backups (apt-get install age; age-keygen on your
 # secure machine). EMPTY = local-only PLAINTEXT snapshots (fine on-box; never push those off). Keep bare.
 BACKUP_AGE_RECIPIENT=
+# Six snapshots/day × 14 days. This is an artifact count, so extra manual backups shorten the time window.
+BACKUP_KEEP=84
 # Shell snippet to ship each finished artifact off-box, run with \$ARTIFACT = the file path, e.g.:
 #   BACKUP_PUSH_CMD=rclone copy "\$ARTIFACT" remote:nullsink-backups/
 # EMPTY = keep backups on-box only. Keep this line bare (no inline # comment).
@@ -305,17 +307,18 @@ else
   todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install bitcoind"
 fi
 
-step "Enabling timers (health check, daily backup)"
+step "Enabling timers (health check, four-hour backup)"
 # One shared reconcile (lib.sh enable_timers, also run by deploy.sh): enables the always-on timers. Units were
 # refreshed by install_units above. Both always-on timers are safe with their creds unset:
 #   - status-check.timer runs status-check.sh every 10 min; a failure pages Telegram via status-alert@.service
 #     (a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set — still logs to journald).
-#   - backup.timer runs deploy/backup.sh daily AS the service user: sqlite3 .backup of balances.db + pending.db,
-#     optional age-encryption (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), both set in $ENV_FILE.
+#   - backup.timer runs deploy/backup.sh every four hours AS the service user: sqlite3 .backup of balances.db +
+#     pending.db, matched-pair validation, an aggregate-only report, optional age-encryption
+#     (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), all configured in $ENV_FILE.
 #     Unset = local-only plaintext snapshots in /var/lib/nullsink/backups (status-check warns if the newest goes
 #     stale). Restore or TEST a backup with deploy/restore.sh (dry-run by default).
 enable_timers
-# Seed the first backup artifact now, so the freshness check doesn't warn until the daily timer first fires AND
+# Seed the first backup artifact now, so the freshness check doesn't warn until the four-hour timer first fires AND
 # so any backup misconfig surfaces immediately. Non-fatal (e.g. before the app has created balances.db).
 systemctl start backup.service || note "initial backup run failed — check: journalctl -u backup.service"
 

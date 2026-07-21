@@ -26,6 +26,11 @@ DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 SVC_USER="${SVC_USER:-nullsink}"
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
+RESTORE_MAX_MEMBER_BYTES="${RESTORE_MAX_MEMBER_BYTES:-8589934592}" # 8 GiB/member; real billing DBs are far smaller
+[[ "$RESTORE_MAX_MEMBER_BYTES" =~ ^[0-9]+$ ]] && [ "$RESTORE_MAX_MEMBER_BYTES" -gt 0 ] || {
+  echo "RESTORE_MAX_MEMBER_BYTES must be a positive integer" >&2
+  exit 1
+}
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -41,8 +46,52 @@ case "$artifact" in
     cp "$artifact" "$tarball" ;;
 esac
 
+# Treat a backup as untrusted input until its archive shape is proven. backup.sh emits only these three flat
+# regular files. Exact-name allowlisting rejects absolute paths and traversal; counts reject duplicate entries
+# whose extraction order could otherwise make the file we inspect differ from the file an operator expects.
+members="$(tar -tf "$tarball" 2>/dev/null)" || { echo "could not list backup archive — wrong/corrupt file?" >&2; exit 1; }
+[ -n "$members" ] || { echo "backup archive is empty" >&2; exit 1; }
+seen_balances=0
+seen_pending=0
+seen_labels=0
+while IFS= read -r member; do
+  case "$member" in
+    balances.db) seen_balances=$((seen_balances + 1)); [ "$seen_balances" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    pending.db) seen_pending=$((seen_pending + 1)); [ "$seen_pending" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    bitcoin-wallet-labels.json) seen_labels=$((seen_labels + 1)); [ "$seen_labels" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    *) echo "unexpected archive member: $member" >&2; exit 1 ;;
+  esac
+done <<< "$members"
+[ "$seen_balances" -eq 1 ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
+
+# GNU tar and bsdtar render different owner columns, but expected member names contain no spaces and are the
+# final field in both formats. Regular-file type is the first character; size is field 3 (GNU) or 5 (BSD).
+verbose_members="$(tar -tvf "$tarball" 2>/dev/null)" || { echo "could not inspect backup archive" >&2; exit 1; }
+verbose_count=0
+while IFS= read -r verbose_member; do
+  verbose_count=$((verbose_count + 1))
+  type="${verbose_member:0:1}"
+  [ "$type" = - ] || { echo "backup archive contains a non-regular member" >&2; exit 1; }
+  size="$(awk '{ if ($2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/) print $5; else if ($3 ~ /^[0-9]+$/) print $3; }' <<< "$verbose_member")"
+  [[ "$size" =~ ^[0-9]+$ ]] || { echo "could not determine archive member size" >&2; exit 1; }
+  [ "$size" -le "$RESTORE_MAX_MEMBER_BYTES" ] || {
+    echo "backup archive member exceeds RESTORE_MAX_MEMBER_BYTES ($size > $RESTORE_MAX_MEMBER_BYTES)" >&2
+    exit 1
+  }
+done <<< "$verbose_members"
+[ "$verbose_count" -eq $((seen_balances + seen_pending + seen_labels)) ] || {
+  echo "backup archive member listing is inconsistent" >&2
+  exit 1
+}
+
 tar -C "$work" -xf "$tarball"
-[ -f "$work/balances.db" ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
+[ -f "$work/balances.db" ] && [ ! -L "$work/balances.db" ] || { echo "archive did not extract a regular balances.db" >&2; exit 1; }
+for extracted in "$work/pending.db" "$work/bitcoin-wallet-labels.json"; do
+  [ ! -e "$extracted" ] || { [ -f "$extracted" ] && [ ! -L "$extracted" ]; } || {
+    echo "archive did not extract a regular $(basename "$extracted")" >&2
+    exit 1
+  }
+done
 
 # Verify each extracted DB before trusting it (a backup that won't open is no backup). The `|| true` is
 # load-bearing: on a not-a-database / truncated / bad-header file, sqlite3 EXITS non-zero (SQLITE_NOTADB=26),
