@@ -38,7 +38,8 @@ the map.
 |------|------|
 | `status-check.sh` | Rail + app health check (run every 10 min by `status-check.timer`). Privacy-safe: reads the billing DBs only for an integrity pragma, never row content. |
 | `alert.sh` | Pushes a one-line Telegram page. The `OnFailure=` sink for the units, and how `status-check.sh` closes an incident. Sends no request content. |
-| `backup.sh` | Daily consistent (`sqlite3 .backup`) snapshot of the billing DBs, optional age-encryption + off-box push. |
+| `backup.sh` | Four-hour coordinated (`sqlite3 .backup`) snapshot of the billing DBs; validates the pair, atomically publishes the recovery artifact, optionally age-encrypts/pushes it, and emits an aggregate-only report. |
+| `backup-report.sh` | Builds the versioned privacy-safe JSON report from backup snapshots: daily/asset revenue, aggregate liability, and open/undelivered-credit health—never token/payment linkage. |
 | `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` to replace the live DBs, re-arm the credit outbox, and restart both services. |
 | `regen-bitcoin-rpcauth.sh` | Break-glass: regenerate bitcoind's `rpcauth` + the proxy's RPC password as one matched pair. The cure for a BTC-rail 401. |
 
@@ -83,6 +84,45 @@ dev/CI tool, so it doesn't ride along to the box.)
 
 **Nothing box-specific is committed.** Per-box config (domain, node address, RPC creds, Telegram token,
 backup keys) lives only in `/etc/nullsink.env` and systemd drop-ins on the box, never in this tree.
+
+## Backup and reporting boundary
+
+`backup.timer` runs every four hours. `backup.sh` snapshots `pending.db` first and `balances.db` second,
+packages the pair, and runs `restore.sh`'s read-only validation before anything receives a final
+`backup-*` name. Encryption and report output are written under hidden partial names in the destination
+directory, then atomically renamed. A collector therefore sees a complete final file or no file, never an
+in-progress artifact.
+
+For the production/off-box workflow, set `BACKUP_AGE_RECIPIENT` to an `age` **public recipient** whose
+private identity remains offline. The finished recovery artifact is `backup-<UTC>.tar.age`; a production
+box or storage host with only the recipient/ciphertext cannot decrypt it. Plain `.tar` remains available for
+local development, but must not cross the production box boundary. `BACKUP_KEEP` defaults to 84 completed
+artifacts—normally about fourteen days at six runs per day; extra manual runs shorten that time window.
+
+Each validated artifact has a `report-<UTC>.json` generated from the same private snapshots. Its schema is
+an explicit allowlist:
+
+- UTC-day/asset revenue counts plus credited/gross micro-dollar totals;
+- aggregate outstanding micro-dollar liability;
+- open-order count, quoted credit total, and payment-seen count;
+- unacknowledged-credit count, total, and oldest age.
+
+The report contains no token hash, per-token balance, payment address, transaction/idempotency key,
+individual sale row, or delivered payment→token join. It is still private business data and is stored mode
+`0600`. A report failure pages by failing `backup.service`, but happens after recovery-artifact publication,
+so it cannot discard the valid backup.
+
+Test a retained artifact on the trusted machine that holds the offline identity (default is a dry-run and
+touches no live database):
+
+```sh
+BACKUP_AGE_IDENTITY=/secure/nullsink-age.key \
+  core/deploy/restore.sh backup-20260721T120000Z.tar.age
+```
+
+Run that check after schema, archive-format, restore-code, or key changes and periodically during normal
+operation. The separate Pi-store slice will collect only finalized encrypted artifacts and these aggregate
+reports; it does not need or receive the private `age` identity.
 
 **Release fetch is plain `curl`.** The four fetch helpers in `lib.sh` pull the public GitHub Release assets
 over HTTPS and verify them against `SHA256SUMS` — no `gh`, no auth on the box. Build provenance is attested

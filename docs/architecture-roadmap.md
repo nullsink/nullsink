@@ -6,7 +6,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: shipped today and the next app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-07-18, v1.9.1
+## Status — 2026-07-21, v1.9.1
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Implemented for next release** | Definite ack atomically clears hash/amount; legacy acknowledgements replay once; restores verify tombstones against the ledger. |
-| Financial and backup egress | **In design** | Define the permitted off-box view before shipping operator tooling. |
+| Financial and backup egress | **Implementation in progress** | Production artifact/report contract is implemented for the next release; independent Pi retention remains the second slice. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -66,6 +66,11 @@ credit diagnostics without rebuilding a permanent delivered-payment→token hist
 
 Gate: matched-pair restore succeeds; plaintext is private and temporary; reports contain only
 the fields allowed by the privacy lifecycle.
+
+Production slice implemented for the next release: four-hour pending-first/ledger-second snapshots are
+validated before atomic publication; an offline-recipient `age` artifact is paired with a versioned report
+containing only daily/asset revenue, aggregate liability, and open/undelivered-credit health. The remaining
+slice is the independent ciphertext-only Pi collector and its retention/freshness controls.
 
 ### 3. Retire direct database access by `nsk`
 
