@@ -42,6 +42,8 @@ export const usdWhole = (n: number): string => USD_WHOLE_FMT.format(n);
 
 export interface Quote {
   pay_to: string;
+  order_id?: string; // compact `${rail}:${index}` status scope; old servers may omit it
+  rail?: string; // rail id, e.g. lightning; old cached/mock responses may omit it
   amount: string; // verbatim coin amount string (8dp for BTC) — display AS-IS, never reformat/round
   unit: string; // display ticker, e.g. "BTC"
   pay_uri: string; // wallet URI for the QR, built server-side (e.g. bitcoin:addr?amount=…)
@@ -69,6 +71,9 @@ export const TROCADOR_REF = "";
 // chosen by the user on Trocador's page. Pure + deterministic. `amount` is the destination amount in
 // AnonPay "payment mode".
 export function trocadorSwapUrl(quote: Quote): string {
+  if (quote.rail === "lightning") {
+    throw new Error("Lightning invoices cannot be used as on-chain swap destinations");
+  }
   const params = new URLSearchParams({
     ticker_to: quote.unit.toLowerCase(),
     network_to: "Mainnet",
@@ -198,6 +203,8 @@ export interface Rail {
   name: string; // server rail id, e.g. "monero" — echoed back to /buy as `rail`
   unit: string; // display ticker, e.g. "XMR"
   confirmations: number; // finality depth for this rail, as reported by the server
+  settlement?: "instant" | "confirmations";
+  order_ttl_ms?: number;
 }
 export interface Rails {
   default: string;
@@ -295,13 +302,20 @@ export interface OrderStatus {
 // `address` is the /buy pay_to the caller is tracking. Sent when known so the server scopes the status to
 // THIS order — a hash can have several open at once, and the newest empty one must not shadow a paid older
 // one. Omitted callers (an older cached bundle) still get the server's seen-preferring fallback.
-export async function fetchOrderStatus(hash: string, address?: string): Promise<OrderStatus> {
+export async function fetchOrderStatus(hash: string, orderIdOrAddress?: string): Promise<OrderStatus> {
+  // A compact order_id contains the rail separator; legacy callers still pass an on-chain address. BOLT11
+  // invoices never need to be echoed once /buy supplies order_id.
+  const scope = orderIdOrAddress
+    ? /^[a-z][a-z0-9_-]{0,31}:(0|[1-9]\d*)$/.test(orderIdOrAddress)
+      ? { order_id: orderIdOrAddress }
+      : { address: orderIdOrAddress }
+    : {};
   let res: Response;
   try {
     res = await fetch("/order-status", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(address ? { hash, address } : { hash }),
+      body: JSON.stringify({ hash, ...scope }),
     });
   } catch {
     throw { kind: "network", status: 0 } as ReadFailure;

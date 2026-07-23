@@ -44,7 +44,7 @@ export type PaymentsHandlerDeps = {
 // Dispatch only the PAYMENTS TRUST DOMAIN paths. undefined = "not mine" (the combined router already tried the
 // proxy trust domain routes; createPaymentsHandler turns it into the fail-closed 404).
 export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url: URL) => Promise<Response> | undefined {
-  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress } = d.orders;
+  const { tryAddOrder, openCount, latestOpenOrderByHash, openOrderByHashAddress, openOrderByHashRailIndex } = d.orders;
   const endpoints = makePaymentsEndpoints({
     rails: d.rails,
     defaultRail: d.defaultRail,
@@ -58,6 +58,7 @@ export function buildPaymentsRoutes(d: PaymentsHandlerDeps): (req: Request, url:
     openCount,
     latestOpenOrderByHash,
     openOrderByHashAddress,
+    openOrderByHashRailIndex,
     buyRateLimit: d.buyRateLimit,
     readRateLimit: d.readRateLimit,
     orderStatus: d.orderStatus,

@@ -2,13 +2,15 @@
 // env (comma list; legacy PAY_RAIL = a single name) and injects their capabilities into the handler + poller.
 import { moneroRail } from "./monero";
 import { bitcoinRail } from "./bitcoin";
+import { lightningRail } from "./lightning";
 import type { PayRail } from "./types";
 
-export type { PayRail, NewAddress, Incoming } from "./types";
+export type { PayRail, NewPayment, CreatePaymentRequest, Incoming } from "./types";
 
 export const RAILS: Record<string, PayRail> = {
   monero: moneroRail,
   bitcoin: bitcoinRail,
+  lightning: lightningRail,
 };
 
 // Resolve a rail by name, or throw — the boot path in src/payments.ts logs the message and exits on it.

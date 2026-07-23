@@ -118,7 +118,7 @@ function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response
     margin: 1.15, buyMinUsd: 5, buyMaxUsd: 2000, orderTtlMs: 4 * 60 * 60 * 1000, maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances, orders: openOrderStore(":memory:"),
     upstreamFetch: upstreamFetch as typeof fetch,
-    rails: new Map<string, RailView>([["monero", { name: "monero", createAddress: async () => ({ address: "8a", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` }]]),
+    rails: new Map<string, RailView>([["monero", { name: "monero", createPayment: async () => ({ payTo: "8a", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` }]]),
     defaultRail: "monero",
     ...over,
   };
@@ -283,7 +283,7 @@ test("reject:orders also counts the cross-process claim-lost gate (not just the 
   const errSpy = spyOn(console, "error").mockImplementation(() => {}); // the orphan path logs a warn (→ console.error)
   metrics.reset(0);
   const realOrders = openOrderStore(":memory:");
-  const orders = { ...realOrders, tryAddOrder: () => false }; // openCount stays 0 → the cap gates pass; the claim fails post-createAddress
+  const orders = { ...realOrders, tryAddOrder: () => false }; // openCount stays 0 → the cap gates pass; the claim fails post-createPayment
   const { handler } = makeHandler(okStream(), { orders });
   expect((await handler(buyReq(A))).status).toBe(503);
   expect(metrics.snapshot().reject.orders).toBe(1);

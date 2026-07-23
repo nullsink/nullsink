@@ -109,6 +109,9 @@ export function openOrderStore(path: string) {
   const byHashAddrStmt = db.query<PendingOrder, [string, string]>(
     "SELECT * FROM pending_orders WHERE hash = ? AND address = ? LIMIT 1",
   );
+  const byHashRailIndexStmt = db.query<PendingOrder, [string, string, number]>(
+    "SELECT * FROM pending_orders WHERE hash = ? AND rail = ? AND order_index = ? LIMIT 1",
+  );
   const countStmt = db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM pending_orders");
   const markSeenStmt = db.query<never, [number, string, number]>(
     "UPDATE pending_orders SET seen_at = ? WHERE rail = ? AND order_index = ? AND seen_at IS NULL",
@@ -176,6 +179,12 @@ export function openOrderStore(path: string) {
   // property as above: a non-matching address is indistinguishable from a closed/never-existed order.
   function openOrderByHashAddress(hash: string, address: string): PendingOrder | null {
     return byHashAddrStmt.get(hash, address) ?? null;
+  }
+
+  // Short status-poll scope returned by /buy as `${rail}:${order_index}`. This avoids posting a long BOLT11
+  // invoice back on every Lightning status check while preserving the exact same hash-scoped lookup.
+  function openOrderByHashRailIndex(hash: string, rail: string, orderIndex: number): PendingOrder | null {
+    return byHashRailIndexStmt.get(hash, rail, orderIndex) ?? null;
   }
 
   // Drop an order's row — on its first confirmed payment (pay-once) or a reap. Also drops the index→hash
@@ -268,7 +277,7 @@ export function openOrderStore(path: string) {
   }
 
   return {
-    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, openOrderByHashAddress, removeOrder, purgeStale, markSeen,
+    db, tryAddOrder, openOrders, openCount, latestOpenOrderByHash, openOrderByHashAddress, openOrderByHashRailIndex, removeOrder, purgeStale, markSeen,
     enqueueCredit, listUnackedCredits, unackedCreditCount, ackCredit, oldestUnackedCreditAt, recordRevenue, listRevenue, commitSettlement,
   };
 }

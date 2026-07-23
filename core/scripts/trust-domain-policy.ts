@@ -70,6 +70,7 @@ export const INTENTIONAL_PAYMENTS_ONLY_RUNTIME = new Set([
   "rails/bitcoin.ts",
   "rails/catalog.ts",
   "rails/index.ts",
+  "rails/lightning.ts",
   "rails/monero.ts",
   "rails/rate.ts",
   "rails/units.ts",

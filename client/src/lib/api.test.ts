@@ -124,6 +124,12 @@ test("fetchOrderStatus POSTs the hash and returns parsed status; preserves typed
   expect(bodyOf(calls[0])).toEqual({ hash: "HASH", address: "PAY_TO_ADDR" });
   expect(JSON.stringify(calls[0].init)).not.toContain("x-api-key");
 
+  // New quotes carry a compact order_id, so a long BOLT11 invoice is never echoed on every status poll.
+  calls = [];
+  stubFetch(() => json({ state: "waiting" }));
+  await fetchOrderStatus("HASH", "lightning:42");
+  expect(bodyOf(calls[0])).toEqual({ hash: "HASH", order_id: "lightning:42" });
+
   stubFetch(() => new Response("x", { status: 404 }));
   await expect(fetchOrderStatus("HASH")).rejects.toEqual({ kind: "server", status: 404, retryAfterSec: undefined });
 });
@@ -141,6 +147,21 @@ test("trocadorSwapUrl prefills AnonPay: lowercased ticker, verbatim amount, no r
   expect(p.get("name")).toBe("nullsink");
   expect(p.get("description")).toBe("api credit");
   expect(p.has("ref")).toBe(false); // TROCADOR_REF === "" → the param is omitted entirely
+});
+
+test("trocadorSwapUrl refuses to treat a Lightning invoice as an on-chain BTC address", () => {
+  expect(() =>
+    trocadorSwapUrl({
+      pay_to: "lnbc1invoice",
+      rail: "lightning",
+      amount: "0.0001",
+      unit: "BTC",
+      pay_uri: "lightning:lnbc1invoice",
+      rate_usd: 60_000,
+      confirmations_required: 0,
+      expires_at: 1,
+    }),
+  ).toThrow(/cannot be used as on-chain/i);
 });
 
 // --- buyErrorMessage (pure code → copy) -------------------------------------

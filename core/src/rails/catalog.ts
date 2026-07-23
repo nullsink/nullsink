@@ -12,6 +12,7 @@ export type RailMeta = { unit: string; scale: number };
 export const RAIL_META: Record<string, RailMeta> = {
   monero: { unit: "XMR", scale: ATOMIC_PER_XMR },
   bitcoin: { unit: "BTC", scale: SATS_PER_BTC },
+  lightning: { unit: "BTC", scale: SATS_PER_BTC },
 };
 
 // Known rail names — the allow-list `nsk orders --rail` checks (a typo errors; a known-but-inactive rail just

@@ -1,6 +1,7 @@
 # Trust model
 
-nullsink is a prepaid, account-less LLM proxy paid in Monero or Bitcoin. This doc states
+nullsink is a prepaid, account-less LLM proxy paid in Monero or Bitcoin (on-chain, with
+Bitcoin Lightning experimental and disabled by default). This doc states
 what it guarantees, how the code enforces each guarantee, and — honestly — what it does
 **not** protect against. The point is to let you verify the claims against the source rather
 than take them on faith. See [architecture.md](architecture.md) for how the pieces fit.
@@ -14,7 +15,8 @@ than take them on faith. See [architecture.md](architecture.md) for how the piec
 | **No request logs, no content retention** | `log.ts` records only operational lines — never a per-request entry, and never a user-linkable pair (no token hash beside a txid or address). Prompts and outputs stream straight through and are never stored; the OpenAI provider also forces `store:false` so the upstream retains nothing. (Tinfoil gets no such flag — `store` is OpenAI-specific — and its non-retention rests on enclave ephemerality; a local attesting proxy verifies, before forwarding, that we reach a genuine enclave running Tinfoil's published image — operator integrity, see [tinfoil-attestation.md](tinfoil-attestation.md).) Aggregate metrics are kept — see *What we do collect*, below. |
 | **Payment and token are unlinkable** | The payment ↔ token link lives only in `pending.db` (`ledger/orders.ts`), a separate database from balances, and is dropped the moment an order settles (`ledger/settle.ts`). The idempotency and revenue records hold no hash and no address. |
 | **Your key and identity never leak upstream** | `http/headers.ts` strips the headers that identify the caller or our account before forwarding — the client's auth (we inject our own), any org/beta headers, and the client's SDK fingerprint — and scrubs our org/project headers off responses; the exact list is the `STRIP` set in the source. |
-| **Watch-only custody** | The wallets on the box are view-only (Monero) / watch-only (Bitcoin). `rails/monero.ts` and `rails/bitcoin.ts` only mint addresses and read incoming transfers — there is no spend, sweep, or withdraw call anywhere in the code. The spend key stays cold/offline. |
+| **On-chain watch-only custody** | The on-chain wallets are view-only (Monero) / watch-only (Bitcoin). `rails/monero.ts` and `rails/bitcoin.ts` only create addresses and read incoming transfers — there is no spend, sweep, or withdraw call. Their spend keys stay cold/offline. |
+| **Lightning hot custody (experimental, disabled by default)** | LND must sign live channel updates and therefore holds hot keys plus money-critical channel/invoice state. `rails/lightning.ts` exposes invoice creation and settlement reads only, using a narrowly permissioned macaroon, but node compromise can still put capped channel funds at risk. Mainnet requires tested seed+SCB recovery, off-box backup, liquidity/health alerts, watchtower coverage and an explicit hot-funds limit. |
 | **Rate limits don't identify you** | `ratelimit.ts` is a single global bucket — no per-IP or per-token keying. The code handles no client IP at all. |
 | **Your balance can't go negative** | The debit is an atomic conditional update (`ledger/db.ts`), and settlement bounds every refund to the hold it releases (`handler.ts`, `billActual`). See [billing-model.md](billing-model.md). |
 | **Errors don't leak our key, billing, or provider state** | `handler.ts` (`relayOrMaskUpstream`) relays only clearly user-fixable errors verbatim and masks everything else (our key status, our billing state, provider outages) behind an opaque code. |

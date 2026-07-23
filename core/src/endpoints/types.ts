@@ -32,6 +32,7 @@ export type PaymentsEndpointDeps = {
   openCount: OrdersStore["openCount"]; // /buy: in-flight ceiling pre-check
   latestOpenOrderByHash: OrdersStore["latestOpenOrderByHash"]; // /order-status unscoped fallback (no address)
   openOrderByHashAddress: OrdersStore["openOrderByHashAddress"]; // /order-status scoped to the client's tracked order
+  openOrderByHashRailIndex: OrdersStore["openOrderByHashRailIndex"]; // short order_id scope (Lightning-safe)
   buyRateLimit?: TokenBucket; // global /buy burst guard; omitted = no limit (tests)
   readRateLimit?: TokenBucket; // global read throttle for /order-status + /rails; omitted = no limit. One bucket per trust domain.
   orderStatus?: (orderIndex: number, rail?: string) => OrderProgress | undefined; // live payment progress

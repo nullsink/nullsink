@@ -155,7 +155,7 @@ async function pollRail(rail: PayRail): Promise<void> {
     asset: rail.name,
     rail: rail.name, // scope settle's pending_orders reads/reaps to THIS rail
     backstopMs: ORDER_BACKSTOP_MS,
-    unfundedReapMs: ORDER_TTL_MS + REAP_GRACE_MS,
+    unfundedReapMs: (rail.orderTtlMs ?? ORDER_TTL_MS) + REAP_GRACE_MS,
   });
   if (enqueued > 0) metrics.recordCredit("enqueued", enqueued);
   // Refresh the live /order-status view AFTER settle has removed credited/reaped orders, so closed ones drop out.

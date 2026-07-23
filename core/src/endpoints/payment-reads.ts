@@ -17,7 +17,7 @@ const MAX_ADDRESS_LEN = 128;
 // (settle.ts), so a credited/reaped/never-existed order all read `closed` — the dropped-link privacy
 // property. The client confirms the actual credit via /balance.
 export function makeOrderStatus(d: PaymentsEndpointDeps) {
-  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, orderStatus, readRateLimit } = d;
+  const { rails: RAILS, defaultRail: DEFAULT_RAIL, maxBuyBodyBytes: MAX_BUY_BODY_BYTES, orderTtlMs: ORDER_TTL_MS, latestOpenOrderByHash, openOrderByHashAddress, openOrderByHashRailIndex, orderStatus, readRateLimit } = d;
   return async (req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
     if (throttled) return throttled;
@@ -36,7 +36,22 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
       if (typeof body.address !== "string" || body.address.length > MAX_ADDRESS_LEN) return deny(400, "invalid_address");
       address = body.address;
     }
-    const order = address !== null ? openOrderByHashAddress(hash, address) : latestOpenOrderByHash(hash);
+    // New clients scope with the compact order_id returned by /buy. Older clients may still post the
+    // address; keep that path until cached bundles age out. If both are present, order_id is authoritative.
+    let orderId: { rail: string; index: number } | null = null;
+    if (body?.order_id !== undefined) {
+      if (typeof body.order_id !== "string" || body.order_id.length > 64) return deny(400, "invalid_order_id");
+      const match = /^([a-z][a-z0-9_-]{0,31}):(0|[1-9]\d*)$/.exec(body.order_id);
+      const index = match ? Number(match[2]) : NaN;
+      if (!match || !Number.isSafeInteger(index)) return deny(400, "invalid_order_id");
+      orderId = { rail: match[1]!, index };
+    }
+    const order =
+      orderId !== null
+        ? openOrderByHashRailIndex(hash, orderId.rail, orderId.index)
+        : address !== null
+          ? openOrderByHashAddress(hash, address)
+          : latestOpenOrderByHash(hash);
     if (!order) return Response.json({ state: "closed" });
     // Format by the ORDER's rail (a BTC order shows BTC sats/unit even while Monero is also active).
     // Fallback fires only if a rail is dropped from PAY_RAILS with open orders still live — it would then
@@ -72,7 +87,7 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
       received: (received / r.scale).toFixed(decimalsOf(r.scale)),
       expected: (order.expected_atomic / r.scale).toFixed(decimalsOf(r.scale)),
       unit: r.unit,
-      expires_at: order.created_at + ORDER_TTL_MS,
+      expires_at: order.created_at + (r.orderTtlMs ?? ORDER_TTL_MS),
     });
   };
 }
@@ -81,13 +96,19 @@ export function makeOrderStatus(d: PaymentsEndpointDeps) {
 // Lets the client render a coin picker without hardcoding the set; privacy-neutral (reveals only which coins
 // we accept, already public). A cheap read — the shared read limit applies.
 export function makeRails(d: PaymentsEndpointDeps) {
-  const { rails: RAILS, defaultRail: DEFAULT_RAIL, readRateLimit } = d;
+  const { rails: RAILS, defaultRail: DEFAULT_RAIL, orderTtlMs: ORDER_TTL_MS, readRateLimit } = d;
   return async (_req: Request): Promise<Response> => {
     const throttled = readThrottled(readRateLimit);
     if (throttled) return throttled;
     return Response.json({
       default: DEFAULT_RAIL,
-      rails: [...RAILS.values()].map((rv) => ({ name: rv.name, unit: rv.unit, confirmations: rv.confirmations })),
+      rails: [...RAILS.values()].map((rv) => ({
+        name: rv.name,
+        unit: rv.unit,
+        confirmations: rv.confirmations,
+        settlement: rv.confirmations === 0 ? "instant" : "confirmations",
+        order_ttl_ms: rv.orderTtlMs ?? ORDER_TTL_MS,
+      })),
     });
   };
 }
