@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly pull of nullsink encrypted backups
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=10min
+Persistent=true
+Unit=nullsink-backup-pull.service
+
+[Install]
+WantedBy=timers.target

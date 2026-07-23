@@ -136,6 +136,46 @@ test("backup publishes a validated encrypted artifact and an aggregate-only repo
   for (const forbidden of [HASH, OTHER_HASH, ADDRESS, ORDER_ID, "delivered-order"]) expect(raw).not.toContain(forbidden);
 });
 
+test("backup can publish finalized files to one dedicated export group", () => {
+  const w = workspace();
+  seedDatabases(w.db);
+  const group = Bun.spawnSync(["id", "-gn"], { stdout: "pipe" }).stdout.toString().trim();
+
+  const result = runBackup({
+    PATH: `${w.bin}:${process.env.PATH}`,
+    DB_DIR: w.db,
+    BACKUP_DIR: w.backups,
+    BACKUP_AGE_RECIPIENT: "age1test",
+    BACKUP_EXPORT_GROUP: group,
+    FAKE_AGE_MARKER: w.ageMarker,
+  });
+  const output = result.stdout.toString() + result.stderr.toString();
+  expect(result.exitCode, output).toBe(0);
+
+  const names = readdirSync(w.backups);
+  const artifactName = names.find((name) => /^backup-.*\.tar\.age$/.test(name));
+  const reportName = names.find((name) => /^report-.*\.json$/.test(name));
+  expect(statSync(join(w.backups, artifactName!)).mode & 0o777).toBe(0o640);
+  expect(statSync(join(w.backups, reportName!)).mode & 0o777).toBe(0o640);
+});
+
+test("backup refuses to expose a plaintext archive through the collector group", () => {
+  const w = workspace();
+  seedDatabases(w.db);
+  const group = Bun.spawnSync(["id", "-gn"], { stdout: "pipe" }).stdout.toString().trim();
+
+  const result = runBackup({
+    PATH: `${w.bin}:${process.env.PATH}`,
+    DB_DIR: w.db,
+    BACKUP_DIR: w.backups,
+    BACKUP_EXPORT_GROUP: group,
+  });
+  const output = result.stdout.toString() + result.stderr.toString();
+  expect(result.exitCode).not.toBe(0);
+  expect(output).toContain("plaintext archives must not enter the export boundary");
+  expect(readdirSync(w.backups)).toEqual([]);
+});
+
 test("backup validates the matched pair before invoking encryption or publishing a final name", () => {
   const w = workspace();
   seedDatabases(w.db, { missingTombstoneMarker: true });

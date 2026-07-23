@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Lint the deploy + ops artifacts: shellcheck every deploy/*.sh, core/scripts/*.sh, and .github/scripts/*.sh;
+# Lint the deploy + ops artifacts: shellcheck the app deploy scripts, role-specific backup collector scripts,
+# core/scripts/*.sh, and .github/scripts/*.sh;
 # then check that the Caddyfile parses, is caddy-fmt clean, and satisfies its live error contract. Run locally
 # before pushing — CI runs this exact script with pinned linters. The deploy scripts/units ARE how the box
 # runs, so they get gated like app code. Needs `shellcheck`, `caddy`, and `bun` on PATH.
@@ -8,9 +9,9 @@ cd "$(dirname "$0")/.." || exit 1   # repo root, so it works from any cwd
 
 # --- shell scripts ---
 shopt -s nullglob
-scripts=(deploy/*.sh scripts/*.sh ../.github/scripts/*.sh)
+scripts=(deploy/*.sh deploy/backup-collector/*.sh scripts/*.sh ../.github/scripts/*.sh)
 if [ "${#scripts[@]}" -eq 0 ]; then
-  echo "lint: no deploy/*.sh, scripts/*.sh, or .github/scripts/*.sh matched — nothing to check (did the paths move?)" >&2
+  echo "lint: no deploy, collector, core/script, or GitHub shell scripts matched — nothing to check (did the paths move?)" >&2
   exit 1
 fi
 echo ">>> shellcheck (${#scripts[@]}): ${scripts[*]}"
