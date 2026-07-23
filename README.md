@@ -155,6 +155,7 @@ Claude rides a bundled pipe function. Full walkthrough — connection, pipe inst
 ## Docs
 
 - [docs/architecture.md](docs/architecture.md) — how the pieces fit together
+- [docs/architecture-roadmap.md](docs/architecture-roadmap.md) — shipped topology, the next app-box boundary, and its implementation gates
 - [docs/trust-model.md](docs/trust-model.md) — the privacy and money-safety guarantees (and what's *not* covered)
 - [docs/billing-model.md](docs/billing-model.md) — pricing, holds, settlement, no-overdraft
 

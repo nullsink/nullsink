@@ -36,7 +36,7 @@ export function makeSocketSender(sockPath: string, timeoutMs = 5_000): CreditSen
   };
 }
 
-// Drain unacked outbox rows, oldest first, through `send`. Ack ONLY on a definite outcome. Stop at the FIRST
+// Drain unacked outbox rows, oldest first, through `send`. Ack + scrub ONLY on a definite outcome. Stop at the FIRST
 // ambiguous result and leave the rest for the next tick — the rows are durable, and stopping avoids hammering a
 // down socket once per row. Consequence, deliberate: a persistently-failing head row (poison payload, wire skew)
 // BLOCKS the queue. That is fail-closed — no credit is lost, and the oldest-unacked-age alert is what surfaces it.

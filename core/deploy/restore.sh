@@ -26,6 +26,11 @@ DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 SVC_USER="${SVC_USER:-nullsink}"
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
+RESTORE_MAX_MEMBER_BYTES="${RESTORE_MAX_MEMBER_BYTES:-8589934592}" # 8 GiB/member; real billing DBs are far smaller
+[[ "$RESTORE_MAX_MEMBER_BYTES" =~ ^[0-9]+$ ]] && [ "$RESTORE_MAX_MEMBER_BYTES" -gt 0 ] || {
+  echo "RESTORE_MAX_MEMBER_BYTES must be a positive integer" >&2
+  exit 1
+}
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -41,8 +46,52 @@ case "$artifact" in
     cp "$artifact" "$tarball" ;;
 esac
 
+# Treat a backup as untrusted input until its archive shape is proven. backup.sh emits only these three flat
+# regular files. Exact-name allowlisting rejects absolute paths and traversal; counts reject duplicate entries
+# whose extraction order could otherwise make the file we inspect differ from the file an operator expects.
+members="$(tar -tf "$tarball" 2>/dev/null)" || { echo "could not list backup archive — wrong/corrupt file?" >&2; exit 1; }
+[ -n "$members" ] || { echo "backup archive is empty" >&2; exit 1; }
+seen_balances=0
+seen_pending=0
+seen_labels=0
+while IFS= read -r member; do
+  case "$member" in
+    balances.db) seen_balances=$((seen_balances + 1)); [ "$seen_balances" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    pending.db) seen_pending=$((seen_pending + 1)); [ "$seen_pending" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    bitcoin-wallet-labels.json) seen_labels=$((seen_labels + 1)); [ "$seen_labels" -eq 1 ] || { echo "duplicate archive member: $member" >&2; exit 1; } ;;
+    *) echo "unexpected archive member: $member" >&2; exit 1 ;;
+  esac
+done <<< "$members"
+[ "$seen_balances" -eq 1 ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
+
+# GNU tar and bsdtar render different owner columns, but expected member names contain no spaces and are the
+# final field in both formats. Regular-file type is the first character; size is field 3 (GNU) or 5 (BSD).
+verbose_members="$(tar -tvf "$tarball" 2>/dev/null)" || { echo "could not inspect backup archive" >&2; exit 1; }
+verbose_count=0
+while IFS= read -r verbose_member; do
+  verbose_count=$((verbose_count + 1))
+  type="${verbose_member:0:1}"
+  [ "$type" = - ] || { echo "backup archive contains a non-regular member" >&2; exit 1; }
+  size="$(awk '{ if ($2 ~ /^[0-9]+$/ && $5 ~ /^[0-9]+$/) print $5; else if ($3 ~ /^[0-9]+$/) print $3; }' <<< "$verbose_member")"
+  [[ "$size" =~ ^[0-9]+$ ]] || { echo "could not determine archive member size" >&2; exit 1; }
+  [ "$size" -le "$RESTORE_MAX_MEMBER_BYTES" ] || {
+    echo "backup archive member exceeds RESTORE_MAX_MEMBER_BYTES ($size > $RESTORE_MAX_MEMBER_BYTES)" >&2
+    exit 1
+  }
+done <<< "$verbose_members"
+[ "$verbose_count" -eq $((seen_balances + seen_pending + seen_labels)) ] || {
+  echo "backup archive member listing is inconsistent" >&2
+  exit 1
+}
+
 tar -C "$work" -xf "$tarball"
-[ -f "$work/balances.db" ] || { echo "no balances.db inside the artifact — wrong/corrupt file?" >&2; exit 1; }
+[ -f "$work/balances.db" ] && [ ! -L "$work/balances.db" ] || { echo "archive did not extract a regular balances.db" >&2; exit 1; }
+for extracted in "$work/pending.db" "$work/bitcoin-wallet-labels.json"; do
+  [ ! -e "$extracted" ] || { [ -f "$extracted" ] && [ ! -L "$extracted" ]; } || {
+    echo "archive did not extract a regular $(basename "$extracted")" >&2
+    exit 1
+  }
+done
 
 # Verify each extracted DB before trusting it (a backup that won't open is no backup). The `|| true` is
 # load-bearing: on a not-a-database / truncated / bad-header file, sqlite3 EXITS non-zero (SQLITE_NOTADB=26),
@@ -56,8 +105,50 @@ for db in "$work/balances.db" "$work/pending.db"; do
   else echo "integrity FAILED: $(basename "$db"): ${res:-sqlite3 could not open it (not a database?)}" >&2; exit 1; fi
 done
 
+# Validate the cross-database money invariant, not just each SQLite file in isolation. A delivered tombstone
+# has intentionally forgotten its hash + amount, so unlike a legacy acknowledged payload it CANNOT be re-armed
+# to repair an older/mismatched balances.db. Every tombstone in the artifact must therefore have the matching
+# applied_orders marker in the SAME artifact. Refuse poison/half-scrubbed rows too: an unacked tombstone would
+# head-of-line block every real credit behind it.
+if [ -f "$work/pending.db" ]; then
+  artifact_has_outbox="$(sqlite3 "$work/pending.db" \
+    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';")"
+  if [ "$artifact_has_outbox" = 1 ]; then
+    invalid_rows="$(sqlite3 "$work/pending.db" \
+      "SELECT COUNT(*) FROM credit_outbox
+        WHERE (acked_at IS NULL AND (hash = '' OR micros < 0))
+           OR (acked_at IS NOT NULL AND ((hash = '' AND micros <> 0) OR (hash <> '' AND micros < 0))); ")"
+    [ "$invalid_rows" = 0 ] || {
+      echo "billing invariant FAILED: pending.db has $invalid_rows poison or partially scrubbed credit-outbox row(s)" >&2
+      exit 1
+    }
+
+    tombstones="$(sqlite3 "$work/pending.db" \
+      "SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NOT NULL AND hash = '' AND micros = 0;")"
+    if [ "$tombstones" -gt 0 ]; then
+      artifact_has_applied="$(sqlite3 "$work/balances.db" \
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';")"
+      [ "$artifact_has_applied" = 1 ] || {
+        echo "billing invariant FAILED: pending.db has scrubbed delivery tombstones but balances.db has no applied_orders table" >&2
+        exit 1
+      }
+      missing_markers="$(sqlite3 "$work/pending.db" \
+        "ATTACH '$work/balances.db' AS bal;
+         SELECT COUNT(*) FROM credit_outbox AS outbox
+          WHERE outbox.acked_at IS NOT NULL AND outbox.hash = '' AND outbox.micros = 0
+            AND NOT EXISTS (SELECT 1 FROM bal.applied_orders AS applied
+                             WHERE applied.order_id = outbox.idempotency_key);")"
+      [ "$missing_markers" = 0 ] || {
+        echo "billing invariant FAILED: $missing_markers scrubbed credit tombstone(s) have no matching ledger marker — DB snapshots are mismatched" >&2
+        exit 1
+      }
+      echo "billing pair OK: $tombstones scrubbed delivery tombstone(s) backed by ledger markers"
+    fi
+  fi
+fi
+
 if [ "$apply" -eq 0 ]; then
-  echo "--- dry-run OK: the artifact is intact and restorable. Re-run with --apply to restore for real. ---"
+  echo "--- dry-run OK: the artifact is intact and internally consistent. Re-run with --apply to restore for real. ---"
   exit 0
 fi
 
@@ -67,6 +158,14 @@ fi
 # in, keeping the previous live DB as <db>.prerestore for recovery. The snapshots are already checkpointed,
 # so the stale -wal/-shm are dropped.
 [ "$(id -u)" -eq 0 ] || { echo "--apply must run as root (it installs files + (re)starts the services)" >&2; exit 1; }
+
+# A balances-only restore over a scrub-era pending.db can rewind the receiver below acknowledgements whose
+# payloads no longer exist. There is nothing safe to redeliver, so prohibit that partial restore. Historical
+# balances-only artifacts remain applicable only to installations that do not yet have pending.db.
+if [ ! -f "$work/pending.db" ] && [ -f "$DB_DIR/pending.db" ]; then
+  echo "unsafe partial restore refused: artifact has balances.db but no pending.db; scrub-era billing DBs must be restored as a matched pair" >&2
+  exit 1
+fi
 
 staged=()
 for db in balances.db pending.db; do
@@ -104,11 +203,11 @@ done
 # cross-DB ATTACH rather than un-acking everything, so a box with a long history redelivers only what is
 # genuinely missing instead of its entire lifetime of credits.
 #
-# NEVER un-ack a TOMBSTONE. Some outboxes carry acked marker rows with hash='' and micros=0 — seeded once per
-# already-applied key so a zombie order the old ledger had already credited could not double-book its sale;
-# the real credit landed long ago and its values were never recorded here. Un-acking one hands the sender a
-# row whose empty hash can never be delivered, wedging every genuine credit queued behind it. `hash <> ''`
-# selects real credits only: settle() always enqueues a 64-hex token hash and nothing else writes ''.
+# NEVER un-ack a TOMBSTONE. Current releases intentionally turn definitely delivered rows into hash='' and
+# micros=0; older migrations may also contain marker-only rows. Un-acking one hands the sender an empty,
+# undeliverable payload, wedging every genuine credit queued behind it. Artifact validation above already
+# proved each scrubbed tombstone has a matching ledger marker. `hash <> ''` selects real credits only:
+# settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
 # Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
 # break the services' billing writes (the same trap cli/guard.ts exists to prevent).

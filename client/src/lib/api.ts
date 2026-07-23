@@ -283,8 +283,8 @@ export async function checkBalance(rawToken: string): Promise<number | null> {
 // Live payment progress for an in-flight order, keyed by the token's HASH (never the raw token — so a
 // re-check during the wait never puts the spendable secret on the wire; that's reserved for /balance).
 // `closed` means there's no open order for this hash: it may have credited, been reaped, or never
-// existed — the server can't tell (the link is dropped at settle), so the caller falls back to /balance
-// for the authoritative outcome.
+// existed — the active-order link is dropped at settle (the durable delivery payload is separately scrubbed
+// after a definite ledger acknowledgement), so the caller falls back to /balance for the authoritative outcome.
 export interface OrderStatus {
   // `detected` = the server has durably seen an inbound for this order (pending_orders.seen_at) but has no
   // live confirmation count right now — its progress map is process-local and empty after a restart, and the

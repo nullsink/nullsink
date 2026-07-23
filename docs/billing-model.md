@@ -84,14 +84,16 @@ stateDiagram-v2
     Quoted --> Unfunded: never seen, age past TTL + grace (default ~4.5h)
     Paying --> Credited: deposit final (rail's confirmations reached)
     Paying --> Stuck: never confirms, age past backstop (default 24h)
-    Credited --> [*]: credit the balance, drop the payment-token link
+    Credited --> [*]: ack the credit, scrub hash + amount
     Unfunded --> [*]: reap the order
     Stuck --> [*]: stop watching the address
 ```
 
 Crediting is exactly-once (idempotent per deposit) and proportional to the coin actually received
 against the locked quote; a confirmed payment closes the order on first sight, so a later top-up
-is a fresh order. The two reap paths differ on purpose. An order *never seen* paying is treated as
+is a fresh order. The closed order's delivery payload remains only until the balance ledger returns
+a definite acknowledgement; that acknowledgement clears the token hash and amount while retaining
+the idempotency tombstone. The two reap paths differ on purpose. An order *never seen* paying is treated as
 abandoned and dropped quickly (the unfunded reap). One that *was seen* but never reaches finality —
 a dropped or replaced transaction — is the rarer **stuck** case: because a payment was spotted, it's
 spared the fast reap and held all the way to the backstop. That extra time is what lets a buyer who

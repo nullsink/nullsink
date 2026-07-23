@@ -43,8 +43,8 @@ MONERO_SHA256_X64="22a7dda7b0cb699fdd6b7674c3b4a4465b337cc98a54983523b759e1e7cc9
 # weaker than the Bitcoin/Monero pins: its SHA256SUMS is an unsigned CI artifact, so this is trust-on-first-use
 # (checked once at authoring) then pinned by SHA. The enclave measurement still floats with Tinfoil's latest
 # Sigstore-gated release; the proxy CLI offers no measurement pin (see docs/tinfoil-attestation.md).
-TINFOIL_PROXY_VERSION="v0.1.6"
-TINFOIL_PROXY_SHA256_X64="0efa144e09bcc4d68ed8b167f14e07ca46d0459158b839789ba452d6da4144cf"
+TINFOIL_PROXY_VERSION="v0.1.7"
+TINFOIL_PROXY_SHA256_X64="97d281b61c2a3f48c7d5288353956240581265f36a4e27f75e96d6af7e1137b2"
 
 fetch_verified() {  # $1=url $2=sha256 $3=dest — download + checksum-check; refuses on mismatch
   # Explicit `|| return 1` on the checksum, not a bare `set -e` gate: install_verified_tinfoil_proxy is called

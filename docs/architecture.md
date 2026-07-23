@@ -1,14 +1,16 @@
 # Architecture
 
-nullsink is a metered proxy in front of Anthropic and OpenAI. A user prepays with
+nullsink is a metered proxy in front of Anthropic, OpenAI, and Tinfoil. A user prepays with
 Monero, on-chain Bitcoin, or the experimental Bitcoin Lightning rail, gets a bearer token,
 and spends it against a balance. Each request
 is forwarded upstream with *our* provider key and billed for exact usage. We keep no
 identity and no request logs: a token is a bearer secret, and only its SHA-256 hash is
 ever stored.
 
-This doc maps how the pieces fit. For the privacy and money-safety guarantees see
-[trust-model.md](trust-model.md); for the billing math see [billing-model.md](billing-model.md).
+This doc maps how the shipped pieces fit. The current-versus-next diagram and staged
+implementation gates live in [architecture-roadmap.md](architecture-roadmap.md). For the
+privacy and money-safety guarantees see [trust-model.md](trust-model.md); for the billing
+math see [billing-model.md](billing-model.md).
 
 ## The shape: two processes over a pure core
 
@@ -100,10 +102,11 @@ subaddress, Bitcoin HD index, or LND `add_index`.
   idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
   a row exists while a hold is outstanding, and survivors are refunded at boot).
 - **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
-  `credit_outbox` (credits owed to the balance ledger). Orders are the **only** place the payment
-  ↔ token link lives, in a separate database on purpose: a leak of `balances.db` can't reveal who
-  funded which token. The link is dropped when the order settles. Coin amounts, locked rates, and
-  transaction-derived keys stay on this side of the wall too.
+  `credit_outbox` (credits owed to the balance ledger). The payment ↔ token link lives only in this
+  database: first on the open order, then on its durable, unacknowledged outbox row. A definite ledger
+  acknowledgement atomically clears that row's token hash and credit amount while preserving its
+  idempotency key and timestamps as a tombstone. Coin amounts, locked rates, and transaction-derived
+  keys stay on the payment side of the wall.
 
 Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
 / `financials`) is the exception and a second writer: it opens both directly on the box, and
@@ -128,6 +131,17 @@ rail's idempotency key, so a redelivery is a no-op that still reports a definite
 anywhere — before the ack, mid-socket, during the credit — leaves a durable row that is simply
 retried. Delivery stops at the first ambiguous row rather than skipping past it, so credits cannot
 be reordered around a stuck one.
+
+On the first start after upgrading from a pre-scrub release, payments re-arms every acknowledged
+row that still carries a payload. Normal exactly-once delivery then verifies or repairs the ledger
+before the row is scrubbed; an existing `applied_orders` marker makes the replay a no-op. This avoids
+turning a historical, independently restored `balances.db` into silent lost credit.
+
+Scrubbing changes the restore contract. A tombstone no longer has enough data to reconstruct a
+credit, so `pending.db` and `balances.db` are a matched backup pair. `backup.sh` snapshots pending
+first and balances second, ensuring every captured acknowledgement has its later receiver marker;
+`restore.sh` verifies that every scrubbed tombstone has that marker and refuses a balances-only
+restore over a scrub-era pending database.
 
 Authentication is the filesystem. The socket is a pathname socket bound owner-only, and Linux
 checks write permission on the socket file at `connect(2)` — an unspoofable, kernel-enforced gate
@@ -155,7 +169,8 @@ POST /buy {hash, credit_usd, rail?}                              [payments]
 poller tick → rail.incomingTransfers() → settle()               [payments]
   → one transaction: drop the order, book the sale, enqueue the credit
   → drain the outbox over the credit socket
-       → creditOnce(hash) → ack                                 [proxy]
+       → creditOnce(hash) → definite ack                        [proxy]
+       → scrub hash + amount; retain idempotency tombstone      [payments]
 ```
 
 **Spend** — billing a request:

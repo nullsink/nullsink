@@ -15,6 +15,10 @@ const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
 const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
+const backup = readFileSync(deploy("backup.sh"), "utf8");
+const backupReport = readFileSync(deploy("backup-report.sh"), "utf8");
+const backupTimer = readFileSync(deploy("backup.timer"), "utf8");
+const restore = readFileSync(deploy("restore.sh"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
 
@@ -49,6 +53,12 @@ test("both systemd units and both roots use the one owner-authenticated credit s
   expect(payments).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
   expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
+});
+
+test("payments starts only after the proxy credit socket is ready", () => {
+  expect(proxyUnit).toContain("ExecStartPost=/bin/sh -c 'until [ -S /run/nullsink/credit.sock ]; do sleep 0.1; done'");
+  expect(proxyUnit).toContain("TimeoutStartSec=60");
+  expect(paymentsUnit).toContain("After=nullsink-proxy.service");
 });
 
 test("the Monero wallet keeps ring metadata outside its protected home", () => {
@@ -90,4 +100,40 @@ test("balance responses are never stored by an intermediary", () => {
   // handler chain, so its Caddy-generated proxy outage also sets no-store explicitly.
   expect(caddy).toMatch(/handle \/balance \{[\s\S]*?header >Cache-Control "no-store"[\s\S]*?reverse_proxy 127\.0\.0\.1:8080/);
   expect(caddy).toMatch(/handle @balance_outage \{\n\t\t\theader Cache-Control "no-store"/);
+});
+
+test("backup and restore preserve the scrubbed-outbox money invariant", () => {
+  // The outbox snapshot must precede the ledger snapshot: any tombstone/ack captured in pending.db is then
+  // guaranteed to have its applied_orders marker captured in the later balances.db snapshot.
+  expect(backup.indexOf(".backup '$work/pending.db'")).toBeGreaterThan(-1);
+  expect(backup.indexOf(".backup '$work/balances.db'")).toBeGreaterThan(backup.indexOf(".backup '$work/pending.db'"));
+
+  // A tombstone has no payload to replay. Restore must verify its receiver marker, never re-arm it, and reject
+  // a balances-only restore over a deployment that already has pending.db.
+  expect(restore).toContain("scrubbed credit tombstone(s) have no matching ledger marker");
+  expect(restore).toContain("WHERE acked_at IS NOT NULL\n          AND hash <> ''");
+  expect(restore).toContain("UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';");
+  expect(restore).toContain("unsafe partial restore refused");
+  expect(restore).not.toMatch(/SET acked_at = NULL WHERE hash = ''/);
+});
+
+test("backup publication and routine reporting follow the Step 2 egress contract", () => {
+  const validation = backup.indexOf('"$script_dir/restore.sh" "$work/backup.tar"');
+  const encryption = backup.indexOf('age -r "$BACKUP_AGE_RECIPIENT"');
+  const publication = backup.indexOf('mv -n "$artifact_tmp" "$artifact"');
+  const reporting = backup.indexOf('"$script_dir/backup-report.sh"');
+  expect(validation).toBeGreaterThan(-1);
+  expect(encryption).toBeGreaterThan(validation);
+  expect(publication).toBeGreaterThan(encryption);
+  expect(reporting).toBeGreaterThan(publication);
+  expect(backup).toContain('BACKUP_KEEP="${BACKUP_KEEP:-84}"');
+  expect(backupTimer).toContain("OnCalendar=*-*-* 00/4:00:00 UTC");
+
+  // The report queries sensitive tables only through fixed aggregate projections. These forbidden column
+  // names should appear solely in the privacy comment, never in SQL/output construction.
+  const reportBody = backupReport.slice(backupReport.indexOf("set -euo pipefail"));
+  expect(reportBody).not.toMatch(/\b(?:hash|address|idempotency_key|order_index|asset_atomic)\b/);
+  expect(backupReport).toContain("GROUP BY day, asset");
+  expect(backupReport).toContain("WHERE acked_at IS NULL");
+  expect(backupReport).toContain("SUM(balance)");
 });

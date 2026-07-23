@@ -71,6 +71,13 @@ const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerS
 
 // The one on-disk store this service owns. The proxy opens balances.db; neither touches the other's.
 const orders = openOrderStore(PENDING_DB_PATH);
+// Migrate acknowledged payloads written by pre-scrub releases through the normal exactly-once crossing. We
+// cannot erase them blindly: balances.db may have been restored independently and be missing the matching
+// applied_orders marker. Re-delivery either repairs that balance or returns already_applied; only that definite
+// response lets ackCredit scrub the link. Tombstones never match and therefore never become poison queue rows.
+const rearmedCredits = orders.rearmLegacyAckedCredits();
+if (rearmedCredits > 0)
+  log.info("credit", `re-armed ${rearmedCredits} historical delivered credit(s) for verified migration`);
 
 // Ephemeral live payment progress for /order-status, fed by the poller each tick. Held here, not the DB — it's a
 // display aid, not money, and is re-derived on the next poll after a restart.

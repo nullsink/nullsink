@@ -1,5 +1,60 @@
 # Changelog
 
+## [1.10.1](https://github.com/nullsink/nullsink/compare/v1.10.0...v1.10.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **deploy:** wait for credit socket readiness ([#129](https://github.com/nullsink/nullsink/issues/129)) ([5e4dd98](https://github.com/nullsink/nullsink/commit/5e4dd9891fcaf715559fd21d9a8c4e96da57c3f4))
+
+## [1.10.0](https://github.com/nullsink/nullsink/compare/v1.9.1...v1.10.0) (2026-07-22)
+
+
+### Features
+
+* **deploy:** define backup and financial egress ([#127](https://github.com/nullsink/nullsink/issues/127)) ([5444997](https://github.com/nullsink/nullsink/commit/54449971e975774c496aec3b583bb8b286dcad1e))
+
+
+### Bug Fixes
+
+* **privacy:** scrub delivered credit linkage ([#124](https://github.com/nullsink/nullsink/issues/124)) ([0e5eb0f](https://github.com/nullsink/nullsink/commit/0e5eb0f21d7b27c1de040094b5c10f3be57f3753))
+
+## [1.9.1](https://github.com/nullsink/nullsink/compare/v1.9.0...v1.9.1) (2026-07-17)
+
+
+### Maintenance
+
+* **deploy:** pin tinfoil-proxy v0.1.7 ([#121](https://github.com/nullsink/nullsink/issues/121)) ([1efd787](https://github.com/nullsink/nullsink/commit/1efd7870c0a6beb315cb0ca11d201b0000585c08))
+
+## [1.9.0](https://github.com/nullsink/nullsink/compare/v1.8.2...v1.9.0) (2026-07-16)
+
+
+### Features
+
+* **deploy:** add guarded component upgrades ([#120](https://github.com/nullsink/nullsink/issues/120)) ([2c99826](https://github.com/nullsink/nullsink/commit/2c998262f2165ba948588ee9e691c862257c5c01))
+
+
+### Bug Fixes
+
+* **client:** collapse same-turn quote submits ([#113](https://github.com/nullsink/nullsink/issues/113)) ([857e161](https://github.com/nullsink/nullsink/commit/857e16189bfd2452a2bd90783e09530a6d60b1be))
+* **client:** distinguish payment check failures ([#102](https://github.com/nullsink/nullsink/issues/102)) ([a870ff0](https://github.com/nullsink/nullsink/commit/a870ff0146f8982fe2502b2077483ec88373de5c))
+* **client:** keep expired orders trackable ([#114](https://github.com/nullsink/nullsink/issues/114)) ([e991d69](https://github.com/nullsink/nullsink/commit/e991d69f728f17044ec281747336efc9e10a4a48))
+* **client:** require authoritative payment verification ([#116](https://github.com/nullsink/nullsink/issues/116)) ([b55e1a7](https://github.com/nullsink/nullsink/commit/b55e1a7d4bebfc8bc1f525b93e60c1105b0611cb))
+* **client:** state the single-use constraint on the pay screen ([#98](https://github.com/nullsink/nullsink/issues/98)) ([0a7aa14](https://github.com/nullsink/nullsink/commit/0a7aa148566df584163fece2e46d39364418f418))
+* **deploy:** do not cache balance responses ([#105](https://github.com/nullsink/nullsink/issues/105)) ([1c59356](https://github.com/nullsink/nullsink/commit/1c59356b4138510cc99ed0cf0c6282328c962e95))
+* **deploy:** preserve API errors during edge outages ([#104](https://github.com/nullsink/nullsink/issues/104)) ([922f63b](https://github.com/nullsink/nullsink/commit/922f63b5f50974095a36de854627c7398d932fa4))
+* **deploy:** preserve edge error contracts ([#107](https://github.com/nullsink/nullsink/issues/107)) ([36712b1](https://github.com/nullsink/nullsink/commit/36712b12aff57f51197900adbf74a23d8823ddde))
+* **deploy:** relocate Monero shared ringdb ([#119](https://github.com/nullsink/nullsink/issues/119)) ([9f8b5c1](https://github.com/nullsink/nullsink/commit/9f8b5c1ac37eb26e1522b601ef67d0eb9ce15b65))
+* **errors:** clarify read failures ([#97](https://github.com/nullsink/nullsink/issues/97)) ([e361301](https://github.com/nullsink/nullsink/commit/e3613016b1fd72312ce5b710bfe8833683116945))
+* **metrics:** expose aggregate payment delivery health ([#117](https://github.com/nullsink/nullsink/issues/117)) ([c1beb7f](https://github.com/nullsink/nullsink/commit/c1beb7f81230c63065fadd424c09f98adf6fd451))
+* **release:** distinguish prereleases and maintenance changes ([#106](https://github.com/nullsink/nullsink/issues/106)) ([1ce9257](https://github.com/nullsink/nullsink/commit/1ce92576566ef402d27557f7546464b9a02be9e5))
+
+
+### Maintenance
+
+* **deploy:** bump pinned dependencies ([#103](https://github.com/nullsink/nullsink/issues/103)) ([0306f12](https://github.com/nullsink/nullsink/commit/0306f1237c2e198fc0f9be0ccfdae5777f375064))
+* sanity-sweep cleanup — dead code, lying comments, stale references ([#99](https://github.com/nullsink/nullsink/issues/99)) ([b73c8a2](https://github.com/nullsink/nullsink/commit/b73c8a22fb381c3aa52d3ea6cdc585861159c660))
+
 ## [1.8.2](https://github.com/nullsink/nullsink/compare/v1.8.1...v1.8.2) (2026-07-11)
 
 
