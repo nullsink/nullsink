@@ -55,6 +55,12 @@ test("both systemd units and both roots use the one owner-authenticated credit s
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
 });
 
+test("payments starts only after the proxy credit socket is ready", () => {
+  expect(proxyUnit).toContain("ExecStartPost=/bin/sh -c 'until [ -S /run/nullsink/credit.sock ]; do sleep 0.1; done'");
+  expect(proxyUnit).toContain("TimeoutStartSec=60");
+  expect(paymentsUnit).toContain("After=nullsink-proxy.service");
+});
+
 test("the Monero wallet keeps ring metadata outside its protected home", () => {
   expect(walletUnit).toContain("StateDirectory=nullsink-wallet");
   expect(walletUnit).toContain("ProtectHome=true");

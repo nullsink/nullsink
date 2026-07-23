@@ -28,6 +28,12 @@ EnvironmentFile=/etc/nullsink.env
 # Runs the self-contained `bun build --compile` artifact via the `current-proxy` symlink, swapped atomically
 # by deploy.sh/setup.sh's install_binary (versioned binary + relative symlink for rollback).
 ExecStart=/usr/local/lib/nullsink/current-proxy
+# Type=simple considers ExecStart launched before the process has bound its owner-only credit socket. Gate the
+# start job on that socket so nullsink-payments.service's After= ordering covers actual crossing readiness,
+# not merely process creation. TimeoutStartSec bounds a broken/mismatched CREDIT_SOCK boot and lets systemd
+# fail + restart the proxy instead of holding the payments start job forever.
+ExecStartPost=/bin/sh -c 'until [ -S /run/nullsink/credit.sock ]; do sleep 0.1; done'
+TimeoutStartSec=60
 Restart=always
 RestartSec=2
 
