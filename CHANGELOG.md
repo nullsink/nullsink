@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/nullsink/nullsink/compare/v1.10.0...v1.10.1) (2026-07-23)
+
+
+### Bug Fixes
+
+* **deploy:** wait for credit socket readiness ([#129](https://github.com/nullsink/nullsink/issues/129)) ([5e4dd98](https://github.com/nullsink/nullsink/commit/5e4dd9891fcaf715559fd21d9a8c4e96da57c3f4))
+
 ## [1.10.0](https://github.com/nullsink/nullsink/compare/v1.9.1...v1.10.0) (2026-07-22)
 
 
