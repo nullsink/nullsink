@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/nullsink/nullsink/compare/v1.9.1...v1.10.0) (2026-07-22)
+
+
+### Features
+
+* **deploy:** define backup and financial egress ([#127](https://github.com/nullsink/nullsink/issues/127)) ([5444997](https://github.com/nullsink/nullsink/commit/54449971e975774c496aec3b583bb8b286dcad1e))
+
+
+### Bug Fixes
+
+* **privacy:** scrub delivered credit linkage ([#124](https://github.com/nullsink/nullsink/issues/124)) ([0e5eb0f](https://github.com/nullsink/nullsink/commit/0e5eb0f21d7b27c1de040094b5c10f3be57f3753))
+
 ## [1.9.1](https://github.com/nullsink/nullsink/compare/v1.9.0...v1.9.1) (2026-07-17)
 
 
