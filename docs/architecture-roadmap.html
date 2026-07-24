@@ -99,13 +99,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-07-23<br>v1.10.1 · Step 1 shipped</div>
+    <div class="stamp">as of 2026-07-24<br>v1.11.0 · Steps 1–2 shipped</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
       <title id="roadmap-title">nullsink shipped architecture and next app-box boundary</title>
-      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and version 1.10.1 scrubs the token hash and amount after definite acknowledgement. Coordinated encrypted recovery artifacts and aggregate reports are produced on the app box; the next operational gate is installing the pull-only Raspberry Pi collector. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
+      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and version 1.10.1 scrubs the token hash and amount after definite acknowledgement. Version 1.11.0 ships coordinated encrypted recovery artifacts and aggregate reports through a restricted read-only export to an hourly Raspberry Pi collector; scheduled pulling and an offline dry-run restore are proven. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -227,10 +227,10 @@
       <text class="title" x="765" y="1139">age encryption</text>
       <text class="copy-small" x="765" y="1157">offline recipient</text>
       <path class="edge-control" d="M950 1139 L992 1139" marker-end="url(#arrowBlue)"/>
-      <rect class="node-planned" x="1000" y="1102" width="300" height="74" rx="9"/>
+      <rect class="node-shipped" x="1000" y="1102" width="300" height="74" rx="9"/>
       <text class="title" x="1025" y="1132">Pi pull collector</text>
       <text class="copy-small" x="1025" y="1152">hourly · 90d · no age identity</text>
-      <text class="label-blue" x="1150" y="1170" text-anchor="middle">next: install + prove restore</text>
+      <text class="copy-small" x="1150" y="1170" text-anchor="middle">shipped v1.11 · restore proven</text>
 
       <!-- AFTER STEPS 1-5 -->
       <rect class="panel" x="28" y="1225" width="1344" height="585" rx="18"/>

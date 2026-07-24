@@ -6,7 +6,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: shipped today and the next app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-07-23, v1.10.1
+## Status — 2026-07-24, v1.11.0
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -14,7 +14,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
-| Financial and backup egress | **Producer shipped; collector ready** | v1.10.1 produces/restores the encrypted pair and aggregate report. The pull-only Pi bundle is ready; installing it and proving its first retained restore remain the operational gate. |
+| Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -57,7 +57,7 @@ Gate: an ambiguous delivery still replays safely; a definite acknowledgement lea
 delivered payment→token link in current database rows. Covered by outbox, socket-drain, migration,
 and backup/restore contract tests.
 
-### 2. Define financial and backup egress
+### 2. Define financial and backup egress — shipped in v1.11.0
 
 Treat backups as a control-plane path, not an application API: create a coordinated SQLite
 snapshot, encrypt it to an offline `age` recipient, and optionally push the ciphertext off-box.
@@ -71,12 +71,15 @@ The production slice shipped in v1.10.1: four-hour pending-first/ledger-second s
 before atomic publication; an offline-recipient `age` artifact is paired with a versioned report containing
 only daily/asset revenue, aggregate liability, and open/undelivered-credit health.
 
-The role-specific `deploy/backup-collector/` bundle completes the repository side of the independent-storage
-slice. Production exposes only finalized files through a forced read-only `rrsync` command. The Pi initiates
-an hourly pull, keeps 90 days, rejects stale or schema-expanded report pairs, records a privacy-safe success
-marker, and optionally pings a dead-man switch. It never receives the private `age` identity. Step 2 becomes
-operationally complete after the bundle is installed on the Pi and one retained artifact passes a dry-run
-restore on the trusted machine.
+The role-specific `deploy/backup-collector/` bundle completes the independent-storage slice. Production
+exposes only finalized files through a forced read-only `rrsync` command. The Pi initiates an hourly pull,
+keeps 90 days, rejects stale or schema-expanded report pairs, records a privacy-safe success marker, and
+optionally pings a dead-man switch. It never receives the private `age` identity.
+
+The operational gate passed on 2026-07-24: the restricted manual pull validated the newest pair, systemd
+completed the first scheduled pull, and a retained Pi ciphertext passed the reviewed release's dry-run
+restore on the trusted machine with the offline identity. No plaintext database or decryption identity
+crossed into the collector.
 
 ### 3. Retire direct database access by `nsk`
 
