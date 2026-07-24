@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.1](https://github.com/nullsink/nullsink/compare/v1.11.0...v1.11.1) (2026-07-24)
+
+
+### Documentation
+
+* mark backup collector operational ([#134](https://github.com/nullsink/nullsink/issues/134)) ([c10304f](https://github.com/nullsink/nullsink/commit/c10304f4035e4784efbc33c1f30613bf570dab22))
+
 ## [1.11.0](https://github.com/nullsink/nullsink/compare/v1.10.1...v1.11.0) (2026-07-24)
 
 
