@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.0](https://github.com/nullsink/nullsink/compare/v1.10.1...v1.11.0) (2026-07-24)
+
+
+### Features
+
+* **deploy:** add pull-only backup collector ([#132](https://github.com/nullsink/nullsink/issues/132)) ([54f40be](https://github.com/nullsink/nullsink/commit/54f40be435ae97eeb0ff368903174df2f8a2c0b1))
+
 ## [1.10.1](https://github.com/nullsink/nullsink/compare/v1.10.0...v1.10.1) (2026-07-23)
 
 
