@@ -85,24 +85,27 @@ test("incomingTransfers returns [] when result.in is absent or not an array", as
   expect(await makeMonero({ ...CFG, fetchImpl: rpcOk({ in: "nope" }) }).incomingTransfers()).toEqual([]);
 });
 
-test("createAddress maps a valid response", async () => {
+test("createPayment maps a valid response", async () => {
   await fc.assert(
     fc.asyncProperty(fc.string(), fc.nat({ max: 1000 }), async (address, idx) => {
-      const { createAddress } = makeMonero({ ...CFG, fetchImpl: rpcOk({ address, address_index: idx }) });
-      expect(await createAddress("lbl")).toEqual({ address, orderIndex: idx });
+      const { createPayment } = makeMonero({ ...CFG, fetchImpl: rpcOk({ address, address_index: idx }) });
+      expect(await createPayment({ amountAtomic: 1, expiresAt: 1234, label: "lbl" })).toEqual({
+        payTo: address,
+        orderIndex: idx,
+      });
     }),
   );
 });
 
-test("createAddress throws MoneroError on an unexpected response shape", async () => {
+test("createPayment throws MoneroError on an unexpected response shape", async () => {
   const bad = [{}, { address: "8" }, { address_index: 1 }, { address: 5, address_index: 1 }, { address: "8", address_index: "x" }, null];
   for (const result of bad) {
-    const { createAddress } = makeMonero({ ...CFG, fetchImpl: rpcOk(result) });
-    await expect(createAddress()).rejects.toBeInstanceOf(MoneroError);
+    const { createPayment } = makeMonero({ ...CFG, fetchImpl: rpcOk(result) });
+    await expect(createPayment()).rejects.toBeInstanceOf(MoneroError);
   }
 });
 
 test("rpc surfaces HTTP and JSON-RPC errors as MoneroError", async () => {
-  await expect(makeMonero({ ...CFG, fetchImpl: httpErr(500) }).createAddress()).rejects.toThrow("wallet-rpc HTTP 500");
+  await expect(makeMonero({ ...CFG, fetchImpl: httpErr(500) }).createPayment()).rejects.toThrow("wallet-rpc HTTP 500");
   await expect(makeMonero({ ...CFG, fetchImpl: rpcErr({ code: -1, message: "boom" }) }).incomingTransfers()).rejects.toThrow("boom");
 });

@@ -22,12 +22,12 @@ const ORDER_TTL_MS = 4 * 60 * 60 * 1000;
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 
-// Rail-knob overrides kept for back-compat with this harness's many call sites (xmrUsd / createAddress are the
+// Rail-knob overrides kept for back-compat with this harness's many call sites (xmrUsd / createPayment are the
 // historical single-rail field names). makeHandler folds them into the one-entry `rails` map the handler now
 // requires; passing an explicit `rails` / `defaultRail` in `over` still wins (the multi-rail tests below).
 type RailKnobs = {
   xmrUsd?: RailView["rateUsd"];
-  createAddress?: RailView["createAddress"];
+  createPayment?: RailView["createPayment"];
   scale?: RailView["scale"];
   unit?: RailView["unit"];
   confirmations?: RailView["confirmations"];
@@ -37,10 +37,10 @@ type RailKnobs = {
 function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> & RailKnobs = {}) {
   const balances = openDb(":memory:");
   const orders = openOrderStore(":memory:");
-  const { xmrUsd, createAddress, scale, unit, confirmations, paymentUri, ...handlerOver } = over;
+  const { xmrUsd, createPayment, scale, unit, confirmations, paymentUri, ...handlerOver } = over;
   const monero: RailView = {
     name: "monero",
-    createAddress: createAddress ?? (async () => ({ address: "8FundAddr", orderIndex: 0 })),
+    createPayment: createPayment ?? (async () => ({ payTo: "8FundAddr", orderIndex: 0 })),
     rateUsd: xmrUsd ?? (async () => 150),
     scale: scale ?? 1_000_000_000_000,
     unit: unit ?? "XMR",
@@ -770,7 +770,14 @@ test("/buy quotes enough XMR to never under-charge credit_usd × MARGIN", async 
       fc.integer({ min: 5, max: 2000 }), // within [BUY_MIN_USD, BUY_MAX_USD]
       fc.integer({ min: 50, max: 500 }), // plausible XMR/USD rate
       async (hash, creditUsd, rate) => {
-        const { handler, orders } = makeHandler(ok("claude-opus-4-8", {}), { xmrUsd: async () => rate });
+        let paymentRequest: Parameters<RailView["createPayment"]>[0] | undefined;
+        const { handler, orders } = makeHandler(ok("claude-opus-4-8", {}), {
+          xmrUsd: async () => rate,
+          createPayment: async (request) => {
+            paymentRequest = request;
+            return { payTo: "8FundAddr", orderIndex: 0 };
+          },
+        });
         const req = new Request("https://proxy.local/buy", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -788,6 +795,13 @@ test("/buy quotes enough XMR to never under-charge credit_usd × MARGIN", async 
         // TTL (a different base time) or a different offset between quoted and purged deadlines.
         const stored = orders.openOrders()[0]!;
         expect(quote.expires_at).toBe(stored.created_at + ORDER_TTL_MS);
+        // The rail sees the exact integer amount and deadline before creating its destination. On-chain
+        // rails ignore them; Lightning uses both to encode an amount-bound, expiring BOLT11 invoice.
+        expect(paymentRequest).toEqual({
+          amountAtomic: stored.expected_atomic,
+          expiresAt: quote.expires_at,
+          label: "ns",
+        });
       },
     ),
     { numRuns: 300 },
@@ -963,7 +977,7 @@ test("/buy enforces abuse caps and fails closed on rate/wallet errors", async ()
   const A = "a".repeat(64);
   const B = "b".repeat(64);
 
-  // Global ceiling: the second open order is rejected (the cap is checked before createAddress).
+  // Global ceiling: the second open order is rejected (the cap is checked before createPayment).
   {
     const { handler } = makeHandler(ok("x", {}), { maxOpenOrders: 1 });
     expect((await handler(buyReq({ hash: A, credit_usd: 10 }))).status).toBe(200);
@@ -981,7 +995,7 @@ test("/buy enforces abuse caps and fails closed on rate/wallet errors", async ()
   }
   // Wallet down → 502, no order stored.
   {
-    const { handler, orders } = makeHandler(ok("x", {}), { createAddress: async () => { throw new Error("down"); } });
+    const { handler, orders } = makeHandler(ok("x", {}), { createPayment: async () => { throw new Error("down"); } });
     const res = await handler(buyReq({ hash: A, credit_usd: 10 }));
     expect(res.status).toBe(502);
     expect(((await res.json()) as { error: string }).error).toBe("wallet_unavailable");
@@ -990,28 +1004,28 @@ test("/buy enforces abuse caps and fails closed on rate/wallet errors", async ()
   errSpy.mockRestore();
 });
 
-test("/buy reserves a slot before createAddress: a concurrent burst at the cap mints no orphan subaddress", async () => {
+test("/buy reserves a slot before createPayment: a concurrent burst at the cap mints no orphan subaddress", async () => {
   // The slot-race-lost backstop path logs a warn (→ console.error); silence it in case it ever fires.
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
-  // createAddress suspends until released so both requests are in flight at once. The in-process
+  // createPayment suspends until released so both requests are in flight at once. The in-process
   // reservation (openCount() + pendingCreates) must shed the loser at the gate BEFORE it reaches
-  // createAddress — so only ONE address is ever minted and the cap (1) is never overshot. This is the
+  // createPayment — so only ONE address is ever minted and the cap (1) is never overshot. This is the
   // orphan-on-race the old post-create tryAddOrder claim could only reject *after* the subaddress existed.
   let creates = 0;
   let release!: () => void;
   const gate = new Promise<void>((r) => (release = r));
-  const createAddress = async () => {
+  const createPayment = async () => {
     creates++;
     await gate;
-    return { address: `8addr${creates}`, orderIndex: creates - 1 };
+    return { payTo: `8addr${creates}`, orderIndex: creates - 1 };
   };
-  const { handler, orders } = makeHandler(ok("x", {}), { maxOpenOrders: 1, createAddress });
+  const { handler, orders } = makeHandler(ok("x", {}), { maxOpenOrders: 1, createPayment });
   const p1 = handler(buyReq({ hash: "a".repeat(64), credit_usd: 10 }));
   const p2 = handler(buyReq({ hash: "b".repeat(64), credit_usd: 10 }));
   release();
   const [r1, r2] = await Promise.all([p1, p2]);
   expect([r1.status, r2.status].sort()).toEqual([200, 503]); // exactly one admitted, one rejected
-  expect(creates).toBe(1); // the loser was shed BEFORE createAddress — no orphan subaddress minted
+  expect(creates).toBe(1); // the loser was shed BEFORE createPayment — no orphan subaddress minted
   expect(orders.openCount()).toBe(1); // cap never overshot
   errSpy.mockRestore();
 });
@@ -1021,8 +1035,8 @@ test("/buy releases the reservation after a successful order (sequential buys do
   // success, so openCount() + pendingCreates would hit the cap at half the real ceiling and the Nth buy
   // would falsely 503. With maxOpen=2 and the reservation correctly released, two sequential orders land.
   let idx = 0;
-  const createAddress = async () => ({ address: `8addr${idx}`, orderIndex: idx++ });
-  const { handler, orders } = makeHandler(ok("x", {}), { maxOpenOrders: 2, createAddress });
+  const createPayment = async () => ({ payTo: `8addr${idx}`, orderIndex: idx++ });
+  const { handler, orders } = makeHandler(ok("x", {}), { maxOpenOrders: 2, createPayment });
   const r1 = await handler(buyReq({ hash: "a".repeat(64), credit_usd: 10 }));
   const r2 = await handler(buyReq({ hash: "b".repeat(64), credit_usd: 10 }));
   expect(r1.status).toBe(200);
@@ -1041,21 +1055,21 @@ test("orders.tryAddOrder is the hard cap backstop: count-gated insert rejects pa
   expect(store.openCount()).toBe(1); // the second never landed a row
 });
 
-test("/buy returns 503 and stores nothing when the cross-process claim loses the race after createAddress", async () => {
-  // Covers the post-createAddress backstop (handler ~928-930): the in-process reservation PASSES (openCount
+test("/buy returns 503 and stores nothing when the cross-process claim loses the race after createPayment", async () => {
+  // Covers the post-createPayment backstop (handler ~928-930): the in-process reservation PASSES (openCount
   // under cap) but tryAddOrder returns false — the authoritative count-gated insert that ALSO holds across
   // processes sharing pending.db, where the in-memory counter can't see the other instance. The address was
   // minted (the logged "orphan"), but no row commits and the buyer gets a retryable 503. Distinct from the
-  // pre-check 503 and the single-process reservation test above (both shed BEFORE createAddress).
+  // pre-check 503 and the single-process reservation test above (both shed BEFORE createPayment).
   const errSpy = spyOn(console, "error").mockImplementation(() => {}); // the orphan path logs a warn
   const realOrders = openOrderStore(":memory:");
   const orders = { ...realOrders, tryAddOrder: () => false }; // openCount stays 0 → pre-checks pass; claim fails
   let creates = 0;
   const { handler } = makeHandler(ok("x", {}), {
     orders,
-    createAddress: async () => {
+    createPayment: async () => {
       creates++;
-      return { address: "8Orphan", orderIndex: 0 };
+      return { payTo: "8Orphan", orderIndex: 0 };
     },
   });
   const res = await handler(buyReq({ hash: "a".repeat(64), credit_usd: 10 }));
@@ -1187,7 +1201,7 @@ test("/order-status returns closed for a hash with no open order (credited/reape
 
 test("/order-status reflects an open order's live progress: waiting → confirming → finalizing", async () => {
   const hash = "a".repeat(64);
-  // A controllable progress source; createAddress (makeHandler default) yields orderIndex 0, so the
+  // A controllable progress source; createPayment (makeHandler default) yields orderIndex 0, so the
   // order's subaddress is 0. confirmations dep is 10.
   let progress: { received_atomic: number; confirmations: number } | undefined;
   const { handler, orders } = makeHandler(ok("x", {}), { orderStatus: () => progress });
@@ -1274,13 +1288,14 @@ test("/order-status rejects malformed JSON, non-64-hex hashes, and oversized bod
 // created_at, and seen_at) — the real store wired into the handler, so /order-status resolves against it.
 const seedOrder = (
   orders: ReturnType<typeof makeHandler>["orders"],
-  o: { order_index: number; address: string; hash: string; created_at: number; expected_atomic: number; seen?: boolean },
+  o: { order_index: number; address: string; hash: string; created_at: number; expected_atomic: number; seen?: boolean; rail?: string },
 ) => {
+  const rail = o.rail ?? "monero";
   orders.tryAddOrder(
-    { rail: "monero", order_index: o.order_index, address: o.address, hash: o.hash, expected_atomic: o.expected_atomic, credit_micros: 1_000_000, received_atomic: 0, created_at: o.created_at, rate_usd: 150 },
+    { rail, order_index: o.order_index, address: o.address, hash: o.hash, expected_atomic: o.expected_atomic, credit_micros: 1_000_000, received_atomic: 0, created_at: o.created_at, rate_usd: 150 },
     1000,
   );
-  if (o.seen) orders.markSeen(o.order_index, "monero", o.created_at + 1);
+  if (o.seen) orders.markSeen(o.order_index, rail, o.created_at + 1);
 };
 const xmr = (atomic: number) => (atomic / ATOMIC_PER_XMR).toFixed(12); // the expected/received string /order-status renders
 
@@ -1364,6 +1379,25 @@ test("/order-status rejects a non-string or over-long `address` with 400 invalid
   expect(((await atCap.json()) as any).expected).toBe(xmr(2_000_000_000));
 });
 
+test("/order-status scopes by compact order_id without posting a long payment destination", async () => {
+  const { handler, orders } = makeHandler(ok("x", {}));
+  const hash = "c".repeat(64);
+  seedOrder(orders, { rail: "monero", order_index: 7, address: "invoice-or-address-never-echoed", hash, created_at: 1000, expected_atomic: 2_000_000_000 });
+  seedOrder(orders, { rail: "monero", order_index: 8, address: "newer", hash, created_at: 2000, expected_atomic: 9_000_000_000 });
+
+  const scoped = await handler(orderStatusReq({ hash, order_id: "monero:7" }));
+  expect(scoped.status).toBe(200);
+  expect(((await scoped.json()) as any).expected).toBe(xmr(2_000_000_000));
+
+  const wrongRail = await handler(orderStatusReq({ hash, order_id: "bitcoin:7" }));
+  expect(((await wrongRail.json()) as any).state).toBe("closed");
+  for (const order_id of [7, "", "monero:-1", "Monero:7", "monero:9007199254740992", "x".repeat(65)]) {
+    const invalid = await handler(orderStatusReq({ hash, order_id }));
+    expect(invalid.status).toBe(400);
+    expect(((await invalid.json()) as any).error).toBe("invalid_order_id");
+  }
+});
+
 test("F3: a 2xx with NEGATIVE usage never inflates the balance (cost floored at 0 → full refund)", async () => {
   // priceUsage of negative tokens is negative; the billActual floor (Math.max(0, actual)) must turn that
   // into a FULL refund, never credit MORE than was held. (Not reachable under honest upstreams — a latent
@@ -1380,8 +1414,9 @@ test("F3: a 2xx with NEGATIVE usage never inflates the balance (cost floored at 
 });
 
 // --- multi-rail (task 4): /buy routes to the requested rail, tags the order, and /order-status renders it ---
-const RAIL_XMR: RailView = { name: "monero", createAddress: async () => ({ address: "8xmraddr", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` };
-const RAIL_BTC: RailView = { name: "bitcoin", createAddress: async () => ({ address: "bc1qtest", orderIndex: 0 }), rateUsd: async () => 60000, scale: 100_000_000, unit: "BTC", confirmations: 3, paymentUri: (a, amt) => `bitcoin:${a}?amount=${amt}` };
+const RAIL_XMR: RailView = { name: "monero", createPayment: async () => ({ payTo: "8xmraddr", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` };
+const RAIL_BTC: RailView = { name: "bitcoin", createPayment: async () => ({ payTo: "bc1qtest", orderIndex: 0 }), rateUsd: async () => 60000, scale: 100_000_000, unit: "BTC", confirmations: 3, paymentUri: (a, amt) => `bitcoin:${a}?amount=${amt}` };
+const RAIL_LIGHTNING: RailView = { name: "lightning", createPayment: async () => ({ payTo: "lnbc1invoice", orderIndex: 42 }), rateUsd: async () => 60000, scale: 100_000_000, unit: "BTC", confirmations: 0, orderTtlMs: 30 * 60 * 1000, paymentUri: (invoice) => `lightning:${invoice}` };
 
 test("multi-rail: /buy?rail=bitcoin routes to BTC, tags the order bitcoin, and /order-status renders BTC", async () => {
   const rails = new Map<string, RailView>([["monero", RAIL_XMR], ["bitcoin", RAIL_BTC]]);
@@ -1390,10 +1425,12 @@ test("multi-rail: /buy?rail=bitcoin routes to BTC, tags the order bitcoin, and /
 
   const res = await handler(buyReq({ hash, credit_usd: 30, rail: "bitcoin" }));
   expect(res.status).toBe(200);
-  const q = (await res.json()) as { unit: string; amount: string; pay_uri: string; confirmations_required: number };
+  const q = (await res.json()) as { unit: string; amount: string; pay_uri: string; confirmations_required: number; order_id: string; rail: string };
   expect(q.unit).toBe("BTC");
   expect(q.confirmations_required).toBe(3); // BTC's confs, not Monero's 10
   expect(q.pay_uri).toContain("bitcoin:bc1qtest");
+  expect(q.order_id).toBe("bitcoin:0");
+  expect(q.rail).toBe("bitcoin");
   expect(q.amount).toBe("0.00057500"); // 30 × 1.15 / 60000 BTC at 8-decimal sats precision
 
   expect(orders.openOrders()[0]!.rail).toBe("bitcoin"); // order tagged with the chosen rail
@@ -1405,6 +1442,27 @@ test("multi-rail: /buy?rail=bitcoin routes to BTC, tags the order bitcoin, and /
   expect(s.expected).toBe("0.00057500");
 });
 
+test("Lightning /buy uses its short TTL and returns a compact status order_id", async () => {
+  const rails = new Map<string, RailView>([["lightning", RAIL_LIGHTNING]]);
+  const { handler, orders } = makeHandler(ok("x", {}), { rails, defaultRail: "lightning" });
+  const hash = "d".repeat(64);
+  const res = await handler(buyReq({ hash, credit_usd: 30, rail: "lightning" }));
+  const q = (await res.json()) as any;
+  const order = orders.openOrders("lightning")[0]!;
+  expect(q).toMatchObject({
+    pay_to: "lnbc1invoice",
+    pay_uri: "lightning:lnbc1invoice",
+    order_id: "lightning:42",
+    rail: "lightning",
+    confirmations_required: 0,
+  });
+  expect(q.expires_at).toBe(order.created_at + 30 * 60 * 1000);
+  expect((await (await handler(orderStatusReq({ hash, order_id: q.order_id }))).json()) as any).toMatchObject({
+    state: "waiting",
+    expires_at: q.expires_at,
+  });
+});
+
 test("multi-rail: /buy with a rail not in the registry → 400 unknown_rail, nothing stored", async () => {
   const rails = new Map<string, RailView>([["monero", RAIL_XMR]]);
   const { handler, orders } = makeHandler(ok("x", {}), { rails, defaultRail: "monero" });
@@ -1414,16 +1472,17 @@ test("multi-rail: /buy with a rail not in the registry → 400 unknown_rail, not
   expect(orders.openCount()).toBe(0);
 });
 
-test("GET /rails lists the active rails + the default (for the client coin picker)", async () => {
-  const rails = new Map<string, RailView>([["monero", RAIL_XMR], ["bitcoin", RAIL_BTC]]);
+test("GET /rails lists active rails with settlement style and their real quote lifetime", async () => {
+  const rails = new Map<string, RailView>([["monero", RAIL_XMR], ["bitcoin", RAIL_BTC], ["lightning", RAIL_LIGHTNING]]);
   const { handler } = makeHandler(ok("x", {}), { rails, defaultRail: "monero" });
   const res = await handler(new Request("https://proxy.local/rails", { method: "GET" }));
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { default: string; rails: { name: string; unit: string; confirmations: number }[] };
+  const body = (await res.json()) as { default: string; rails: { name: string; unit: string; confirmations: number; settlement: string; order_ttl_ms: number }[] };
   expect(body.default).toBe("monero");
   expect(body.rails).toEqual([
-    { name: "monero", unit: "XMR", confirmations: 10 },
-    { name: "bitcoin", unit: "BTC", confirmations: 3 },
+    { name: "monero", unit: "XMR", confirmations: 10, settlement: "confirmations", order_ttl_ms: ORDER_TTL_MS },
+    { name: "bitcoin", unit: "BTC", confirmations: 3, settlement: "confirmations", order_ttl_ms: ORDER_TTL_MS },
+    { name: "lightning", unit: "BTC", confirmations: 0, settlement: "instant", order_ttl_ms: 30 * 60 * 1000 },
   ]);
 });
 

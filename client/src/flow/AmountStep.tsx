@@ -10,6 +10,7 @@ const FLASH_MS = 1000;
 const COIN_DESC: Record<string, string> = {
   monero: "private on-chain · confirms in ~20-45 min",
   bitcoin: "public on-chain · confirms in ~20-45 min",
+  lightning: "bitcoin lightning · usually settles in seconds",
 };
 
 // Pure amount picker: presets + a constrained field + the up-front price. No button — the

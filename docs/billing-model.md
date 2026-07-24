@@ -72,7 +72,8 @@ context editing) are re-added.
 
 ## Order lifecycle
 
-`POST /buy` quotes a coin amount, locks the USD rate, and mints a single-use watch-only address,
+`POST /buy` quotes a coin amount, locks the USD rate, and creates a single-use payment request
+(a watch-only on-chain address or an amount-bound Lightning invoice),
 storing the order in `pending.db`. The poller (`ledger/settle.ts`) then moves that order through
 a small state machine:
 

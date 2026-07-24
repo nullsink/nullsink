@@ -20,7 +20,7 @@ export function makeBuy(d: PaymentsEndpointDeps) {
     tryAddOrder,
     buyRateLimit,
   } = d;
-  // In-flight createAddress reservations (this process). Gated at the slot check below so a burst never
+  // In-flight createPayment reservations (this process). Gated at the slot check below so a burst never
   // starts more creates than free slots; per-handler state, resets between tests. See the reservation.
   let pendingCreates = 0;
 
@@ -82,8 +82,9 @@ export function makeBuy(d: PaymentsEndpointDeps) {
     // One timestamp for stored created_at and quoted expires_at = created_at + ORDER_TTL_MS. The reaper
     // waits LONGER internally (see payments.ts) so a deadline payment still gains its first confirmation.
     const createdAt = Date.now();
+    const expiresAt = createdAt + (r.orderTtlMs ?? ORDER_TTL_MS);
 
-    // Reserve a create slot BEFORE the irreversible createAddress, gating on committed orders + creates
+    // Reserve a create slot BEFORE the irreversible createPayment, gating on committed orders + creates
     // already in flight. The check and the ++ run with no await between them, so in this single-threaded
     // event loop they're atomic: at most (MAX_OPEN_ORDERS − openCount()) creates are ever in flight, so a
     // loser is shed HERE and never mints an address — a claim made only after the create would reject the
@@ -101,9 +102,13 @@ export function makeBuy(d: PaymentsEndpointDeps) {
         // in its own file, OUTSIDE this app's two-DB privacy boundary and not dropped at settle; a
         // hash-derived label would be a durable address→token link surviving the very deletion (settle.ts)
         // the design relies on. The real link lives only in pending.db while needed.
-        addr = await r.createAddress("ns");
+        addr = await r.createPayment({
+          amountAtomic: expectedAtomic,
+          expiresAt,
+          label: "ns",
+        });
       } catch (err) {
-        log.warn("buy", `createAddress failed: ${log.errMsg(err)}`);
+        log.warn("buy", `createPayment failed: ${log.errMsg(err)}`);
         return deny(502, "wallet_unavailable");
       }
       // Hard cap backstop: the reservation already bounds in-process creates to the free-slot count, but
@@ -114,7 +119,7 @@ export function makeBuy(d: PaymentsEndpointDeps) {
         {
           rail: railName, // the buyer's chosen pay rail (defaults to DEFAULT_RAIL when the request omits it)
           order_index: addr.orderIndex,
-          address: addr.address,
+          address: addr.payTo,
           hash,
           expected_atomic: expectedAtomic,
           credit_micros: Math.round(creditUsd * 1_000_000),
@@ -132,13 +137,15 @@ export function makeBuy(d: PaymentsEndpointDeps) {
       metrics.observeOpenOrders(openCount()); // high-water open orders — the count only RISES here, so observing at creation catches every peak (vs. a sampling tick)
       const amount = (expectedAtomic / r.scale).toFixed(decimalsOf(r.scale));
       return Response.json({
-        pay_to: addr.address,
-        pay_uri: r.paymentUri(addr.address, amount),
+        pay_to: addr.payTo,
+        pay_uri: r.paymentUri(addr.payTo, amount),
+        order_id: `${railName}:${addr.orderIndex}`,
+        rail: railName,
         amount,
         unit: r.unit,
         rate_usd: rate,
         confirmations_required: r.confirmations,
-        expires_at: createdAt + ORDER_TTL_MS,
+        expires_at: expiresAt,
       });
     } finally {
       pendingCreates--;

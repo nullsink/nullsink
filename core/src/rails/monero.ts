@@ -9,7 +9,7 @@ import { numEnv } from "../env";
 import { xmrUsd } from "./rate";
 import { ATOMIC_PER_XMR } from "./units";
 import { RAIL_META } from "./catalog";
-import type { PayRail, NewAddress, Incoming } from "./types";
+import type { PayRail, NewPayment, CreatePaymentRequest, Incoming } from "./types";
 
 export class MoneroError extends Error {}
 
@@ -43,12 +43,12 @@ export function makeMonero(opts: MoneroOptions) {
 
   // Create a fresh per-order subaddress in the configured account. The subaddress minor index IS the
   // order's integer key (PayRail's orderIndex).
-  async function createAddress(label?: string): Promise<NewAddress> {
-    const r = await rpc("create_address", { account_index: opts.accountIndex, label });
+  async function createPayment(request?: CreatePaymentRequest): Promise<NewPayment> {
+    const r = await rpc("create_address", { account_index: opts.accountIndex, label: request?.label });
     if (typeof r?.address !== "string" || typeof r?.address_index !== "number") {
       throw new MoneroError("create_address: unexpected response");
     }
-    return { address: r.address, orderIndex: r.address_index };
+    return { payTo: r.address, orderIndex: r.address_index };
   }
 
   // Confirmed incoming transfers in the configured account, normalised to the rail-neutral Incoming shape.
@@ -96,7 +96,7 @@ export function makeMonero(opts: MoneroOptions) {
     return out;
   }
 
-  return { createAddress, incomingTransfers };
+  return { createPayment, incomingTransfers };
 }
 
 const RPC_URL = process.env.MONERO_WALLET_RPC_URL ?? "http://127.0.0.1:18083/json_rpc";
@@ -119,7 +119,7 @@ export const moneroRail: PayRail = {
   scale: ATOMIC_PER_XMR,
   confirmations: CONFIRMATIONS,
   unit: RAIL_META.monero.unit,
-  createAddress: wallet.createAddress,
+  createPayment: wallet.createPayment,
   incomingTransfers: wallet.incomingTransfers,
   rateUsd: xmrUsd,
   paymentUri: (address, amount) => `monero:${address}?tx_amount=${amount}`,

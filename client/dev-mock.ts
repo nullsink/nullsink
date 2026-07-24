@@ -53,12 +53,14 @@ const RAILS = {
   rails: [
     { name: "monero", unit: "XMR", confirmations: 10 },
     { name: "bitcoin", unit: "BTC", confirmations: 3 },
+    { name: "lightning", unit: "BTC", confirmations: 0, settlement: "instant", order_ttl_ms: 1_800_000 },
   ],
 };
 type RailCfg = { unit: string; confirmations: number; rate: number; scale: number; decimals: number; payTo: string; uri: (a: string) => string };
 const RAIL_CFG: Record<string, RailCfg> = {
   monero: { unit: "XMR", confirmations: 10, rate: 160, scale: 1_000_000_000_000, decimals: 12, payTo: "88nullsinkDemoMoneroSubaddrForTheWalkthroughOnlyNotARealWalletAddress00000000000q4WmZ9pK", uri: (a) => `monero:88nullsinkDemoMoneroSubaddrForTheWalkthroughOnlyNotARealWalletAddress00000000000q4WmZ9pK?tx_amount=${a}` },
   bitcoin: { unit: "BTC", confirmations: 3, rate: 68_000, scale: 100_000_000, decimals: 8, payTo: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", uri: (a) => `bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4?amount=${a}` },
+  lightning: { unit: "BTC", confirmations: 0, rate: 68_000, scale: 100_000_000, decimals: 8, payTo: `lnbcrt${"demo".repeat(55)}`, uri: () => `lightning:lnbcrt${"demo".repeat(55)}` },
 };
 // expected coin rounded UP in atomic units so the margin is never eroded — same as the server.
 const expectedAtomic = (creditUsd: number, c: RailCfg) => Math.ceil(((creditUsd * MARGIN) / c.rate) * c.scale);
@@ -237,6 +239,8 @@ export function mockApi(): Plugin {
             const amount = toCoin(atomic, cfg);
             send(200, {
               pay_to: cfg.payTo,
+              order_id: `${rail}:0`,
+              rail,
               amount,
               unit: cfg.unit,
               pay_uri: cfg.uri(amount),

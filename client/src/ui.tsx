@@ -115,7 +115,7 @@ export function BitcoinMark({ className }: { className?: string }) {
 // Pick the mark for a rail by its server name; an unknown rail (a future coin) renders no glyph, just its label.
 export function CoinMark({ name, className }: { name: string; className?: string }) {
   if (name === "monero") return <MoneroMark className={className} />;
-  if (name === "bitcoin") return <BitcoinMark className={className} />;
+  if (name === "bitcoin" || name === "lightning") return <BitcoinMark className={className} />;
   return null;
 }
 
