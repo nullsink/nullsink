@@ -41,6 +41,7 @@ the map.
 | `backup.sh` | Four-hour coordinated (`sqlite3 .backup`) snapshot of the billing DBs; validates the pair, atomically publishes the recovery artifact, optionally age-encrypts/pushes it, and emits an aggregate-only report. |
 | `backup-report.sh` | Builds the versioned privacy-safe JSON report from backup snapshots: daily/asset revenue, aggregate liability, and open/undelivered-credit health—never token/payment linkage. |
 | `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` to replace the live DBs, re-arm the credit outbox, and restart both services. |
+| `backup-collector/` | Role-specific Raspberry Pi pull collector: restricted production export, hourly systemd pull, ciphertext/report retention and freshness validation, plus the recovery-drill runbook. Its units are deliberately outside the app box's top-level install glob. |
 | `regen-bitcoin-rpcauth.sh` | Break-glass: regenerate bitcoind's `rpcauth` + the proxy's RPC password as one matched pair. The cure for a BTC-rail 401. |
 
 ### systemd units & timers
@@ -76,11 +77,12 @@ under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target s
 automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
 `setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
 
-**The flat layout is deliberate.** It looks like it wants subfolders, but the release tarball, the
-`install_units` glob (`deploy/*.service`/`*.timer`), every unit's `ExecStart=/opt/nullsink/deploy/...`
-path, and ~40 doc references all assume files sit directly under `deploy/`. Keep new units/scripts here at
-the top level. (The lint runner lives in [`scripts/lint.sh`](../scripts/lint.sh), *not* here — it's a
-dev/CI tool, so it doesn't ride along to the box.)
+**The app-box layout is deliberately flat.** The `install_units` glob
+(`deploy/*.service`/`*.timer`), app unit paths, and operator references expect app-box files directly under
+`deploy/`. Keep new app-box units/scripts at that top level. A bundle for a different host role belongs in
+an explicit subdirectory, as `backup-collector/` does; this keeps its Pi-only units out of the app install
+glob while still including them in the release tarball and deploy lint. (The lint runner lives in
+[`scripts/lint.sh`](../scripts/lint.sh), *not* here — it is a dev/CI tool.)
 
 **Nothing box-specific is committed.** Per-box config (domain, node address, RPC creds, Telegram token,
 backup keys) lives only in `/etc/nullsink.env` and systemd drop-ins on the box, never in this tree.
@@ -108,9 +110,10 @@ an explicit allowlist:
 - unacknowledged-credit count, total, and oldest age.
 
 The report contains no token hash, per-token balance, payment address, transaction/idempotency key,
-individual sale row, or delivered payment→token join. It is still private business data and is stored mode
-`0600`. A report failure pages by failing `backup.service`, but happens after recovery-artifact publication,
-so it cannot discard the valid backup.
+individual sale row, or delivered payment→token join. It is still private business data. Files are mode
+`0600` by default; the pull-only collector setup changes finalized artifact/report files to `0640` for one
+dedicated export group. A report failure pages by failing `backup.service`, but happens after
+recovery-artifact publication, so it cannot discard the valid backup.
 
 Test a retained artifact on the trusted machine that holds the offline identity (default is a dry-run and
 touches no live database):
@@ -121,8 +124,8 @@ BACKUP_AGE_IDENTITY=/secure/nullsink-age.key \
 ```
 
 Run that check after schema, archive-format, restore-code, or key changes and periodically during normal
-operation. The separate Pi-store slice will collect only finalized encrypted artifacts and these aggregate
-reports; it does not need or receive the private `age` identity.
+operation. The [`backup-collector/`](backup-collector/) bundle collects only finalized encrypted artifacts
+and these aggregate reports; it does not need or receive the private `age` identity.
 
 **Release fetch is plain `curl`.** The four fetch helpers in `lib.sh` pull the public GitHub Release assets
 over HTTPS and verify them against `SHA256SUMS` — no `gh`, no auth on the box. Build provenance is attested

@@ -13,7 +13,7 @@
 # ship it off-box (scp/rsync/rclone — your choice; destination-agnostic). Prunes to BACKUP_KEEP newest.
 #
 # Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD,
-# BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP.
+# BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP, BACKUP_EXPORT_GROUP.
 set -euo pipefail
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqlite3)" >&2; exit 1; }
@@ -21,10 +21,25 @@ command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqli
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
 BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-84}"   # six four-hour snapshots/day ≈ fourteen days
+BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
 [[ "$BACKUP_KEEP" =~ ^[0-9]+$ ]] && [ "$BACKUP_KEEP" -gt 0 ] || {
   echo "BACKUP_KEEP must be a positive integer" >&2
   exit 1
 }
+[[ -z "$BACKUP_EXPORT_GROUP" || "$BACKUP_EXPORT_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] || {
+  echo "BACKUP_EXPORT_GROUP is not a valid system group name" >&2
+  exit 1
+}
+if [ -n "$BACKUP_EXPORT_GROUP" ] && command -v getent >/dev/null; then
+  getent group "$BACKUP_EXPORT_GROUP" >/dev/null || {
+    echo "BACKUP_EXPORT_GROUP does not exist: $BACKUP_EXPORT_GROUP" >&2
+    exit 1
+  }
+fi
+if [ -n "$BACKUP_EXPORT_GROUP" ] && [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
+  echo "BACKUP_EXPORT_GROUP requires BACKUP_AGE_RECIPIENT — plaintext archives must not enter the export boundary" >&2
+  exit 1
+fi
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SNAPSHOT_EPOCH_MS="$(( $(date -u +%s) * 1000 ))"
 script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -44,6 +59,19 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
+
+# Default publication is owner-only. A pull collector can instead receive finalized files through one
+# dedicated supplementary group; setup-export.sh gives that group only to backup.service and the restricted
+# rsync account. Apply permissions to the hidden partial before the atomic rename, so a final name never
+# appears with broader or incomplete permissions.
+publish_permissions() {
+  local path="$1"
+  chmod 600 "$path"
+  if [ -n "$BACKUP_EXPORT_GROUP" ]; then
+    chgrp "$BACKUP_EXPORT_GROUP" "$path"
+    chmod 640 "$path"
+  fi
+}
 
 # Consistent snapshots via .backup (NOT cp). The CLI opens its OWN connection, so set a busy_timeout (the
 # app's PRAGMA doesn't apply here) — else a concurrent settler write lock returns SQLITE_BUSY and aborts the
@@ -107,7 +135,7 @@ else
   artifact_tmp="$BACKUP_DIR/.backup-$STAMP.tar.partial.$$"
   cp "$work/backup.tar" "$artifact_tmp"
 fi
-chmod 600 "$artifact_tmp"
+publish_permissions "$artifact_tmp"
 [ ! -e "$artifact" ] || { echo "refusing to replace existing backup artifact: $artifact" >&2; exit 1; }
 # A same-directory rename is atomic: pullers see either no final name or the complete closed artifact, never
 # age's in-progress output. `-n` closes the check→rename race with an accidental concurrent manual run.
@@ -138,7 +166,7 @@ pending_arg="-"
 [ -f "$work/pending.db" ] && pending_arg="$work/pending.db"
 "$script_dir/backup-report.sh" "$pending_arg" "$work/balances.db" "$report_tmp" \
   "$STAMP" "$(basename "$artifact")" "$SNAPSHOT_EPOCH_MS"
-chmod 600 "$report_tmp"
+publish_permissions "$report_tmp"
 [ ! -e "$report" ] || { echo "refusing to replace existing backup report: $report" >&2; exit 1; }
 mv -n "$report_tmp" "$report"
 [ ! -e "$report_tmp" ] || { echo "backup report name collision: $report" >&2; exit 1; }

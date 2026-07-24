@@ -6,15 +6,15 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: shipped today and the next app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-07-21, v1.9.1
+## Status — 2026-07-23, v1.10.1
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
 | Dedicated Bitcoin node box | **Shipped** in v1.4.x | `deploy/node-box-runbook.md`; RPC crosses WireGuard. |
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
-| Delivered-link scrubbing | **Implemented for next release** | Definite ack atomically clears hash/amount; legacy acknowledgements replay once; restores verify tombstones against the ledger. |
-| Financial and backup egress | **Implementation in progress** | Production artifact/report contract is implemented for the next release; independent Pi retention remains the second slice. |
+| Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
+| Financial and backup egress | **Producer shipped; collector ready** | v1.10.1 produces/restores the encrypted pair and aggregate report. The pull-only Pi bundle is ready; installing it and proving its first retained restore remain the operational gate. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -46,7 +46,7 @@ enclave. That upstream verification is not attestation of nullsink itself.
 
 Each step should ship independently and retain the money-safety invariants.
 
-### 1. Fix the privacy lifecycle — implemented for next release
+### 1. Fix the privacy lifecycle — shipped in v1.10.1
 
 Retain the payment→token link only while an order is open or a credit is still owed. After a
 definite ledger acknowledgement, scrub the delivered outbox payload while retaining the
@@ -67,10 +67,16 @@ credit diagnostics without rebuilding a permanent delivered-payment→token hist
 Gate: matched-pair restore succeeds; plaintext is private and temporary; reports contain only
 the fields allowed by the privacy lifecycle.
 
-Production slice implemented for the next release: four-hour pending-first/ledger-second snapshots are
-validated before atomic publication; an offline-recipient `age` artifact is paired with a versioned report
-containing only daily/asset revenue, aggregate liability, and open/undelivered-credit health. The remaining
-slice is the independent ciphertext-only Pi collector and its retention/freshness controls.
+The production slice shipped in v1.10.1: four-hour pending-first/ledger-second snapshots are validated
+before atomic publication; an offline-recipient `age` artifact is paired with a versioned report containing
+only daily/asset revenue, aggregate liability, and open/undelivered-credit health.
+
+The role-specific `deploy/backup-collector/` bundle completes the repository side of the independent-storage
+slice. Production exposes only finalized files through a forced read-only `rrsync` command. The Pi initiates
+an hourly pull, keeps 90 days, rejects stale or schema-expanded report pairs, records a privacy-safe success
+marker, and optionally pings a dead-man switch. It never receives the private `age` identity. Step 2 becomes
+operationally complete after the bundle is installed on the Pi and one retained artifact passes a dry-run
+restore on the trusted machine.
 
 ### 3. Retire direct database access by `nsk`
 

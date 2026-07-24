@@ -99,13 +99,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-07-18<br>v1.9.1 + Step 1 next release</div>
+    <div class="stamp">as of 2026-07-23<br>v1.10.1 · Step 1 shipped</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
       <title id="roadmap-title">nullsink shipped architecture and next app-box boundary</title>
-      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket, and Step 1 for the next release scrubs the token hash and amount after definite acknowledgement. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
+      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and version 1.10.1 scrubs the token hash and amount after definite acknowledgement. Coordinated encrypted recovery artifacts and aggregate reports are produced on the app box; the next operational gate is installing the pull-only Raspberry Pi collector. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -160,7 +160,7 @@
       <rect class="node-shipped" x="770" y="385" width="510" height="300" rx="13"/>
       <text class="title" x="798" y="420">nullsink-payments · :8081</text>
       <rect class="badge-acid" x="1142" y="399" width="112" height="28" rx="6"/>
-      <text class="db-text" x="1198" y="418" text-anchor="middle">Step 1 ready</text>
+      <text class="db-text" x="1198" y="418" text-anchor="middle">shipped v1.10</text>
       <line class="divider" x1="795" y1="448" x2="1255" y2="448"/>
       <text class="section-kicker" x="798" y="478">PAYMENT PATH</text>
       <text class="copy" x="798" y="505">orders · rail poller · settlement</text>
@@ -219,17 +219,18 @@
       <text class="title" x="125" y="1139">nsk · direct DB writer</text>
       <text class="copy-small" x="125" y="1157">opens both DBs · temporary exception</text>
 
-      <rect class="node" x="490" y="1110" width="240" height="58" rx="9"/>
-      <text class="title" x="515" y="1139">coordinated snapshot</text>
-      <text class="copy-small" x="515" y="1157">balances.db + pending.db</text>
-      <path class="edge-control" d="M730 1139 L792 1139" marker-end="url(#arrowBlue)"/>
-      <rect class="node" x="800" y="1110" width="210" height="58" rx="9"/>
-      <text class="title" x="825" y="1139">age encryption</text>
-      <text class="copy-small" x="825" y="1157">offline recipient</text>
-      <path class="edge-control" d="M1010 1139 L1072 1139" marker-end="url(#arrowBlue)"/>
-      <rect class="node" x="1080" y="1110" width="220" height="58" rx="9"/>
-      <text class="title" x="1105" y="1139">off-box storage</text>
-      <text class="copy-small" x="1105" y="1157">ciphertext only</text>
+      <rect class="node-shipped" x="430" y="1110" width="260" height="58" rx="9"/>
+      <text class="title" x="455" y="1139">coordinated snapshot</text>
+      <text class="copy-small" x="455" y="1157">matched DBs + aggregate report</text>
+      <path class="edge-control" d="M690 1139 L732 1139" marker-end="url(#arrowBlue)"/>
+      <rect class="node-shipped" x="740" y="1110" width="210" height="58" rx="9"/>
+      <text class="title" x="765" y="1139">age encryption</text>
+      <text class="copy-small" x="765" y="1157">offline recipient</text>
+      <path class="edge-control" d="M950 1139 L992 1139" marker-end="url(#arrowBlue)"/>
+      <rect class="node-planned" x="1000" y="1102" width="300" height="74" rx="9"/>
+      <text class="title" x="1025" y="1132">Pi pull collector</text>
+      <text class="copy-small" x="1025" y="1152">hourly · 90d · no age identity</text>
+      <text class="label-blue" x="1150" y="1170" text-anchor="middle">next: install + prove restore</text>
 
       <!-- AFTER STEPS 1-5 -->
       <rect class="panel" x="28" y="1225" width="1344" height="585" rx="18"/>
