@@ -3,6 +3,7 @@
 // the upstream creds + estimator (was built inline in createHandler before the providers/ seam).
 import { providerOf, extractUsage, streamUsageScanner } from "../cost";
 import type { HoldEstimator } from "../hold";
+import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
 
 // Anthropic betas that bill at standard per-token rates (no premium tier / per-call fee) and are therefore
@@ -51,22 +52,6 @@ export function hasOneHourCacheControl(v: unknown): boolean {
   return false;
 }
 
-// Anthropic's native auth header is x-api-key; ALSO accept Authorization: Bearer so clients that default to
-// Bearer authenticate instead of silently 401ing — notably Claude Code under ANTHROPIC_AUTH_TOKEN, and other
-// agents/SDKs that only know the Bearer convention. x-api-key wins when both are present (it's the native
-// one). Both are in STRIP, so whichever carried the proxy token is dropped before forwarding and our real
-// key injected — accepting Bearer changes only what we READ, never what we forward.
-function anthropicToken(req: Request): string | null {
-  const k = req.headers.get("x-api-key");
-  if (k) return k;
-  const auth = req.headers.get("authorization");
-  if (auth) {
-    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
-    if (m) return m[1]!.trim();
-  }
-  return null;
-}
-
 export function makeAnthropicProvider(cfg: {
   apiKey: string;
   baseUrl: string;
@@ -80,7 +65,8 @@ export function makeAnthropicProvider(cfg: {
     // Annotate the hold input with whether this request opts into 1-hour cache writes, so the (provider-
     // agnostic) estimator + priceHoldBound reserve the dearer 2× input tier only when 1h is actually used.
     estimateHold: (input) => cfg.estimateHold({ ...input, oneHourCache: hasOneHourCacheControl(input.body) }),
-    readToken: anthropicToken,
+    // Anthropic's native x-api-key wins if a client sends both supported conventions.
+    readToken: (req) => readProxyToken(req, "api-key"),
     premiumReject: (body) => {
       // Premium-priced features the flat rate card doesn't cover. inference_geo (regional premium) and
       // server-side tools (web search / code exec) carry usage-based fees beyond per-token rates.

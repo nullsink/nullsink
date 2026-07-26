@@ -5,18 +5,8 @@
 // Built only when TINFOIL_API_KEY is configured (selectProviders); otherwise its endpoint 404s.
 import { providerOf, isOffCardModel, extractOpenAIChatUsage, openaiChatScanner } from "../cost";
 import type { HoldEstimator } from "../hold";
+import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
-
-// Tinfoil clients put the proxy token in `Authorization: Bearer …` (OpenAI convention); also accept x-api-key
-// for the OpenAI-compatible tool tail. Either way it's stripped before forwarding (STRIP) and our key injected.
-function bearerToken(req: Request): string | null {
-  const auth = req.headers.get("authorization");
-  if (auth) {
-    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
-    if (m) return m[1]!.trim();
-  }
-  return req.headers.get("x-api-key");
-}
 
 // Output ceiling: max_completion_tokens (current) or the legacy max_tokens. REQUIRED — the hold needs a sound
 // output bound. null → max_tokens_required.
@@ -67,7 +57,8 @@ export function makeTinfoilProvider(cfg: TinfoilConfig): Provider {
     baseUrl: cfg.baseUrl,
     upstreamPath: "/v1/chat/completions",
     estimateHold: cfg.estimateHold, // always the byte bound — Tinfoil has no count_tokens endpoint (proxy.ts)
-    readToken: bearerToken,
+    // Tinfoil follows the OpenAI-compatible Bearer convention, with x-api-key as fallback.
+    readToken: (req) => readProxyToken(req, "bearer"),
     premiumReject: tinfoilPremiumReject,
     outputCap: tinfoilOutputCap,
     // Priced AND tagged tinfoil AND not off-card. The off-card check backstops a future priced id that

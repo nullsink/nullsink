@@ -5,18 +5,8 @@
 // shape-specific parts. Was built inline in createHandler before the providers/ seam.
 import { providerOf, isOffCardModel, extractOpenAIChatUsage, openaiChatScanner, extractOpenAIResponsesUsage, openaiResponsesScanner } from "../cost";
 import type { HoldEstimator } from "../hold";
+import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
-
-// OpenAI clients put the proxy token in `Authorization: Bearer …`; also accept x-api-key for the long
-// tail of OpenAI-compatible tools. Either way it's stripped before forwarding (STRIP) and our key injected.
-function bearerToken(req: Request): string | null {
-  const auth = req.headers.get("authorization");
-  if (auth) {
-    const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
-    if (m) return m[1]!.trim();
-  }
-  return req.headers.get("x-api-key");
-}
 
 // --- OpenAI Chat Completions provider pieces (the shape passed to makeBase below) ---
 
@@ -155,7 +145,8 @@ function makeBase(
     id: "openai",
     baseUrl: cfg.baseUrl,
     estimateHold: cfg.estimateHold,
-    readToken: bearerToken,
+    // OpenAI's native Bearer convention wins if a client sends both supported conventions.
+    readToken: (req) => readProxyToken(req, "bearer"),
     // Priced AND tagged openai AND not off-card. The off-card check is load-bearing, not redundant with
     // the price-table curation: findModel matches by prefix, so an excluded id (o3-deep-research,
     // gpt-4o-audio-preview) would re-admit as its priced base (`o3`/`gpt-4o`) and under-bill. So claude-*

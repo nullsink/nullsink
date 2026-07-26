@@ -273,7 +273,8 @@ export function Api() {
         <EpRow method="GET" path="/balance" />
         <p className="band-note">
           <code>GET /v1/models</code> lists every model this instance serves and its USD/Mtok price;{" "}
-          <code>GET /balance</code> returns a key&apos;s remaining credit. Full catalog on the{" "}
+          <code>GET /balance</code> returns a key&apos;s remaining credit and accepts either{" "}
+          <code>x-api-key</code> or <code>Authorization: Bearer</code>. Full catalog on the{" "}
           <a href="/models/">models</a> page.
         </p>
       </SharedBand>

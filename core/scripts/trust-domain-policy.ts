@@ -44,6 +44,7 @@ export const INTENTIONAL_PROXY_ONLY_RUNTIME = new Set([
   "endpoints/reads.ts",
   "handler.ts",
   "hold.ts",
+  "http/proxy-token.ts",
   "ledger/db.ts",
   "ledger/hash.ts",
   "providers/anthropic.ts",

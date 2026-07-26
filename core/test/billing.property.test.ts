@@ -891,6 +891,22 @@ test("/balance reports the token's own balance; unknown/missing token → 401", 
   expect((await handler(balanceReq(null))).status).toBe(401);
 });
 
+test("/balance accepts Bearer auth, prefers x-api-key, and falls back from a malformed Bearer header", async () => {
+  const { handler, balances } = makeHandler(ok("claude-opus-4-8", {}));
+  balances.credit(hashToken("pr_api_key"), 1_000_000);
+  balances.credit(hashToken("pr_bearer"), 2_000_000);
+
+  const get = (headers: Record<string, string>) =>
+    handler(new Request("https://proxy.local/balance", { method: "GET", headers }));
+  const usd = async (headers: Record<string, string>) =>
+    ((await (await get(headers)).json()) as { balance_usd: number }).balance_usd;
+
+  expect(await usd({ authorization: "Bearer pr_bearer" })).toBe(2);
+  expect(await usd({ "x-api-key": "pr_api_key", authorization: "Bearer pr_bearer" })).toBe(1);
+  expect(await usd({ "x-api-key": "pr_api_key", authorization: "Basic ignored" })).toBe(1);
+  expect((await get({ authorization: "Basic ignored" })).status).toBe(401);
+});
+
 test("/buy rejects out-of-range or non-numeric credit_usd before storing anything", async () => {
   const badAmount = fc.oneof(
     fc.double({ max: 5, noNaN: true, noDefaultInfinity: true }).filter((n) => n < 5), // below BUY_MIN_USD (incl. ≤0)
