@@ -2,6 +2,7 @@
 // global, identity-free read throttle (no money gate), each `(req) => Promise<Response>`. The payments trust domain
 // reads (/order-status, /rails) live in payment-reads.ts so the attested proxy never imports their source.
 import { deny } from "../http";
+import { readProxyToken } from "../http/proxy-token";
 import { hashToken } from "../ledger/hash";
 import type { ProxyEndpointDeps } from "./types";
 import { readThrottled } from "./read-throttle";
@@ -44,7 +45,9 @@ export function makeBalance(d: ProxyEndpointDeps) {
       return throttled;
     }
     try {
-      const token = req.headers.get("x-api-key");
+      // Keep the browser's existing x-api-key convention authoritative when both are sent,
+      // while accepting the Bearer header used by OpenAI-compatible API clients.
+      const token = readProxyToken(req, "api-key");
       if (!token) {
         metrics.recordBalance("unknown");
         return deny(401, "invalid_token");
