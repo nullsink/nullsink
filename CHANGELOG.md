@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/nullsink/nullsink/compare/v1.11.1...v1.11.2) (2026-07-27)
+
+
+### Bug Fixes
+
+* **auth:** accept bearer tokens on balance ([#137](https://github.com/nullsink/nullsink/issues/137)) ([bbd257f](https://github.com/nullsink/nullsink/commit/bbd257f32f9a5e749b30d9393efe3e4ab18fd777))
+
 ## [1.11.1](https://github.com/nullsink/nullsink/compare/v1.11.0...v1.11.1) (2026-07-26)
 
 
