@@ -438,7 +438,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         let settled = false;
         // Mark caller/timeout termination BEFORE cancelling upstream. reader.cancel() can wake an in-flight
         // read as `done`; the done path consults this marker so that race cannot masquerade as a clean end.
-        let requestedCause: "client_cancel" | "deadline" | null = null;
+        let requestedCause: "client_cancel" | "deadline" | "shutdown_drain" | null = null;
         // Captured in the stream's start() so the force-settle deadline below can terminate the client's
         // stream even when the client is the one stalling (a backpressured pull won't observe a close itself).
         let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -448,6 +448,19 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
           settled = true;
           inflight.delete(settle); // billing finalized (naturally, or drained on shutdown) — stop tracking
           cancelDeadline?.(); // every natural exit (done/error/cancel/drain) clears the force-settle timer here
+          if (reason === "drain") {
+            // Billing settlement alone does not stop the fetch body's blocked read. During a service restart,
+            // that previously left server.stop(true) waiting for UPSTREAM_TIMEOUT_MS (normally 10 minutes)
+            // until systemd killed the process at TimeoutStopSec. Cancel generation and end the downstream
+            // body as part of the same idempotent drain action so shutdown finishes on our 25-second schedule.
+            requestedCause = "shutdown_drain"; // mark before cancel wakes a racing reader.read()
+            reader.cancel("shutdown_drain").catch(() => {});
+            try {
+              streamController?.error(new Error("shutdown_drain"));
+            } catch {
+              /* stream already closed/errored — nothing to terminate */
+            }
+          }
           const metered = scan.result();
           const cause = reason === "drain" ? "shutdown_drain" : reason;
           const decision = decideStreamSettlement({

@@ -66,7 +66,11 @@ test("shutdown drain of a live no-usage stream → full refund, NO refunded-in-f
   metrics.reset(0);
   const inflight = new Set<(r?: "drain") => void>();
   // a stream that opens but never produces a frame → stays live (settle pending) until we drain it
-  const liveStream = async () => new Response(new ReadableStream<Uint8Array>({ start() {} }), { status: 200, headers: { "content-type": "text/event-stream" } });
+  let cancelled = false;
+  const liveStream = async () => new Response(new ReadableStream<Uint8Array>({
+    start() {},
+    cancel() { cancelled = true; },
+  }), { status: 200, headers: { "content-type": "text/event-stream" } });
   const { handler, balances } = makeHandler(liveStream, { inflight });
   const hash = hashToken("pr_d");
   balances.credit(hash, 10_000_000_000);
@@ -76,7 +80,9 @@ test("shutdown drain of a live no-usage stream → full refund, NO refunded-in-f
   expect(res.status).toBe(200);
   expect(inflight.size).toBe(1);
   [...inflight][0]("drain"); // shutdown drain
+  await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
 
+  expect(cancelled).toBe(true); // even a no-usage stall must release the upstream read during shutdown
   expect(balances.getBalance(hash)).toBe(before); // refunded
   expect(metrics.snapshot().bill.refundedInFull).toBe(0); // routine, NOT the metering-break page
   expect([metrics.snapshot().streamAborted, metrics.snapshot().served]).toEqual([1, 0]); // counted stream:aborted, NOT served
