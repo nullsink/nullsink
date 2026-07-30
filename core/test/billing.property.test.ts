@@ -639,7 +639,7 @@ test("streaming: the inflight registry holds a live stream and clears it on clea
   expect(inflight.size).toBe(0);
 });
 
-test("streaming: draining the inflight registry (shutdown) bills the metered partial, exactly once", async () => {
+test("streaming: draining the inflight registry cancels upstream and bills the metered partial, exactly once", async () => {
   metrics.reset(0);
   const inflight = new Set<(reason?: "drain") => void>();
   const model = "claude-opus-4-8";
@@ -661,14 +661,16 @@ test("streaming: draining the inflight registry (shutdown) bills the metered par
   // Simulate index.ts's SIGTERM drain: settle every still-open stream, then it's gone from the set.
   expect(inflight.size).toBe(1);
   for (const settle of [...inflight]) settle("drain");
+  await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
   expect(inflight.size).toBe(0);
+  expect(cancelled).toBe(true); // shutdown must stop upstream work; otherwise server.stop(true) waits for its timeout
+  await expect(reader.read()).rejects.toThrow("shutdown_drain"); // downstream is terminated too; hard stop cannot hang on it
   const partial = priceUsage(model, { input_tokens: 1000, output_tokens: 300 });
   expect(initial - balances.getBalance(hashToken(token))!).toBe(partial); // partial billed, not the 9999
   expect([metrics.snapshot().served, metrics.snapshot().servedPartial, metrics.snapshot().streamAborted]).toEqual([0, 1, 0]);
   expect(holdsCount(balances)).toBe(0); // drain settled the open stream → journal cleared (NIT-2)
   // Idempotent: the later natural cancel must not bill again (settle()'s `settled` guard).
   await reader.cancel().catch(() => {});
-  expect(cancelled).toBe(true);
   expect(initial - balances.getBalance(hashToken(token))!).toBe(partial);
 });
 
