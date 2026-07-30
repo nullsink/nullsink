@@ -17,7 +17,7 @@ than take them on faith. See [architecture.md](architecture.md) for how the piec
 | **Watch-only custody** | The wallets on the box are view-only (Monero) / watch-only (Bitcoin). `rails/monero.ts` and `rails/bitcoin.ts` only mint addresses and read incoming transfers — there is no spend, sweep, or withdraw call anywhere in the code. The spend key stays cold/offline. |
 | **Rate limits don't identify you** | `ratelimit.ts` is a single global bucket — no per-IP or per-token keying. The code handles no client IP at all. |
 | **Your balance can't go negative** | The debit is an atomic conditional update (`ledger/db.ts`), and settlement bounds every refund to the hold it releases (`handler.ts`, `billActual`). See [billing-model.md](billing-model.md). |
-| **Errors don't leak our key or billing state** | `handler.ts` (`relayOrSanitizeUpstream`) relays clearly user-fixable errors, synthesizes safe retryable throttle/overload/server envelopes, and keeps operator key, permission, and billing failures opaque. Raw upstream error bodies are never exposed on a non-2xx response. |
+| **Errors don't leak our key or billing state** | `handler.ts` (`relayOrSanitizeUpstream`) relays user-fixable errors, sanitizes retryable failures, and keeps operator key, permission, and billing failures opaque. |
 
 ## What we do collect
 

@@ -140,14 +140,12 @@ export function recordServed(): void {
   served += 1;
 }
 
-// One streamed request the client disconnected on after we'd forwarded the prompt → billed an input-floor only
-// (handler.ts settle, the clientDisconnected branch). Real bounded billing, so NOT a clean `served`, NOT a leak.
+// One locally terminated stream billed from observed usage or an input floor; not a completed `served`.
 export function recordServedPartial(): void {
   servedPartial += 1;
 }
 
-// One streamed 2xx that never reached a clean bill — upstream errored mid-flight, or we drained it at shutdown →
-// refunded in full (handler.ts settle, the drain/aborted branches). Routine; NOT the bill.refundedInFull leak.
+// One upstream-failed stream, or shutdown drain before usage, refunded in full; not a billing anomaly.
 export function recordStreamAborted(): void {
   streamAborted += 1;
 }
