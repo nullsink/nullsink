@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BuyError, Quote, Rail } from "../lib/api.ts";
-import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, toReadFailure, usd, type ReadFailure } from "../lib/api.ts";
+import { balanceErrorMessage, buyErrorMessage, checkBalance, getRails, RAILS_OPTIMISTIC, requestQuote, toReadFailure, usdBalance, type ReadFailure } from "../lib/api.ts";
 import { generateToken, hashToken, keyFieldState } from "../lib/token.ts";
 import { KeyBlock } from "../ui.tsx";
 import { EXT } from "../lib/links.ts";
@@ -292,7 +292,7 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
                 ) : (
                   <span className={"check-line" + (checkedBalance === null ? " none" : "")}>
                     {checkedBalance !== null
-                      ? `balance: ${usd(checkedBalance)}`
+                      ? `balance: ${usdBalance(checkedBalance)}`
                       : "no balance for this key. deposits confirm in ~20-45 min"}
                   </span>
                 ))}
@@ -415,9 +415,9 @@ export function KeyFlow({ onCheckoutChange }: { onCheckoutChange?: (active: bool
         {/* polite region on the amount only — the focus-moved sr-only <h1> already says "funded", so
             announcing the number here (not the whole head) avoids a doubled "funded". */}
         <span className="balance" role="status">
-          {usd(finalBalance)}
+          {usdBalance(finalBalance)}
           {!order.wasNew && order.baseline > 0 && (
-            <span className="delta"> +{usd(finalBalance - order.baseline)}</span>
+            <span className="delta"> +{usdBalance(finalBalance - order.baseline)}</span>
           )}
         </span>
       </div>

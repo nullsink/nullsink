@@ -44,13 +44,13 @@ function issueToken(dollars: string): string {
 
 test("topup credits an EXISTING token by hash; balance reads it back", () => {
   rmDb();
-  const hash = hashOf(issueToken("10"));
-  expect(nsk(["balance", hash]).out.trim()).toBe("$10.000000");
+  const hash = hashOf(issueToken("10.000001"));
+  expect(nsk(["balance", hash]).out.trim()).toBe("$10.000001");
 
-  const { code, out } = nsk(["topup", hash, "5"]);
+  const { code, out } = nsk(["topup", hash, "5.000001"]);
   expect(code).toBe(0);
-  expect(out).toContain("New balance: $15.00");
-  expect(nsk(["balance", hash]).out.trim()).toBe("$15.000000");
+  expect(out).toContain("New balance: $15.000002");
+  expect(nsk(["balance", hash]).out.trim()).toBe("$15.000002");
 });
 
 test("topup REFUSES an unknown (well-formed) hash — no phantom token minted", () => {

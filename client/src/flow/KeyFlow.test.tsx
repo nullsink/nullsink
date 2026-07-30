@@ -133,6 +133,17 @@ test("a valid pasted token routes submit to top-up (baseline snapshot, no save-g
   expect(screen.queryByText(/I saved my key/i)).not.toBeInTheDocument(); // top-ups skip the mint save-gate
 });
 
+test("a checked balance shows all six micro-dollar digits", async () => {
+  checkBalance.mockImplementation(() => Promise.resolve(12.345678));
+  render(<KeyFlow />);
+  await screen.findByRole("button", { name: /mint key/i });
+
+  fireEvent.change(screen.getByLabelText(/leave blank to mint a new key/i), { target: { value: VALID_TOKEN } });
+  fireEvent.click(screen.getByRole("button", { name: /check balance/i }));
+
+  expect(await screen.findByText("balance: $12.345678")).toBeInTheDocument();
+});
+
 // A top-up's success is balance > baseline. If the baseline read fails, substituting zero lets an old
 // positive balance satisfy that check before the new payment is credited. Fail before /buy instead.
 test("a failed top-up baseline read does not request a quote", async () => {

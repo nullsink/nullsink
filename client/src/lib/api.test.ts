@@ -2,7 +2,7 @@
 // test (QuotePay.test mocks the whole module away). Each request's body/headers and each status/error branch
 // is exercised against a stubbed global fetch. Privacy-critical: the raw token may appear ONLY in /balance.
 import { test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, creditVerificationErrorMessage, paymentStatusErrorMessage, toReadFailure, trocadorSwapUrl, TROCADOR_ANONPAY_URL } from "./api.ts";
+import { requestQuote, checkBalance, getRails, fetchOrderStatus, balanceErrorMessage, buyErrorMessage, creditVerificationErrorMessage, paymentStatusErrorMessage, toReadFailure, trocadorSwapUrl, TROCADOR_ANONPAY_URL, usdBalance } from "./api.ts";
 
 type Call = { url: string; init?: RequestInit };
 let calls: Call[] = [];
@@ -22,6 +22,12 @@ const bodyOf = (c: Call) => JSON.parse(c.init!.body as string);
 
 beforeEach(() => { calls = []; });
 afterEach(() => { globalThis.fetch = realFetch; });
+
+test("usdBalance shows the full six-digit micro-dollar precision", () => {
+  expect(usdBalance(0.000001)).toBe("$0.000001");
+  expect(usdBalance(12.5)).toBe("$12.500000");
+  expect(usdBalance(1_234.56789)).toBe("$1,234.567890");
+});
 
 // --- requestQuote -----------------------------------------------------------
 test("requestQuote omits `rail` when not given, includes it when given", async () => {

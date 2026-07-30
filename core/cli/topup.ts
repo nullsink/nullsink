@@ -3,7 +3,8 @@
 // (`nsk topup <hash> <dollars>`), manually after a repeat payment. Refuses an unknown hash rather than
 // minting a phantom, unspendable balance (no one holds its preimage) — use `nsk issue` to create a token.
 import { openDb, DB_PATH } from "../src/ledger/db";
-import { requireDollars, toDollars, toMicros } from "./money";
+import { formatUsd } from "../src/ledger/financials";
+import { requireDollars, toMicros } from "./money";
 
 export function runTopup(args: string[]): void {
   const USAGE = "usage: nsk topup <hash> <dollars>";
@@ -25,6 +26,6 @@ export function runTopup(args: string[]): void {
     process.exit(1);
   }
   credit(hash, toMicros(dollars));
-  const balance = toDollars(getBalance(hash) ?? 0);
-  console.log(`Added $${dollars.toFixed(2)}. New balance: $${balance.toFixed(2)}.`);
+  const balanceMicros = getBalance(hash) ?? 0;
+  console.log(`Added $${dollars.toFixed(2)}. New balance: $${formatUsd(balanceMicros)}.`);
 }
