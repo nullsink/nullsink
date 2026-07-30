@@ -33,8 +33,32 @@ const streamReq = (token: string) => new Request("https://proxy.local/v1/message
 });
 // upstream that yields a fixed SSE script then closes cleanly
 const streamOf = (events: any[]) => async () => new Response(new ReadableStream<Uint8Array>({ start(c) { c.enqueue(enc.encode(sse(events))); c.close(); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
+// upstream that yields one SSE event per client pull, leaving the stream open until the next pull
+const streamEventByEvent = (events: any[]) => async () => new Response(new ReadableStream<Uint8Array>({
+  start(c) { (c as any)._n = 0; },
+  pull(c) {
+    const event = events[(c as any)._n++];
+    if (event) c.enqueue(enc.encode(sse([event])));
+    else c.close();
+  },
+}), { status: 200, headers: { "content-type": "text/event-stream" } });
 // upstream that yields one chunk then errors mid-stream
 const streamThenError = () => async () => new Response(new ReadableStream<Uint8Array>({ start(c) { (c as any)._n = 0; }, pull(c) { const n = (c as any)._n++; if (n === 0) c.enqueue(enc.encode("event: ping\ndata: {}\n\n")); else c.error(new Error("midstream boom")); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
+// upstream that yields a usage-bearing message_start then fails at the transport layer
+const streamUsageThenError = () => async () => new Response(new ReadableStream<Uint8Array>({
+  start(c) { (c as any)._n = 0; },
+  pull(c) {
+    const n = (c as any)._n++;
+    if (n === 0) {
+      c.enqueue(enc.encode(sse([
+        { type: "message_start", message: { model: "claude-opus-4-8", usage: { input_tokens: 5, output_tokens: 0 } } },
+        { type: "message_delta", usage: { output_tokens: 3 } },
+      ])));
+    } else {
+      c.error(new Error("midstream boom after message_start"));
+    }
+  },
+}), { status: 200, headers: { "content-type": "text/event-stream" } });
 const warnText = (spy: any) => spy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
 
 test("shutdown drain of a live no-usage stream → full refund, NO refunded-in-full page", async () => {
@@ -79,6 +103,102 @@ test("mid-stream upstream error → WARN (aborted), NO refunded-in-full page", a
   expect(line).toContain("stream aborted mid-flight"); // WARN emitted
   expect(line).not.toContain("without parseable usage"); // NOT the page
   errSpy.mockRestore();
+});
+
+test("in-band upstream error after message_start → full refund and stream:aborted, not served", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const events = [
+      { type: "message_start", message: { model: "claude-opus-4-8", usage: { input_tokens: 5, output_tokens: 0 } } },
+      { type: "message_delta", usage: { output_tokens: 3 } },
+      { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+    ];
+    const { handler, balances } = makeHandler(streamOf(events));
+    const hash = hashToken("pr_inband_after_start");
+    balances.credit(hash, 10_000_000_000);
+    const before = balances.getBalance(hash)!;
+
+    const res = await handler(streamReq("pr_inband_after_start"));
+    expect(res.status).toBe(200); // the upstream committed SSE headers before reporting overload
+    await res.text();
+
+    const outcome = metrics.snapshot();
+    expect([
+      balances.getBalance(hash),
+      outcome.streamAborted,
+      outcome.served,
+    ]).toEqual([
+      before, // upstream failure is not billable, even after usage metadata
+      1,
+      0,
+    ]);
+    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+  } finally {
+    errSpy.mockRestore();
+  }
+});
+
+test("transport error after message_start → full refund and stream:aborted, not served", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const { handler, balances } = makeHandler(streamUsageThenError());
+    const hash = hashToken("pr_transport_after_start");
+    balances.credit(hash, 10_000_000_000);
+    const before = balances.getBalance(hash)!;
+
+    const res = await handler(streamReq("pr_transport_after_start"));
+    expect(res.status).toBe(200);
+    try { await res.text(); } catch { /* the response stream propagates the upstream transport failure */ }
+
+    const outcome = metrics.snapshot();
+    expect([
+      balances.getBalance(hash),
+      outcome.streamAborted,
+      outcome.served,
+    ]).toEqual([
+      before, // transport failure is not billable after message_start either
+      1,
+      0,
+    ]);
+    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+  } finally {
+    errSpy.mockRestore();
+  }
+});
+
+test("client cancel after a post-message_start error → upstream failure still wins and refunds", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const events = [
+      { type: "message_start", message: { model: "claude-opus-4-8", usage: { input_tokens: 5, output_tokens: 0 } } },
+      { type: "error", error: { type: "overloaded_error", message: "Overloaded" } },
+      { type: "ping" },
+    ];
+    const { handler, balances } = makeHandler(streamEventByEvent(events));
+    const hash = hashToken("pr_error_cancel_after_start");
+    balances.credit(hash, 10_000_000_000);
+    const before = balances.getBalance(hash)!;
+
+    const res = await handler(streamReq("pr_error_cancel_after_start"));
+    const reader = res.body!.getReader();
+    await reader.read(); // message_start → usage is now parseable
+    await reader.read(); // in-band error → scanner marks the upstream failure
+    await reader.cancel("client aborts on error");
+
+    const outcome = metrics.snapshot();
+    expect([
+      balances.getBalance(hash),
+      outcome.streamAborted,
+      outcome.served,
+      outcome.servedPartial,
+    ]).toEqual([before, 1, 0, 0]);
+    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+  } finally {
+    errSpy.mockRestore();
+  }
 });
 
 test("clean end with NO parseable usage → refunded-in-full page (the genuine money leak still pages)", async () => {
