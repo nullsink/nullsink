@@ -209,8 +209,7 @@ done
 # proved each scrubbed tombstone has a matching ledger marker. `hash <> ''` selects real credits only:
 # settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
-# Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
-# break the services' billing writes (the same trap cli/guard.ts exists to prevent).
+# Run as the SERVICE USER: root would leave root-owned WAL sidecars and break billing writes.
 if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
   # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it

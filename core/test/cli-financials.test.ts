@@ -1,7 +1,17 @@
 // The operator financial view consumes only the finalized aggregate report produced by backup.sh. It must
 // reject schema expansion and preserve exact micro-dollar values without opening either live database.
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseFinancialReport, renderFinancialReport } from "../cli/financials";
+import { openDb } from "../src/ledger/db";
+import { openOrderStore } from "../src/ledger/orders";
+import { ATOMIC_PER_XMR } from "../src/rails/units";
+
+const REPORT_SCRIPT = fileURLToPath(new URL("../deploy/backup-report.sh", import.meta.url));
+const FINANCIALS_CLI = fileURLToPath(new URL("../cli/financials.ts", import.meta.url));
 
 function fixture(): Record<string, unknown> {
   return {
@@ -46,6 +56,58 @@ test("renders exact aggregate financials from a finalized report", () => {
   expect(output).toContain("sales: 3 · credited: $23.000000 · gross: $25.300487");
   expect(output).toContain("outstanding liability at snapshot: $3.405787");
   expect(output).toContain("source: backup-20260724T080000Z.tar.age · restore-dry-run-ok");
+});
+
+test("reads the report produced from real backup snapshots", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nullsink-financials-"));
+  try {
+    const balancesPath = join(dir, "balances.db");
+    const pendingPath = join(dir, "pending.db");
+    const reportPath = join(dir, "report-20260724T080000Z.json");
+
+    const balances = openDb(balancesPath);
+    balances.credit("a".repeat(64), 3_405_787);
+    balances.db.close();
+
+    const orders = openOrderStore(pendingPath);
+    orders.recordRevenue(
+      Date.parse("2026-07-23T12:00:00Z"),
+      "monero",
+      100_000_000_000,
+      ATOMIC_PER_XMR,
+      8_000_000,
+      8_800_487,
+    );
+    orders.db.close();
+
+    const generated = Bun.spawnSync({
+      cmd: [
+        "bash",
+        REPORT_SCRIPT,
+        pendingPath,
+        balancesPath,
+        reportPath,
+        "20260724T080000Z",
+        "backup-20260724T080000Z.tar.age",
+        String(Date.parse("2026-07-24T08:00:00Z")),
+      ],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(generated.exitCode).toBe(0);
+
+    const reader = Bun.spawnSync({
+      cmd: [process.execPath, FINANCIALS_CLI, reportPath],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(reader.exitCode).toBe(0);
+    const output = reader.stdout.toString();
+    expect(output).toContain("sales: 1 · credited: $8.000000 · gross: $8.800487");
+    expect(output).toContain("outstanding liability at snapshot: $3.405787");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("date filters are half-open and do not alter snapshot liability", () => {

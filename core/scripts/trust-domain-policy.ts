@@ -77,8 +77,7 @@ export const INTENTIONAL_PAYMENTS_ONLY_RUNTIME = new Set([
 ]);
 
 // Source modules intentionally absent from both service binaries. The first two are erased type contracts;
-// the others are runtime helpers owned by the operator CLI/browser client. Exactness is checked below so a
-// removed/renamed module cannot leave a stale exemption.
+// the others serve local tools or the browser client. Exactness prevents stale exemptions.
 export const INTENTIONAL_NON_SERVICE_MODULES = new Set([
   "providers/types.ts",
   "rails/types.ts",

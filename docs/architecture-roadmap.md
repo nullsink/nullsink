@@ -97,8 +97,8 @@ Bitcoin migration/recovery runbook is also removed; if an exceptional recovery i
 a bounded procedure from the live topology rather than maintaining a permanently actionable
 database-credit workaround.
 
-Gate: no shipped or installed operator command opens either live database. Production financial
-access remains available through finalized reports copied from production or the Pi collector.
+Gate: no routine online operator CLI opens a live database. Production financial access remains
+available through finalized reports copied from production or the Pi collector.
 
 ### 4. Enforce OS privilege separation
 
