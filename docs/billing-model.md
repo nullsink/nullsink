@@ -129,9 +129,10 @@ stateDiagram-v2
     Gate --> [*]: reject - no spend (400 / 401 / 402 / 413)
     Gate --> Held: checks pass - debit the hold (atomic, journaled)
     Held --> Forwarding: forward upstream with our key
-    Forwarding --> Settled: usage metered - charge actual
-    Forwarding --> Settled: client disconnect - charge the input floor
-    Forwarding --> Settled: upstream error / cancel / drain - full refund
+    Forwarding --> Settled: clean completion - charge actual
+    Forwarding --> Settled: client disconnect / deadline - charge metered partial or input floor
+    Forwarding --> Settled: upstream error - full refund
+    Forwarding --> Settled: shutdown drain - charge metered partial, or refund before usage
     Held --> Settled: crash before settle - refunded at next boot
     Settled --> [*]: refund the rest (clamped between 0 and the hold)
 ```

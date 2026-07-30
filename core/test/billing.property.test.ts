@@ -13,6 +13,7 @@ import { hashToken } from "../src/ledger/db";
 import { priceUsage } from "../src/cost";
 import { makeTokenBucket } from "../src/ratelimit";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
+import * as metrics from "../src/metrics";
 
 const MODELS = ["claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-4-6"];
 
@@ -196,7 +197,7 @@ test("non-billable outcomes refund in full (status + zero net debit)", async () 
       let wantStatus: number;
       switch (outcome.kind) {
         case "non2xx":
-          // a 5xx is our/upstream side, so the handler now MASKS it as 503 (see relayOrMaskUpstream)
+          // a 5xx is our/upstream side, so the handler sanitizes it as 503 (see relayOrSanitizeUpstream)
           upstream = async () => new Response(JSON.stringify({ error: "upstream boom" }), { status: 500 });
           wantStatus = 503;
           break;
@@ -226,10 +227,9 @@ test("non-billable outcomes refund in full (status + zero net debit)", async () 
   errSpy.mockRestore();
 });
 
-// The leak fix: a non-OK upstream is refunded either way, but only USER-fixable request errors are relayed
-// verbatim; anything that would reveal our key, our billing, or the provider (incl. Anthropic's 400 "credit
-// balance too low") is masked behind an opaque nullsink error. See relayOrMaskUpstream in handler.ts.
-test("upstream errors: user-fixable relayed, our-side/billing masked (always refunded, no leak)", async () => {
+// Non-OK responses are always refunded. User-fixable request errors relay verbatim; operator auth/billing
+// stays opaque + terminal; transient throttle/server overload is sanitized but explicitly retryable.
+test("upstream errors: safe semantics preserved, operator state masked (always refunded, no leak)", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const model = "claude-opus-4-8";
   const cases = [
@@ -238,20 +238,23 @@ test("upstream errors: user-fixable relayed, our-side/billing masked (always ref
     // (the tightened isBillingError scopes to error.type/code + a tight phrase, not the whole body)
     { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: too long; trim your notes about billing and quota usage" } }), want: 400, relayed: true, label: "400 echoing billing/quota in user text (must relay)" },
     { up: 413, body: JSON.stringify({ type: "error", error: { type: "request_too_large" } }), want: 413, relayed: true, label: "413 too large" },
-    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Purchase credits at https://console.anthropic.com/settings/billing" } }), want: 503, relayed: false, label: "400 billing (the leak)" },
+    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Purchase credits at https://console.anthropic.com/settings/billing" } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "400 billing (the leak)" },
     // OpenAI ships out-of-funds as a 429 insufficient_quota (per its docs), which retrying never clears, so
     // it must mask to 503, NOT 429 rate_limited. A real throttle 429 (below) still masks to 429.
-    { up: 429, body: JSON.stringify({ error: { type: "insufficient_quota", code: "insufficient_quota", message: "You exceeded your current quota, please check your plan and billing details." } }), want: 503, relayed: false, label: "429 openai insufficient_quota -> 503" },
+    { up: 429, body: JSON.stringify({ error: { type: "insufficient_quota", code: "insufficient_quota", message: "You exceeded your current quota, please check your plan and billing details." } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "429 openai insufficient_quota -> 503" },
     // Anthropic also defines a 402 billing_error (real low-credit usually arrives as the 400 above)
-    { up: 402, body: JSON.stringify({ type: "error", error: { type: "billing_error", message: "There's an issue with your billing or payment information." } }), want: 503, relayed: false, label: "402 anthropic billing_error" },
-    { up: 401, body: JSON.stringify({ error: { message: "invalid api key" } }), want: 503, relayed: false, label: "401 our key" },
-    { up: 403, body: "forbidden", want: 503, relayed: false, label: "403 permission" },
-    { up: 429, body: "slow down", want: 429, relayed: false, label: "429 provider throttle" },
-    { up: 500, body: "boom", want: 503, relayed: false, label: "500 provider error" },
-    { up: 529, body: JSON.stringify({ type: "error", error: { type: "overloaded_error" } }), want: 503, relayed: false, label: "529 overloaded" },
+    { up: 402, body: JSON.stringify({ type: "error", error: { type: "billing_error", message: "There's an issue with your billing or payment information." } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "402 anthropic billing_error" },
+    { up: 401, body: JSON.stringify({ error: { message: "invalid api key" } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "401 our key" },
+    { up: 403, body: "forbidden", want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "403 permission" },
+    { up: 429, body: "slow down", want: 429, relayed: false, type: "rate_limit_error", message: "rate_limited", retry: "true", label: "429 provider throttle" },
+    { up: 500, body: "boom", want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "true", label: "500 provider error" },
+    { up: 529, body: JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "LEAK-MARKER overloaded" }, request_id: "req_secret" }), want: 529, relayed: false, type: "overloaded_error", message: "upstream_overloaded", retry: "true", retryAfter: "12", label: "529 overloaded" },
   ];
   for (const c of cases) {
-    const { handler, balances } = makeHandler(async () => new Response(c.body, { status: c.up, headers: { "content-type": "application/json" } }));
+    const { handler, balances } = makeHandler(async () => new Response(c.body, {
+      status: c.up,
+      headers: { "content-type": "application/json", ...(c.retryAfter ? { "retry-after": c.retryAfter } : {}) },
+    }));
     const token = "pr_maskcase";
     const initial = 10_000_000_000;
     balances.credit(hashToken(token), initial);
@@ -263,12 +266,14 @@ test("upstream errors: user-fixable relayed, our-side/billing masked (always ref
       expect([c.label, out]).toEqual([c.label, c.body]); // verbatim so the developer can fix the request
     } else {
       const lower = out.toLowerCase();
-      expect([c.label, lower.includes("credit balance") || lower.includes("anthropic") || lower.includes("console")]).toEqual([c.label, false]);
-      // /v1/messages → native Anthropic envelope, but the message stays an opaque generic code (no leak).
+      expect([c.label, lower.includes("credit balance") || lower.includes("anthropic") || lower.includes("console") || lower.includes("leak-marker") || lower.includes("req_secret")]).toEqual([c.label, false]);
+      // /v1/messages keeps a native Anthropic envelope while synthesizing the safe type/message.
       const j = JSON.parse(out);
       expect([c.label, j.type]).toEqual([c.label, "error"]);
-      expect([c.label, j.error.type]).toEqual([c.label, c.want === 429 ? "rate_limit_error" : "api_error"]);
-      expect([c.label, j.error.message]).toEqual([c.label, c.want === 429 ? "rate_limited" : "service_unavailable"]);
+      expect([c.label, j.error.type]).toEqual([c.label, c.type]);
+      expect([c.label, j.error.message]).toEqual([c.label, c.message]);
+      expect([c.label, res.headers.get("x-should-retry")]).toEqual([c.label, c.retry!]);
+      expect([c.label, res.headers.get("retry-after")]).toEqual([c.label, c.retryAfter ?? null]);
     }
   }
   errSpy.mockRestore();
@@ -635,7 +640,8 @@ test("streaming: the inflight registry holds a live stream and clears it on clea
 });
 
 test("streaming: draining the inflight registry (shutdown) bills the metered partial, exactly once", async () => {
-  const inflight = new Set<() => void>();
+  metrics.reset(0);
+  const inflight = new Set<(reason?: "drain") => void>();
   const model = "claude-opus-4-8";
   const events = [
     { type: "message_start", message: { model, usage: { input_tokens: 1000, output_tokens: 1 } } },
@@ -654,10 +660,11 @@ test("streaming: draining the inflight registry (shutdown) bills the metered par
   await reader.read(); // first delta → output=300 metered
   // Simulate index.ts's SIGTERM drain: settle every still-open stream, then it's gone from the set.
   expect(inflight.size).toBe(1);
-  for (const settle of [...inflight]) settle();
+  for (const settle of [...inflight]) settle("drain");
   expect(inflight.size).toBe(0);
   const partial = priceUsage(model, { input_tokens: 1000, output_tokens: 300 });
   expect(initial - balances.getBalance(hashToken(token))!).toBe(partial); // partial billed, not the 9999
+  expect([metrics.snapshot().served, metrics.snapshot().servedPartial, metrics.snapshot().streamAborted]).toEqual([0, 1, 0]);
   expect(holdsCount(balances)).toBe(0); // drain settled the open stream → journal cleared (NIT-2)
   // Idempotent: the later natural cancel must not bill again (settle()'s `settled` guard).
   await reader.cancel().catch(() => {});

@@ -10,7 +10,7 @@
 //       holdExceeded    actual cost priced ABOVE the up-front hold; the refund was clamped to 0 (no
 //                       overdraft). Sound by construction, but a spike means the hold is mis-sized.
 //   upstream.* — every reason a forwarded request came back non-2xx (i.e. the served↔req gap), BY CAUSE,
-//     classified in handler.ts relayOrMaskUpstream + the transport catch. Level is per-member, not a
+//     classified in handler.ts relayOrSanitizeUpstream + the transport catch. Level is per-member, not a
 //     family-wide rule: the our/provider-side causes below pair with a per-event log → WARN; relayed4xx is
 //     the CLIENT's own request error → routine INFO (no per-event log — a 4xx body can echo the prompt).
 //       throttle    a GENUINE HTTP 429 rate limit — the ceiling tripwire (NOT an out-of-funds 429)
@@ -62,15 +62,12 @@
 //     The per-window `served=N req=M` heartbeat makes "successful serving silently stopped" (served → 0 while
 //     the box is still up) VISIBLE — the one drop /healthz can't.
 //   servedPartial / streamAborted — the streamed-request outcomes that aren't a clean bill (so NOT in served):
-//       servedPartial   the client disconnected after we'd forwarded the prompt → billed an INPUT-FLOOR only
-//                       (the upstream already ingested + charged us for the prompt; no output yet). ROUTINE —
-//                       real, bounded billing. Emitted `stream:partial`. NOTE: Anthropic-granularity — the
-//                       OpenAI scanner folds a mid-stream disconnect into its normal usage result, so an OpenAI
-//                       partial bills via the clean path and counts as `served`, not here (cost/usage/openai.ts).
-//       streamAborted   a 2xx SSE that never reached a clean bill: the upstream errored mid-flight, or we
-//                       drained the stream at shutdown → refunded in full. ROUTINE (the client got an error or
-//                       nothing, not billable content) — NOT the money leak (that's bill.refundedInFull, which
-//                       pages). Emitted `stream:aborted`.
+//       servedPartial   caller disconnect, deadline, or shutdown drain after forwarding → billed the metered
+//                       usage when available, otherwise an INPUT-FLOOR for caller/deadline termination. ROUTINE —
+//                       real, bounded billing. Emitted `stream:partial`.
+//       streamAborted   a 2xx SSE that failed upstream mid-flight, or a shutdown drain before any usage →
+//                       refunded in full. ROUTINE (the client got an error or nothing billable) — NOT the money
+//                       leak (that's bill.refundedInFull, which pages). Emitted `stream:aborted`.
 //   peakStreams / peakOpenOrders — high-water marks for concurrent live streams and open payment orders, so
 //     saturation toward the in-flight ceilings is visible before it bites.
 //   peakOutbox / maxOutboxAgeMs — maximum queued-credit count and oldest-row age observed in the window.
@@ -95,8 +92,8 @@ const balance = { ok: 0, unknown: 0, throttled: 0, error: 0 };
 const credit = { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 };
 let requests = 0; // metered requests forwarded upstream (post-gates)
 let served = 0; // of those, the ones we billed cleanly (a 2xx we metered actual usage on)
-let servedPartial = 0; // streamed, client disconnected post-forward → billed input-floor only (Anthropic-granularity)
-let streamAborted = 0; // streamed 2xx that never cleanly billed — mid-flight upstream error, or shutdown drain → refunded
+let servedPartial = 0; // streamed, locally terminated after forwarding → billed metered usage or input floor
+let streamAborted = 0; // streamed 2xx failed upstream, or drained before usage → fully refunded
 let peakStreams = 0;
 let peakOpenOrders = 0;
 let peakOutbox = 0;
@@ -104,7 +101,7 @@ let maxOutboxAgeMs = 0;
 let recoveredHolds = 0; // stranded holds boot recoverHolds() refunded (ungraceful restart) — boot-point money gauge
 let windowStart = 0;
 
-// One non-clean upstream outcome, already classified by the caller (handler.ts relayOrMaskUpstream / catch).
+// One non-clean upstream outcome, already classified by the caller (handler.ts relayOrSanitizeUpstream / catch).
 export function recordUpstream(kind: UpstreamKind): void {
   upstream[kind] += 1;
 }
@@ -143,14 +140,12 @@ export function recordServed(): void {
   served += 1;
 }
 
-// One streamed request the client disconnected on after we'd forwarded the prompt → billed an input-floor only
-// (handler.ts settle, the clientDisconnected branch). Real bounded billing, so NOT a clean `served`, NOT a leak.
+// One locally terminated stream billed from observed usage or an input floor; not a completed `served`.
 export function recordServedPartial(): void {
   servedPartial += 1;
 }
 
-// One streamed 2xx that never reached a clean bill — upstream errored mid-flight, or we drained it at shutdown →
-// refunded in full (handler.ts settle, the drain/aborted branches). Routine; NOT the bill.refundedInFull leak.
+// One upstream-failed stream, or shutdown drain before usage, refunded in full; not a billing anomaly.
 export function recordStreamAborted(): void {
   streamAborted += 1;
 }
