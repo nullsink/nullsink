@@ -2,7 +2,7 @@
 
 The metered proxy service: an anonymous reverse proxy to Anthropic/OpenAI, metered at the
 provider's per-token price against prepaid balances, plus its billing ledger, payment rails,
-the `nsk` operator CLI, and the box deploy machinery. Bun + TypeScript, zero runtime dependencies.
+local aggregate-report tools, and the box deploy machinery. Bun + TypeScript, zero runtime dependencies.
 
 See the [root README](../README.md) for monorepo setup, dev commands, and deploy.
 
@@ -22,7 +22,7 @@ src/
   http/           body.ts, errors.ts, headers.ts
   env.ts log.ts metrics.ts ratelimit.ts shutdown.ts token-format.ts
 
-cli/      the nsk operator CLI + dev tools
+cli/      local aggregate-report + buyer/dev tools (never installed on the box)
 deploy/   systemd units, Caddyfile, deploy.sh / setup.sh
 scripts/  e2e capture/hold, lint, trust-domain-isolation assert
 test/     bun test (mostly fast-check property tests)
@@ -35,7 +35,6 @@ test/     bun test (mostly fast-check property tests)
 | `bun test` | run the test suite |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run build` | compile both service binaries (`nullsink-{proxy,payments}-linux-x64`) + assert trust-domain isolation |
-| `bun run build:nsk` | compile the `nsk` CLI binary |
 | `bun run e2e:capture` | real-spend end-to-end + golden-fixture capture (operator-run) |
 | `bun run e2e:hold` | live hold-soundness check against real upstreams (operator-run) |
 
@@ -62,7 +61,7 @@ plugin is broken on current Bun, so it's deliberately not used. The HTML/JSON re
 - [architecture.md](../docs/architecture.md) — how the pieces fit together
 - [trust-model.md](../docs/trust-model.md) — the privacy and money-safety guarantees
 - [billing-model.md](../docs/billing-model.md) — holds, settlement, no-overdraft
-- [cli/README.md](cli/README.md) — the `nsk` operator CLI
+- [cli/README.md](cli/README.md) — local DB-free command-line tools
 - [deploy/README.md](deploy/README.md) — the box runtime tree
 - [../SECURITY.md](../SECURITY.md) — reporting security issues
 

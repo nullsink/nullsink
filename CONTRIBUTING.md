@@ -49,7 +49,7 @@ write the changelog or bump versions by hand.
 - release-please keeps an open "release PR" that bumps the version and regenerates `CHANGELOG.md` from the
   commits since the last release. Merge it when you want to cut a release.
 - Merging the release PR tags `vX.Y.Z` and creates the GitHub Release; CI then builds and attaches the
-  linux-x64 server + `nsk` binaries, the deploy tree, and the client UI tarball (with `SHA256SUMS`).
+  two linux-x64 server binaries, the deploy tree, and the client UI tarball (with `SHA256SUMS`).
 
 Pre-1.0, `feat` and breaking changes bump the minor (`0.x`), `fix` bumps the patch.
 

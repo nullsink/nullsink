@@ -16,9 +16,8 @@ the payment→token link. The only channel between them is a unix socket at `/ru
 which payments delivers credits in one direction. They share one service user today; splitting the uids
 waits on the admin-plane redesign (see `nullsink-proxy.service` for why).
 
-See setup.sh to stand up a box, and deploy.sh / upgrade-component.sh / backup.sh / node-box-runbook.md for
-day-2 work (app redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This file is just
-the map.
+See setup.sh to stand up a box, and deploy.sh / upgrade-component.sh / backup.sh for day-2 work (app
+redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This file is just the map.
 
 ## What's here, by concern
 
@@ -29,9 +28,7 @@ the map.
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
 | `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
-| `install-nsk.sh` | Installs the optional `nsk` operator CLI on demand (not shipped by default). |
 | `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
-| `node-box-runbook.md` | The ordered runbook for moving bitcoind to that node box — sync first, then a minutes-long drain window. |
 
 ### Operator & break-glass scripts (run by units or by hand)
 | File | Role |
@@ -59,7 +56,7 @@ the map.
 ## Two things to know
 
 **App releases and pinned runtime dependencies have separate activation paths.** `deploy.sh <tag>` installs
-nullsink's two server binaries, optional `nsk`, client UI, and deploy configuration. It never restarts a rail
+nullsink's two server binaries, client UI, and deploy configuration. It never restarts a rail
 watcher or attestation sidecar. For an existing box, activate one refreshed dependency pin explicitly:
 
 ```sh
@@ -76,6 +73,12 @@ downtime, requires a healthy rollback baseline both before and after staging, pr
 under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target service, and rolls back
 automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
 `setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
+
+**The first no-`nsk` release has a one-time preflight.** Before invoking a pre-Step-3 deployed
+`deploy.sh`, remove `/usr/local/bin/nsk`, `/opt/nullsink/deploy/install-nsk.sh`, and
+`/opt/nullsink/deploy/node-box-runbook.md`. The older deploy script otherwise sees the installed
+binary and tries to refresh an `nsk-linux-x64` asset that the new release intentionally omits.
+The new deploy library repeats this retirement idempotently after extracting future deploy trees.
 
 **The app-box layout is deliberately flat.** The `install_units` glob
 (`deploy/*.service`/`*.timer`), app unit paths, and operator references expect app-box files directly under
@@ -127,6 +130,16 @@ Run that check after schema, archive-format, restore-code, or key changes and pe
 operation. The [`backup-collector/`](backup-collector/) bundle collects only finalized encrypted artifacts
 and these aggregate reports; it does not need or receive the private `age` identity.
 
-**Release fetch is plain `curl`.** The four fetch helpers in `lib.sh` pull the public GitHub Release assets
+Read routine financials on a trusted workstation without opening either live database:
+
+```sh
+bun run financials -- report-20260721T120000Z.json
+```
+
+The reader validates the exact report schema and supports `--since` / `--until` date filters. The normal
+`/buy` flow remains the only supported way to create or add token credit; there is no installed operator
+issue/top-up/balance command.
+
+**Release fetch is plain `curl`.** The three app-release fetch helpers in `lib.sh` pull the public GitHub Release assets
 over HTTPS and verify them against `SHA256SUMS` — no `gh`, no auth on the box. Build provenance is attested
 in CI (`release.yml`); verify off-box with `gh attestation verify <file> --repo nullsink/nullsink`.

@@ -99,13 +99,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-07-24<br>v1.11.0 · Steps 1–2 shipped</div>
+    <div class="stamp">as of 2026-07-30<br>after v1.11.2 · Step 3 next</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
-      <title id="roadmap-title">nullsink shipped architecture and next app-box boundary</title>
-      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and version 1.10.1 scrubs the token hash and amount after definite acknowledgement. Version 1.11.0 ships coordinated encrypted recovery artifacts and aggregate reports through a restricted read-only export to an hourly Raspberry Pi collector; scheduled pulling and an offline dry-run restore are proven. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
+      <title id="roadmap-title">nullsink current architecture, next release, and target app-box boundary</title>
+      <desc id="roadmap-desc">The current system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector; scheduled pulling and an offline dry-run restore are proven. The next release retires nsk and all live operator database access, with financials rendered locally from finalized aggregate reports. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -114,9 +114,9 @@
         <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#e1a85a"/></marker>
       </defs>
 
-      <!-- SHIPPED TODAY -->
+      <!-- CURRENT + NEXT RELEASE -->
       <rect class="panel" x="28" y="28" width="1344" height="1160" rx="18"/>
-      <text class="section-kicker" x="60" y="70">SHIPPED TODAY</text>
+      <text class="section-kicker" x="60" y="70">CURRENT + NEXT RELEASE</text>
       <text class="section-title" x="60" y="101">two code trust domains · one shared OS identity</text>
 
       <!-- user and edge -->
@@ -215,10 +215,11 @@
 
       <!-- control plane -->
       <text class="section-kicker" x="100" y="1092">CONTROL PLANE</text>
-      <rect class="node-exception" x="100" y="1110" width="250" height="58" rx="9"/>
-      <text class="title" x="125" y="1139">nsk · direct DB writer</text>
-      <text class="copy-small" x="125" y="1157">opens both DBs · temporary exception</text>
+      <rect class="node-shipped" x="100" y="1110" width="250" height="58" rx="9"/>
+      <text class="title" x="125" y="1139">local financials</text>
+      <text class="copy-small" x="125" y="1157">finalized report · no DB access</text>
 
+      <path class="edge-control" d="M430 1139 L358 1139" marker-end="url(#arrowBlue)"/>
       <rect class="node-shipped" x="430" y="1110" width="260" height="58" rx="9"/>
       <text class="title" x="455" y="1139">coordinated snapshot</text>
       <text class="copy-small" x="455" y="1157">matched DBs + aggregate report</text>

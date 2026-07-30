@@ -259,7 +259,7 @@ fi
 #     rpcauth pair surfaces here as a failed probe (bitcoin-cli's datadir cookie would mask it; see
 #     regen-bitcoin-rpcauth.sh). Gated on PAY_RAILS (the app's source of truth for active rails, matching
 #     setup.sh rail_active), NOT on a local bitcoind unit — monitoring survives the node moving off-box,
-#     and goes quiet during a deliberate rail drain (node-box-runbook.md). Env vars come from
+#     and goes quiet when an operator deliberately disables the rail. Env vars come from
 #     status-check.service's EnvironmentFile; all read ${VAR:-} — an unset var must skip/warn, never
 #     abort the whole check under set -u. ---
 # An EMPTY PAY_RAILS almost always means the env never loaded (a bare `sudo ./status-check.sh` instead of

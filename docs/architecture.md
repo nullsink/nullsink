@@ -104,9 +104,10 @@ second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin H
   idempotency key and timestamps as a tombstone. Coin amounts, locked rates, and transaction-derived
   keys stay on the payment side of the wall.
 
-Neither process opens the other's database. The `nsk` operator CLI (`issue` / `topup` / `balance`
-/ `financials`) is the exception and a second writer: it opens both directly on the box, and
-SQLite's WAL mode lets that run alongside the servers' reads.
+Neither process opens the other's database, and no shipped operator command opens either live
+database. Routine financial visibility comes from the finalized, aggregate-only report paired
+with each validated backup and rendered on a trusted workstation. New and repeat token funding
+uses the normal `/buy` settlement path.
 
 `ledger/settle.ts` is the coin-agnostic settlement core. It closes each confirmed deposit's order,
 books the sale, and enqueues the credit — all three in one transaction — and reaps orders that

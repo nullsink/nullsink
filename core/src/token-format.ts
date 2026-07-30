@@ -1,5 +1,5 @@
-// Token FORMAT + the non-cryptographic typo checksum: the single source of truth shared by the core CLI
-// minter (cli/mint.ts) and the in-browser client minter (client/src/lib/token.ts), so a CLI-minted token
+// Token FORMAT + the non-cryptographic typo checksum: the single source of truth shared by the local
+// workstation minter (cli/mint.ts) and the in-browser client minter (client/src/lib/token.ts), so a locally minted token
 // and a UI-minted one are byte-identical to the backend and the client can reject a mistyped paste before
 // it is funded.
 //

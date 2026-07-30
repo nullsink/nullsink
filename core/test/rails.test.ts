@@ -39,9 +39,7 @@ test("each rail emits its coin's payment-URI scheme + amount param (what the buy
 });
 
 test("the live rail registry (RAILS) and the display catalog (RAIL_META) enumerate the same rails", () => {
-  // RAILS (name→PayRail, wallet-bound) and the pure rail catalog are deliberately SEPARATE layers — the
-  // operator CLI (`nsk orders`) reads the catalog WITHOUT importing the wallet-bound registry — so their rail
-  // sets can drift unnoticed. Pin them: adding a rail means updating both (else `--rail`/coin rendering and the
-  // server's selectRail disagree).
+  // RAILS (name→PayRail, wallet-bound) and the pure rail catalog are deliberately separate layers, so their
+  // sets can drift unnoticed. Pin them: adding a rail means updating both.
   expect(Object.keys(RAILS).sort()).toEqual([...RAIL_NAMES].sort());
 });

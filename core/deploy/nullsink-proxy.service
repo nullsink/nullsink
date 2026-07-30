@@ -8,12 +8,10 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=simple
-# ONE service user for both app services, for now. Splitting uids would force splitting
-# StateDirectory (systemd chowns it to the unit's User=), which moves balances.db / pending.db to new
-# paths — and `nsk financials` opens BOTH, as a non-root user (cli/guard.ts refuses root: a root open
-# strands root-owned WAL sidecars that break billing writes). So the uid split is blocked on the
-# admin-plane redesign, and lands with it. Until then the socket's owner-only mode (below) is the whole
-# gate, and it is sufficient: a same-uid attacker could write balances.db directly.
+# ONE service user for both app services, for now. Step 3 retired the operator's direct database access, but
+# splitting uids still requires separate StateDirectory paths, environment files, backup permissions, and
+# an explicit credit-socket group/ACL. That permission-matrix migration is Step 4. Until then a same-uid
+# compromise can still bypass the application boundary and read or write the other service's state.
 User=nullsink
 Group=nullsink
 WorkingDirectory=/opt/nullsink

@@ -1,18 +1,16 @@
 // The tokens table holds only a balance per token — no identity, no request history. (This DB also keeps
 // the applied_orders idempotency ledger and a transient holds journal — see below.) We store the SHA-256
 // of the token, never the token itself, so a DB leak yields no usable credentials. Balances are in
-// MICRO-DOLLARS (see pricing.ts). WAL mode lets the issuance CLIs write while the server reads, and is
-// crash-safe.
+// MICRO-DOLLARS (see pricing.ts). WAL mode plus FULL synchronous commits make writes crash-safe.
 import { openSqlite } from "./sqlite";
 
 // hashToken lives in ./hash (pure, DB-free) so the metering/proxy path can hash a token without importing
-// this balance store. Re-exported here for the CLIs + tests that already open this store anyway.
+// this balance store. Re-exported here for tests and the proxy composition root.
 export { hashToken } from "./hash";
 
-// Build a balance store bound to one SQLite path. Each composition root (or a CLI subcommand, post-guard)
-// calls openDb(DB_PATH); tests call openDb(":memory:") for an isolated store per case (prepared statements
-// close over `db`, so each store is fully self-contained). Importing this module opens NOTHING — the DB is
-// opened only when openDb() is actually called.
+// Build a balance store bound to one SQLite path. The proxy composition root calls openDb(DB_PATH); tests
+// call openDb(":memory:") for an isolated store per case (prepared statements close over `db`, so each
+// store is fully self-contained). Importing this module opens NOTHING — openDb() owns activation.
 export function openDb(path: string) {
   const db = openSqlite(path); // WAL + busy_timeout + synchronous=FULL — see sqlite.ts
   db.run(`CREATE TABLE IF NOT EXISTS tokens (
@@ -65,13 +63,10 @@ export function openDb(path: string) {
   );
   // CAST the SUM to TEXT so it returns as an exact decimal string, not a JS number: a going concern's lifetime
   // outstanding total crosses Number.MAX_SAFE_INTEGER at ~$9B of credit-micros, past which a number SUM
-  // silently drops low digits — unacceptable for a money figure (cli/financials.ts renders this exactly).
-  // liabilityTotal() parses it to BigInt. COUNT stays a number (a token count is never near that ceiling).
+  // silently drops low digits — unacceptable for a money figure. liabilityTotal() parses it to BigInt.
+  // COUNT stays a number (a token count is never near that ceiling).
   const liabilityStmt = db.query<{ tokens: number; micros: string }, []>(
     "SELECT COUNT(*) AS tokens, CAST(COALESCE(SUM(balance), 0) AS TEXT) AS micros FROM tokens",
-  );
-  const listBalancesStmt = db.query<{ hash: string; balance: number }, []>(
-    "SELECT hash, balance FROM tokens ORDER BY balance DESC, hash ASC",
   );
   const insertHoldStmt = db.query(
     "INSERT INTO holds (hold_id, hash, micros) VALUES (?, ?, ?)",
@@ -86,8 +81,8 @@ export function openDb(path: string) {
     return getStmt.get(hash)?.balance ?? null;
   }
 
-  // Add micros back: refunds the unused hold, funds tokens (issue.ts / topup.ts). No caller passes a
-  // negative (over-cost is clamped at the hold — handler.ts billActual — so there's no clawback path).
+  // Add micros back for an unused hold or a newly settled payment. No caller passes a negative (over-cost is
+  // clamped at the hold — handler.ts billActual — so there's no clawback path).
   function credit(hash: string, micros: number): void {
     creditStmt.run(hash, micros);
   }
@@ -161,22 +156,13 @@ export function openDb(path: string) {
     return { tokens: row?.tokens ?? 0, micros: BigInt(row?.micros ?? "0") };
   }
 
-  // Every token's (hash, micro-dollar balance), biggest balance first — the per-token view of outstanding
-  // credit, for cli/balances.ts. Returns the stored SHA-256 hash, NEVER the token (only the hash is on disk;
-  // see the file header), so it holds no usable credential and no identity — same privacy class as the tokens
-  // table itself. Its sum is exactly liabilityTotal().micros, so the per-token listing and the aggregate
-  // reconcile by construction.
-  function listBalances(): { hash: string; balance: number }[] {
-    return listBalancesStmt.all();
-  }
-
-  return { db, getBalance, credit, creditOnce, openHold, settleHold, recoverHolds, liabilityTotal, listBalances };
+  return { db, getBalance, credit, creditOnce, openHold, settleHold, recoverHolds, liabilityTotal };
 }
 
 export type BalanceStore = ReturnType<typeof openDb>;
 
-// Default on-disk path. The composition root (src/proxy.ts) and each nsk subcommand pass this to openDb();
-// no store is opened at import time — a module-load singleton would reunify the two DBs across the process
-// boundary (the proxy would open pending.db and payments would open balances.db just by importing a shared
-// module). Callers construct + inject their own store instead.
+// Default on-disk path. The proxy composition root passes this to openDb(); no store is opened at import
+// time — a module-load singleton would reunify the two DBs across the process boundary (the proxy would open
+// pending.db and payments would open balances.db just by importing a shared module). Callers construct and
+// inject their own store instead.
 export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";

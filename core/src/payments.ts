@@ -33,7 +33,7 @@ const CREDIT_TIMEOUT_MS = numEnv("CREDIT_TIMEOUT_MS", 5_000, 100, 60_000);
 // stalled sender, but credits piling up in the outbox can — this is the "is money still crossing?" signal.
 const OUTBOX_AGE_ALERT_MS = numEnv("OUTBOX_AGE_ALERT_MS", 10 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
 
-// Buy-rail margin: our cut, applied at credit time (credit < paid), like cli/issue.ts.
+// Buy-rail margin: our cut, applied at settlement time (credit < paid).
 const MARGIN = numEnv("MARGIN", DEFAULT_MARGIN, 1, 100);
 const BUY_MIN_USD = numEnv("BUY_MIN_USD", 2, 0.01, 1_000_000);
 const BUY_MAX_USD = numEnv("BUY_MAX_USD", 2000, BUY_MIN_USD, 1_000_000);

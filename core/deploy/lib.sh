@@ -4,8 +4,8 @@
 # and can't drift. No side effects beyond defining helpers + pins.
 # Caller must set APP_DIR (and ENV_FILE for health_ok).
 
-# The GitHub repo slug the box pulls release assets from — single source of truth for all four fetch
-# helpers. Env-overridable so a public fork/mirror can point elsewhere without editing this file.
+# The GitHub repo slug the box pulls release assets from — single source of truth for all three app-release
+# fetch helpers. Env-overridable so a public fork/mirror can point elsewhere without editing this file.
 REPO="${REPO:-nullsink/nullsink}"
 
 # Fetch one PUBLIC Release asset $2 for tag $1 into dir $3. The repo is public, so a plain unauthenticated
@@ -214,20 +214,6 @@ install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app b
   echo "    app binaries $tag activated (current-proxy + current-payments -> nullsink-{proxy,payments}-$tag)"
 }
 
-install_nsk() {  # $1=tag — fetch+verify+install the operator CLI binary (nsk) to /usr/local/bin/nsk
-  # A single flat binary (no version-symlink/rollback dance — it's a stateless one-shot tool), built from the
-  # SAME tag as the server in one release.yml run so the two can't drift.
-  local tag="$1" tmp
-  tmp="$(mktemp -d)"
-  fetch_asset "$tag" 'nsk-linux-x64' "$tmp"
-  fetch_asset "$tag" 'SHA256SUMS' "$tmp"
-  test -f "$tmp/nsk-linux-x64"
-  verify_sums "$tmp" || return 1
-  install -m755 "$tmp/nsk-linux-x64" /usr/local/bin/nsk
-  rm -rf "$tmp"
-  echo "    operator CLI nsk $tag installed (/usr/local/bin/nsk)"
-}
-
 install_deploy_tree() {  # $1=tag $2=dest — fetch+verify+extract deploy-<tag>.tar.gz so $2/deploy/ exists
   # Source-free box: the systemd units ExecStart $APP_DIR/deploy/*.sh, so the box needs deploy/ (NOT src/ or
   # cli/). Ship it as a release tarball instead of git-cloning the whole source repo.
@@ -241,6 +227,25 @@ install_deploy_tree() {  # $1=tag $2=dest — fetch+verify+extract deploy-<tag>.
   tar -xzf "$tmp/deploy-${tag}.tar.gz" -C "$dest"   # release.yml `tar -czf … -C core deploy` -> $dest/deploy/*
   rm -rf "$tmp"
   echo "    deploy tree $tag extracted to $dest/deploy"
+}
+
+retire_legacy_operator_tools() {
+  # tar extraction does not remove files omitted by a newer release, so explicitly retire both the installed
+  # live-database CLI and its old deploy helpers. The deletion is intentional and idempotent.
+  local path removed=0
+  for path in \
+    /usr/local/bin/nsk \
+    "$APP_DIR/deploy/install-nsk.sh" \
+    "$APP_DIR/deploy/node-box-runbook.md"
+  do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      rm -f -- "$path"
+      removed=1
+    fi
+  done
+  if [ "$removed" -eq 1 ]; then
+    echo "    retired legacy live-database nsk tooling"
+  fi
 }
 
 install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client UI, activate via a versioned symlink

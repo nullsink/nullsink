@@ -9,7 +9,7 @@ Two Bun + TypeScript workspaces:
 
 | Package | What it is |
 | --- | --- |
-| [`core/`](core/) | The metered proxy, payment rails, the `nsk` operator CLI, the box deploy machinery, and the billing ledger. Zero runtime dependencies. |
+| [`core/`](core/) | The metered proxy, payment rails, box deploy machinery, billing ledger, and local aggregate-report tools. Zero runtime dependencies. |
 | [`client/`](client/) | The purchase UI (Vite + React), served at the edge as static files. |
 
 ## Connect a client
@@ -171,7 +171,7 @@ bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
 bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
 bun run build      # core service binaries (proxy + payments) + client static bundle
-bun run build:nsk  # the nsk operator-CLI binary
+bun run financials -- report-YYYYMMDDTHHMMSSZ.json  # render a finalized aggregate report locally
 ```
 
 Target one package with `bun --filter`, e.g. `bun --filter './client' dev`. To preview just the
@@ -191,16 +191,30 @@ artifacts and publishes them as a GitHub Release:
 
 - **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
 - **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
-- **`nsk-linux-x64`** — the operator CLI (`issue` / `topup` / `balance` / `financials`).
 - **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
+- **`SHA256SUMS`** — checksums over the four artifacts; the box verifies with `sha256sum -c` before installing.
 
 On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
 atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
 systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
 rolling the symlinks back to the previous release if either service is unhealthy.
 It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
+For the first upgrade from a release that has `nsk` installed, remove the retired files before
+invoking that release's older deploy script:
+
+```sh
+sudo rm -f \
+  /usr/local/bin/nsk \
+  /opt/nullsink/deploy/install-nsk.sh \
+  /opt/nullsink/deploy/node-box-runbook.md
+sudo /opt/nullsink/deploy/deploy.sh <tag>
+```
+
+That ordering is required once: the older script would otherwise try to download an `nsk` asset
+that the new release deliberately does not publish. The new deploy code repeats the cleanup
+idempotently on later runs. Operator financial visibility comes from copied, finalized
+`report-*.json` files, never direct live-database reads.
 Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
 rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
 Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.

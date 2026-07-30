@@ -6,9 +6,9 @@ set -euo pipefail
 # Quiet, non-interactive apt: skip needrestart's repeated "Scanning processes…" blocks + any prompts.
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 
-# Runs AS ROOT. The box runs only compiled binaries (server + `nsk`) + the deploy/ scripts; setup.sh fetches
-# them as verified Release assets (install_binary / install_nsk / install_deploy_tree) via plain curl — no
-# gh, no auth, no source tree, no Bun.
+# Runs AS ROOT. The box runs only the compiled server binaries + deploy/ scripts; setup.sh fetches them as
+# verified Release assets (install_binary / install_deploy_tree) via plain curl — no gh, no auth, no source
+# tree, no Bun.
 APP_DIR="/opt/nullsink"
 SVC_USER="nullsink"
 ENV_FILE="/etc/nullsink.env"
@@ -102,6 +102,7 @@ elif install_deploy_tree "$RELEASE_TAG" "$APP_DIR"; then
 else
   todo "deploy tree not installed (check network/tag + re-run) — backup/status-check/alert units can't run until $APP_DIR/deploy exists"
 fi
+retire_legacy_operator_tools
 chown -R "$SVC_USER:$SVC_USER" "$APP_DIR"
 chmod +x "$APP_DIR"/deploy/*.sh   # status-check.sh + alert.sh + backup.sh are run by systemd; keep the exec bit
 
@@ -382,7 +383,7 @@ printf '\n%sAccess%s — the app is PRIVATE on %s127.0.0.1:%s (proxy) + :%s (pay
   "$_c" "$_z" "$_b" "$(proxy_port)" "$(payments_port)" "$_z"
 echo "  • Direct (SSH tunnel):  ssh -L 8080:localhost:8080 root@<box>   then  curl http://localhost:8080/healthz"
 echo "  • Go public:            point DNS at this box + open 80/443, then: systemctl restart caddy"
-echo "  • Operator CLI (opt):   sudo deploy/install-nsk.sh   then  sudo -u nullsink nsk financials"
+echo "  • Financial reports:    copy a finalized report-*.json to a trusted workstation and run: bun run financials -- REPORT.json"
 if [ "${#PENDING[@]}" -gt 0 ]; then
   printf '\n%s>>> Next steps (%d)%s\n' "$_c" "${#PENDING[@]}" "$_z"
   _i=1; for _item in "${PENDING[@]}"; do printf '  %d. %s\n' "$_i" "$_item"; _i=$((_i + 1)); done
