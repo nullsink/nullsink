@@ -8,7 +8,7 @@
 // tree-shaking hope. The combined trust-domain router lives in test/support/handler-combined.ts, which only
 // the tests import; neither composition root does.
 import { hashToken } from "./ledger/hash";
-import { priceUsage, isReasoningModel, pricedModels } from "./cost";
+import { priceUsage, isReasoningModel, pricedModels, type Metered } from "./cost";
 import { BUILD_VERSION } from "./version";
 import * as log from "./log";
 import * as metrics from "./metrics";
@@ -78,12 +78,11 @@ export function maskedErrorDetail(text: string): string {
   return [head, msg].filter(Boolean).join(": ");
 }
 
-// A non-OK upstream response is either the USER's fault (a request they can fix) or OURS / the provider's
-// (our key, our billing, the provider rate-limiting us, or the provider down). Relay the former verbatim so
-// the developer can fix it; MASK the latter behind an opaque nullsink error, so we never leak the provider's
-// identity, our billing state, or our key status (a funded user must never see "your credit balance is too
-// low"). The caller has already refunded the hold; `text` is the already-read upstream body.
-function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text: string): Response {
+// A non-OK upstream response is either the USER's fault (a request they can fix) or OURS / the provider's.
+// Relay the former verbatim; sanitize the latter into a stable native envelope. Safe transient categories
+// retain their retry semantics, but our key/billing state and every raw upstream body remain private.
+// The caller has already refunded the hold; `text` is the already-read upstream body.
+function relayOrSanitizeUpstream(provider: { id: string }, upstream: Response, text: string): Response {
   const s = upstream.status;
   // Model not found — handled uniformly despite the providers' differing status codes (Anthropic 404; OpenAI
   // 404 chat / 400 responses). The permissive prefix gate forwards dated snapshots we can't pre-confirm, so a
@@ -115,12 +114,12 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
       headers: scrubRespHeaders(upstream),
     });
   }
-  // Masked: never send the upstream body. Log the real status + a snippet server-side so the operator is
-  // alerted (e.g. to top up the account). Keep a genuine throttle (429) as a 429 so clients back off, but
-  // map an out-of-funds error to 503 even when the provider wore a 429 (OpenAI returns insufficient_quota
-  // as a 429, which retrying will never clear). Preserve a numeric Retry-After for real throttles.
+  // Sanitized: never send the upstream body. Log the real status + safe structured detail server-side.
+  // Preserve safe transient semantics (genuine 429 and Anthropic 529 overload), while operator auth/billing
+  // failures stay opaque behind 503. An out-of-funds 429 is billing, not retryable rate limiting.
   log.error("upstream", `masked ${s} (refunded, not relayed): ${maskedErrorDetail(text)}`);
   const throttled = s === 429 && !billing; // a GENUINE vendor rate limit (an out-of-funds 429 is billing → 503)
+  const overloaded = s === 529 && !billing; // safe transient category; body is synthesized, never relayed raw
   // Classify the masked outcome for the [metrics] trend (aggregate, no identity). Order matters: billing
   // wins over a 429 (out-of-funds can wear a 429), then a genuine throttle, then our key (auth), then a
   // provider 5xx. A model 404 is handled above; everything else (a rare 405/409/…) → `other`, so EVERY masked
@@ -130,16 +129,18 @@ function relayOrMaskUpstream(provider: { id: string }, upstream: Response, text:
   else if (s === 401 || s === 403) metrics.recordUpstream("auth"); // our key/permission is wrong
   else if (s >= 500) metrics.recordUpstream("server"); // provider degraded / overloaded
   else metrics.recordUpstream("other"); // rare masked status (405/409/…) — bucketed, never an unexplained residual
-  const status = throttled ? 429 : 503;
+  const status = overloaded ? 529 : throttled ? 429 : 503;
   const headers: Record<string, string> = { "content-type": "application/json" };
   const retryAfter = upstream.headers.get("retry-after");
   if (retryAfter && /^\d+$/.test(retryAfter)) headers["retry-after"] = retryAfter;
-  // A genuine throttle (429) is safe to mark retryable (with the provider's Retry-After). The masked 503 is
-  // deliberately AMBIGUOUS — provider-down (retryable) vs our key/billing (won't clear) — which we never
-  // disclose, so we leave x-should-retry unset and let the client's default status heuristic decide. The
-  // body wears the provider's native envelope (so a stock SDK parses it) but the message stays opaque.
-  if (status === 429) headers["x-should-retry"] = "true";
-  return new Response(apiErrorBody(provider.id, status, status === 429 ? "rate_limited" : "service_unavailable"), { status, headers });
+  // We know the internal category even though the body stays sanitized: transient throttle/server/overload
+  // retries; operator auth, billing, and unknown masked statuses do not. This avoids retry storms on permanent
+  // operator failures without exposing which permanent condition occurred.
+  const retryable = throttled || overloaded || (!billing && s >= 500);
+  headers["x-should-retry"] = retryable ? "true" : "false";
+  const code = overloaded ? "upstream_overloaded" : throttled ? "rate_limited" : "service_unavailable";
+  const errorType = overloaded && provider.id === "anthropic" ? "overloaded_error" : undefined;
+  return new Response(apiErrorBody(provider.id, status, code, undefined, errorType), { status, headers });
 }
 
 export type ProxyHandlerDeps = {
@@ -192,6 +193,45 @@ export type ProxyHandlerDeps = {
   // Returns a canceller. Omitted → setTimeout/clearTimeout (unref'd so a pending deadline never blocks exit).
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
+
+type StreamTerminalCause = "complete" | "upstream_error" | "client_cancel" | "deadline" | "shutdown_drain";
+type StreamSettlementDecision =
+  | { outcome: "served"; cost: number }
+  | { outcome: "partial"; cost: number }
+  | { outcome: "upstream_aborted"; cost: 0 }
+  | { outcome: "shutdown_aborted"; cost: 0 }
+  | { outcome: "unmetered_complete"; cost: 0 };
+
+// Pure policy table for the terminal state of a 2xx stream. Transport/in-band upstream failure has highest
+// precedence even when a usage frame arrived first: the caller received a failed response, so our documented
+// policy is a full refund. A caller-initiated/forced partial is billable (the upstream already did the work);
+// only a genuinely complete stream counts as served. Keeping this decision free of stream/race side effects
+// makes the money outcomes exhaustive and table-testable.
+function decideStreamSettlement(input: {
+  cause: StreamTerminalCause;
+  metered: Metered;
+  upstreamErrored: boolean;
+  inputTokens: number;
+  requestModel: string;
+}): StreamSettlementDecision {
+  const { cause, metered, upstreamErrored, inputTokens, requestModel } = input;
+  if (cause === "upstream_error" || upstreamErrored) return { outcome: "upstream_aborted", cost: 0 };
+  if (metered) {
+    const cost = priceUsage(metered.model, metered.usage, requestModel);
+    return { outcome: cause === "complete" ? "served" : "partial", cost };
+  }
+  if (cause === "client_cancel" || cause === "deadline") {
+    const cost = priceUsage(requestModel, {
+      input_tokens: inputTokens,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }, requestModel);
+    return { outcome: "partial", cost };
+  }
+  if (cause === "shutdown_drain") return { outcome: "shutdown_aborted", cost: 0 };
+  return { outcome: "unmetered_complete", cost: 0 };
+}
 
 // Proxy trust-domain route dispatch. Returns undefined when the path isn't ours, so the combined test router
 // (test/support/handler-combined.ts) can fall through to the payments trust domain routes. createProxyHandler wraps
@@ -388,63 +428,74 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // meter → refund in full, exactly like the buffered non-ok path below.
         if (!upstream.ok || !upstream.body) {
           billActual(0); // no SSE body to meter → refund in full (and close the journal row)
-          return relayOrMaskUpstream(provider, upstream, await upstream.text());
+          return relayOrSanitizeUpstream(provider, upstream, await upstream.text());
         }
         // `served` is NOT counted here — a 2xx SSE envelope is not yet a clean bill. settle() (below) counts the
-        // streamed outcome exactly once: served (clean usage), servedPartial (disconnect floor), or streamAborted.
+        // terminal outcome exactly once: completed, billable partial, aborted/refunded, or metering anomaly.
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
         const scan = provider.makeScanner({ model, inputTokens, maxTokens, reasoning: isReasoningModel(model) });
         let settled = false;
-        // Set true the instant the client cuts the connection (the cancel callback), BEFORE we cancel the
-        // upstream — cancelling upstream resolves any in-flight read as `done`, which would otherwise reach
-        // settle() via the clean-end path and RACE (and beat) the cancel callback. Reading a closure flag
-        // here, not a settle() argument, means whichever path wins the race still sees the disconnect.
-        let clientDisconnected = false;
-        // Set true by the pull catch when the upstream read errors mid-stream, so settle() bills it as an
-        // aborted stream (WARN, routine — the client got an error, not content) rather than the money-leak
-        // refunded-in-full page.
-        let aborted = false;
+        // Mark caller/timeout termination BEFORE cancelling upstream. reader.cancel() can wake an in-flight
+        // read as `done`; the done path consults this marker so that race cannot masquerade as a clean end.
+        let requestedCause: "client_cancel" | "deadline" | "shutdown_drain" | null = null;
         // Captured in the stream's start() so the force-settle deadline below can terminate the client's
         // stream even when the client is the one stalling (a backpressured pull won't observe a close itself).
         let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
         let cancelDeadline: (() => void) | undefined; // clears the force-settle timer; assigned after inflight.add
-        const settle = (reason?: "drain") => {
+        const settle = (reason: StreamTerminalCause | "drain" = "complete") => {
           if (settled) return; // at-most-once (idempotent); exactly-once in the normal done/error/cancel flows
           settled = true;
           inflight.delete(settle); // billing finalized (naturally, or drained on shutdown) — stop tracking
           cancelDeadline?.(); // every natural exit (done/error/cancel/drain) clears the force-settle timer here
+          if (reason === "drain") {
+            // Billing settlement alone does not stop the fetch body's blocked read. During a service restart,
+            // that previously left server.stop(true) waiting for UPSTREAM_TIMEOUT_MS (normally 10 minutes)
+            // until systemd killed the process at TimeoutStopSec. Cancel generation and end the downstream
+            // body as part of the same idempotent drain action so shutdown finishes on our 25-second schedule.
+            requestedCause = "shutdown_drain"; // mark before cancel wakes a racing reader.read()
+            reader.cancel("shutdown_drain").catch(() => {});
+            try {
+              streamController?.error(new Error("shutdown_drain"));
+            } catch {
+              /* stream already closed/errored — nothing to terminate */
+            }
+          }
           const metered = scan.result();
-          if (metered) {
-            metrics.recordServed(); // streamed clean-end with parseable usage — billed actual (the success outcome)
-            billActual(priceUsage(metered.model, metered.usage, model));
-          } else if (clientDisconnected && !scan.errored() && inputTokens > 0) {
-            // No usage metered yet, but the CLIENT cleanly disconnected after we began forwarding — the
-            // upstream has already ingested (and bills us for) the prompt, so bill an input-only floor (no
-            // output yet), clamped to the hold by billActual. Closes the early-abort free-prompt-ingestion
-            // gap. scan.errored() EXCLUDES a 200-then-error stream the client aborts on (upstream failed →
-            // the client got nothing usable → full refund, below). Provider-agnostic: the OpenAI scanners
-            // already bill a floor once content has streamed; this covers the no-usage-frame-yet window for
-            // both (the Anthropic scanner has no input floor of its own).
-            metrics.recordServedPartial(); // client disconnected post-forward → input-floor bill (Anthropic-granularity)
-            billActual(priceUsage(model, { input_tokens: inputTokens, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, model));
-          } else if (reason === "drain") {
-            // Shutdown drain cut a still-live stream before any usage frame — the client gets nothing more.
-            // Routine (expected at restart), NOT a metering break: full refund, no log, no page.
-            metrics.recordStreamAborted(); // shutdown drain of a live stream — refunded, routine (grouped with mid-flight aborts)
-            billActual(0);
-          } else if (aborted || scan.errored()) {
-            // Mid-stream upstream failure (a transport read error, or an in-band error frame) — the client got
-            // an error, not billable content. Provider friction worth a WARN, but NOT the money-leak page.
-            log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — refunded`);
-            metrics.recordStreamAborted(); // mid-flight upstream error/abort — refunded, routine (client got an error)
-            billActual(0);
-          } else {
-            // Clean end, NO parseable usage: we delivered a 2xx stream and metered nothing — the genuine
-            // served-but-unbilled money leak, and the ONLY streaming case that should page (log.ts alerts on it).
-            log.error("bill", `streamed ${provider.upstreamPath} without parseable usage — refunded in full`);
-            metrics.recordBill("refundedInFull");
-            billActual(0);
+          const cause = reason === "drain" ? "shutdown_drain" : reason;
+          const decision = decideStreamSettlement({
+            cause,
+            metered,
+            upstreamErrored: scan.errored(),
+            inputTokens,
+            requestModel: model,
+          });
+          switch (decision.outcome) {
+            case "served":
+              metrics.recordServed();
+              billActual(decision.cost);
+              break;
+            case "partial":
+              metrics.recordServedPartial();
+              billActual(decision.cost);
+              break;
+            case "shutdown_aborted":
+              // Expected at restart before any usage frame: routine, silent, fully refunded.
+              metrics.recordStreamAborted();
+              billActual(0);
+              break;
+            case "upstream_aborted":
+              log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — refunded`);
+              metrics.recordStreamAborted();
+              billActual(0);
+              break;
+            case "unmetered_complete":
+              // Clean end, NO parseable usage: delivered a 2xx stream and metered nothing — genuine
+              // served-but-unbilled money leak, and the only streaming case that should page.
+              log.error("bill", `streamed ${provider.upstreamPath} without parseable usage — refunded in full`);
+              metrics.recordBill("refundedInFull");
+              billActual(0);
+              break;
           }
         };
         // Track this live stream so a SIGTERM can finalize its billing before force-close (proxy.ts shutdown).
@@ -460,9 +511,9 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // stream. Set strictly ABOVE upstreamTimeoutMs (proxy.ts), so a legit stream always reaches
         // done/error first and this never fires for it; settle() clears it on every natural exit.
         cancelDeadline = scheduleStreamDeadline(() => {
-          clientDisconnected = true; // a force-cut is a disconnect for billing: partial / input floor, not full refund
+          requestedCause = "deadline"; // set before cancel so a racing done-pull cannot settle as complete
           reader.cancel("stream_settle_deadline").catch(() => {}); // stop generation → stop paying the provider
-          settle();
+          settle("deadline");
           try {
             streamController?.error(new Error("stream_settle_deadline"));
           } catch {
@@ -479,26 +530,24 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
             try {
               const { done, value } = await reader.read();
               if (done) {
-                settle(); // clean end → bill the exact final total
+                settle(requestedCause ?? "complete");
                 controller.close();
                 return;
               }
               scan.feed(decoder.decode(value, { stream: true }));
               controller.enqueue(value);
             } catch (err) {
-              aborted = true; // mid-stream upstream read error → settle() treats it as an aborted stream, not a leak
-              settle(); // upstream errored / timed out mid-stream → bill what we metered
+              // reader.cancel() may reject a pending read; when we initiated that cancel, preserve its already-
+              // marked client/deadline cause. With no local termination pending, this is a genuine transport error.
+              settle(requestedCause ?? "upstream_error");
               controller.error(err);
             }
           },
           async cancel(reason) {
-            // Client disconnected: flag it FIRST (so a racing done-pull, woken by the upstream cancel below,
-            // bills the metered partial / input floor instead of full-refunding), then cancel upstream
-            // (stops generation → stops our spend) and settle. The self-undercharge is bounded by the
-            // metered partial / input floor, which the billActual clamp keeps ≤ the up-front hold.
-            clientDisconnected = true;
+            // Mark FIRST so a racing done-pull woken by reader.cancel() bills a partial, never a clean serve.
+            requestedCause = "client_cancel";
             await reader.cancel(reason).catch(() => {});
-            settle();
+            settle("client_cancel");
           },
         });
 
@@ -512,8 +561,8 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       const text = await upstream.text();
 
       // Reconcile. A 2xx with parseable usage is billed (refunding hold − actual); a 2xx without usage
-      // refunds in full and relays as-is. A non-OK upstream refunds in full, then relayOrMaskUpstream
-      // decides whether to relay it (user-fixable) or mask it (our or the provider's side); see its note.
+      // refunds in full and relays as-is. A non-OK upstream refunds in full, then relayOrSanitizeUpstream
+      // decides whether to relay it (user-fixable) or synthesize a safe error; see its note.
       if (upstream.ok) {
         const metered = provider.extractUsage(text);
         if (metered) {
@@ -532,7 +581,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       }
 
       billActual(0); // non-OK: nothing billable happened, refund in full
-      return relayOrMaskUpstream(provider, upstream, text);
+      return relayOrSanitizeUpstream(provider, upstream, text);
     } catch (err) {
       billActual(0); // refund in full — the request never billably completed (settleHold closes the row)
       const timedOut = err instanceof Error && err.name === "TimeoutError";

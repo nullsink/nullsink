@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.11.3](https://github.com/nullsink/nullsink/compare/v1.11.2...v1.11.3) (2026-07-30)
+
+
+### Bug Fixes
+
+* show full balance precision ([#143](https://github.com/nullsink/nullsink/issues/143)) ([fa2ab11](https://github.com/nullsink/nullsink/commit/fa2ab11b71617067961b37df196d1e6284df9f94))
+* **shutdown:** cancel upstream streams during drain ([#144](https://github.com/nullsink/nullsink/issues/144)) ([08f2d61](https://github.com/nullsink/nullsink/commit/08f2d61e35acd9be660799c24c6944d36b1721b3))
+* **streams:** refund post-start upstream failures ([#140](https://github.com/nullsink/nullsink/issues/140)) ([1e3cf90](https://github.com/nullsink/nullsink/commit/1e3cf90a4a7ce752b2da4f9d70874a96024bd0df))
+
+
+### Maintenance
+
+* **deploy:** bump tinfoil-proxy to v0.1.9 ([#145](https://github.com/nullsink/nullsink/issues/145)) ([737351a](https://github.com/nullsink/nullsink/commit/737351aeb485f69f76531af6299ef8fa3f39fbca))
+
 ## [1.11.2](https://github.com/nullsink/nullsink/compare/v1.11.1...v1.11.2) (2026-07-27)
 
 

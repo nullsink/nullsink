@@ -74,12 +74,6 @@ under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target s
 automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
 `setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
 
-**The first no-`nsk` release has a one-time preflight.** Before invoking a pre-Step-3 deployed
-`deploy.sh`, remove `/usr/local/bin/nsk`, `/opt/nullsink/deploy/install-nsk.sh`, and
-`/opt/nullsink/deploy/node-box-runbook.md`. The older deploy script otherwise sees the installed
-binary and tries to refresh an `nsk-linux-x64` asset that the new release intentionally omits.
-The new deploy library repeats this retirement idempotently after extracting future deploy trees.
-
 **The app-box layout is deliberately flat.** The `install_units` glob
 (`deploy/*.service`/`*.timer`), app unit paths, and operator references expect app-box files directly under
 `deploy/`. Keep new app-box units/scripts at that top level. A bundle for a different host role belongs in

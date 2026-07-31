@@ -200,21 +200,6 @@ atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes
 systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
 rolling the symlinks back to the previous release if either service is unhealthy.
 It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
-For the first upgrade from a release that has `nsk` installed, remove the retired files before
-invoking that release's older deploy script:
-
-```sh
-sudo rm -f \
-  /usr/local/bin/nsk \
-  /opt/nullsink/deploy/install-nsk.sh \
-  /opt/nullsink/deploy/node-box-runbook.md
-sudo /opt/nullsink/deploy/deploy.sh <tag>
-```
-
-That ordering is required once: the older script would otherwise try to download an `nsk` asset
-that the new release deliberately does not publish. The new deploy code repeats the cleanup
-idempotently on later runs. Operator financial visibility comes from copied, finalized
-`report-*.json` files, never direct live-database reads.
 Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
 rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
 Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.

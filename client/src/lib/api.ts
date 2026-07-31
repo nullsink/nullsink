@@ -35,6 +35,17 @@ export const MARKUP_PCT = Math.round((MARGIN - 1) * 100);
 const USD_FMT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 export const usd = (n: number): string => USD_FMT.format(n);
 
+// Balances are stored in micro-dollars, so render all six available decimal places. Keep this separate from
+// the ordinary two-decimal purchase-price formatter above: amounts such as presets are intentionally cents,
+// while rounding a remaining balance would hide real spendable credit.
+const USD_BALANCE_FMT = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 6,
+  maximumFractionDigits: 6,
+});
+export const usdBalance = (n: number): string => USD_BALANCE_FMT.format(n);
+
 // Whole-dollar form ("$10", "$100") for the round figures — presets, the min/max band, the per-purchase
 // range. Same fixed-locale reasoning; routes the symbol + its placement through Intl too.
 const USD_WHOLE_FMT = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });

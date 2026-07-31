@@ -25,15 +25,12 @@ test("release and deployment retire the nsk artifact", () => {
   const library = readFileSync(`${CORE}/deploy/lib.sh`, "utf8");
   const deploy = readFileSync(`${CORE}/deploy/deploy.sh`, "utf8");
   const setup = readFileSync(`${CORE}/deploy/setup.sh`, "utf8");
-  const docs = readFileSync(`${CORE}/deploy/README.md`, "utf8");
 
   expect(release).not.toContain("nsk-linux-x64");
   expect(library).toContain("/usr/local/bin/nsk");
   expect(library).toContain("retire_legacy_operator_tools");
   expect(deploy).toContain("retire_legacy_operator_tools");
   expect(setup).toContain("retire_legacy_operator_tools");
-  expect(docs).toContain("one-time preflight");
-  expect(docs).toContain("tries to refresh an `nsk-linux-x64` asset");
   expect(existsSync(`${CORE}/cli/index.ts`)).toBe(false);
   expect(existsSync(`${CORE}/deploy/install-nsk.sh`)).toBe(false);
   expect(existsSync(`${CORE}/deploy/node-box-runbook.md`)).toBe(false);

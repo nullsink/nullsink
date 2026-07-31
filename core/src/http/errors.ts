@@ -1,7 +1,7 @@
 // Error + rejection responses for the proxy edge, extracted from handler.ts. Two envelope styles:
 // deny() serves nullsink's OWN endpoints (/buy, /balance, 404) with a bare {error} body; denyApi() +
 // apiErrorBody() build each upstream PROVIDER's NATIVE error envelope so a stock SDK classifies a gate
-// reject correctly. The upstream relay/mask POLICY (relayOrMaskUpstream / isBillingError) stays with the
+// reject correctly. The upstream relay/sanitize POLICY (relayOrSanitizeUpstream / isBillingError) stays with the
 // metering engine in handler.ts and imports apiErrorBody from here — it's billing policy, not plumbing.
 
 // The public, nullsink-owned endpoint codes. Keep this list small and stable: browser/UI copy belongs in
@@ -71,17 +71,17 @@ function openaiErrorType(status: number): string {
 // Anthropic → {type:"error",error:{type,message}}; OpenAI → {error:{message,type,code}} (code keeps our
 // machine-readable reason). `message` stays opaque on masked paths (a generic code, never the upstream's
 // text) so the envelope is native without leaking the provider's identity, our billing state, or key status.
-// Shared by denyApi (the gate) and relayOrMaskUpstream / the transient catch (the forward path).
-export function apiErrorBody(providerId: string, status: number, code: string, message?: string): string {
+// Shared by denyApi (the gate) and relayOrSanitizeUpstream / the transient catch (the forward path).
+export function apiErrorBody(providerId: string, status: number, code: string, message?: string, errorType?: string): string {
   return providerId === "anthropic"
-    ? JSON.stringify({ type: "error", error: { type: anthropicErrorType(status), message: message ?? code } })
-    : JSON.stringify({ error: { message: message ?? code, type: openaiErrorType(status), code } });
+    ? JSON.stringify({ type: "error", error: { type: errorType ?? anthropicErrorType(status), message: message ?? code } })
+    : JSON.stringify({ error: { message: message ?? code, type: errorType ?? openaiErrorType(status), code } });
 }
 
 // Provider-native GATE rejection (pre-forward), as opposed to deny() which serves nullsink's OWN endpoints
 // (/balance, /buy, 404). Every gate reject is TERMINAL (bad token, unpriced model, no funds — retrying never
 // clears it), so we send `x-should-retry: false` to stop conforming SDKs from spinning. Transient upstream
-// errors take the retryable path in relayOrMaskUpstream / the catch below instead.
+// errors take the retryable path in relayOrSanitizeUpstream / the catch below instead.
 export function denyApi(provider: { id: string }, status: number, code: string, message?: string): Response {
   return new Response(apiErrorBody(provider.id, status, code, message), {
     status,

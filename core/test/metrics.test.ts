@@ -155,7 +155,7 @@ function okStream(): (url: string, init: any) => Promise<Response> {
     );
 }
 
-// The upstream-outcome map, asserted as a table (the policy that relayOrMaskUpstream + the transport catch
+// The upstream-outcome map, asserted as a table (the policy that relayOrSanitizeUpstream + the transport catch
 // encode, verified rather than hand-checked). For EVERY row: the named bucket lands at 1 AND every other bucket
 // stays 0 — so each status/failure maps to EXACTLY ONE outcome (no double-bucketing). The forwarded request is
 // counted (req=1) but never served. And after the loop, the set of buckets the table exercises must equal the

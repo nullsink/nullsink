@@ -33,6 +33,5 @@ copy on the backup collector.
 - `gen-token.ts` mints a raw token locally and prints it once.
 - `sync-prices.ts` refreshes the checked-in public price snapshot used by development.
 
-The normal `/buy` flow creates or funds tokens after confirmed payment. There is deliberately no
-operator issue/top-up/balance command and no shipped `nsk` binary: restoring such a command would
-reintroduce a second writer or a live per-token read path across the process boundary.
+The normal `/buy` flow creates or funds tokens after confirmed payment. Routine operator tools
+do not open the live billing databases.

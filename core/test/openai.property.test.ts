@@ -154,11 +154,10 @@ test("openai streaming: a reasoning-model disconnect bills input (from the hold)
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
-test("openai streaming disconnect counts as `served`, NOT stream:partial — pins the Anthropic-granularity caveat", async () => {
-  // The OBSERVABILITY half of the disconnect above. The OpenAI scanner folds a mid-stream disconnect into
-  // result() (input + char/cap estimate), so settle() takes the `metered` branch → recordServed. Anthropic's
-  // scanner returns null until a usage frame → the input-floor branch → recordServedPartial. So an OpenAI
-  // partial is COUNTED as served, never as stream:partial — exactly the granularity the metric documents.
+test("openai streaming disconnect counts as stream:partial, not a completed serve", async () => {
+  // The OpenAI scanner folds a mid-stream disconnect into result() (input + char/cap estimate), but terminal
+  // cause — not the presence of estimated usage — determines the outcome. A caller-aborted response is a
+  // billed partial across providers and must never inflate the clean `served` count.
   metrics.reset(0);
   let cancelled = false;
   const chunks = [
@@ -176,7 +175,7 @@ test("openai streaming disconnect counts as `served`, NOT stream:partial — pin
   await reader.cancel(); // client disconnects mid-stream
   expect(cancelled).toBe(true); // upstream generation cancelled
   const s = metrics.snapshot();
-  expect([s.served, s.servedPartial, s.streamAborted, s.bill.refundedInFull]).toEqual([1, 0, 0, 0]); // served, not partial
+  expect([s.served, s.servedPartial, s.streamAborted, s.bill.refundedInFull]).toEqual([0, 1, 0, 0]);
 });
 
 // --- Body mutation: store:false always, include_usage on streams ----------------------------------
@@ -322,9 +321,9 @@ test("masked upstream errors on an OpenAI endpoint wear OpenAI's native envelope
   const errSpy = spyOn(console, "error").mockImplementation(() => {}); // masked errors log a server-side snippet
   const token = "pr_oamask";
   const cases = [
-    { up: 401, body: JSON.stringify({ error: { message: "Incorrect API key SECRET-oa-key", type: "invalid_request_error", code: "invalid_api_key" } }), want: 503, type: "server_error", code: "service_unavailable", retry: null },
+    { up: 401, body: JSON.stringify({ error: { message: "Incorrect API key SECRET-oa-key", type: "invalid_request_error", code: "invalid_api_key" } }), want: 503, type: "server_error", code: "service_unavailable", retry: "false" },
     { up: 429, body: "slow down LEAK-oa", want: 429, type: "rate_limit_error", code: "rate_limited", retry: "true" },
-    { up: 500, body: "boom SECRET-oa", want: 503, type: "server_error", code: "service_unavailable", retry: null },
+    { up: 500, body: "boom SECRET-oa", want: 503, type: "server_error", code: "service_unavailable", retry: "true" },
   ];
   for (const c of cases) {
     const { handler, balances } = makeHandler(async () => new Response(c.body, { status: c.up, headers: { "content-type": "application/json" } }));
@@ -332,7 +331,7 @@ test("masked upstream errors on an OpenAI endpoint wear OpenAI's native envelope
     const res = await handler(chatReq(token, { model: "gpt-5", max_completion_tokens: 16, messages: [{ role: "user", content: "hi" }] }));
     const out = await res.text();
     expect([c.up, res.status]).toEqual([c.up, c.want]);
-    expect([c.up, res.headers.get("x-should-retry")]).toEqual([c.up, c.retry]); // 429 retryable; masked 503 left unset (ambiguous)
+    expect([c.up, res.headers.get("x-should-retry")]).toEqual([c.up, c.retry]);
     const j = JSON.parse(out);
     expect([c.up, j.error.type]).toEqual([c.up, c.type]); // OpenAI-native object envelope
     expect([c.up, j.error.code]).toEqual([c.up, c.code]);
