@@ -70,19 +70,20 @@ function billableTextModel(m: any): boolean {
 // prefix matcher would otherwise re-admit an excluded id as its priced base model.
 
 // Providers to sync, each with its retired-id denylist (ids that 404 upstream despite models.dev listing).
-// flatCache: the provider bills cached prompt reads at the full INPUT rate (models.dev lists no cache rate).
-// Tinfoil is flat AND its vLLM backend CAN report cached prompt tokens (prompt_tokens_details.cached_tokens →
-// cache_read_input_tokens via the OpenAI usage extractor), so cache_read must default to `input`, never 0 —
-// else a cache hit would bill free and under-charge. (nomic-embed-text is dropped by billableTextModel: output 0.)
-const PROVIDERS: Array<{ name: string; retired: Set<string>; flatCache?: boolean }> = [
+// cacheReadDefaultsToInput is the safe fallback when the source omits cache_read: Tinfoil's vLLM backend
+// CAN report cached prompt tokens (prompt_tokens_details.cached_tokens → cache_read_input_tokens via the
+// OpenAI usage extractor), so a missing rate must default to `input`, never 0, or a cache hit would bill
+// free. An explicit models.dev cache_read price always wins. (nomic-embed-text is dropped by
+// billableTextModel: output 0.)
+const PROVIDERS: Array<{ name: string; retired: Set<string>; cacheReadDefaultsToInput?: boolean }> = [
   { name: "anthropic", retired: ANTHROPIC_RETIRED },
   { name: "openai", retired: OPENAI_RETIRED },
-  { name: "tinfoil", retired: new Set(), flatCache: true },
+  { name: "tinfoil", retired: new Set(), cacheReadDefaultsToInput: true },
 ];
 
 const out: Record<string, unknown> = {};
 const counts: Record<string, number> = {};
-for (const { name, retired, flatCache } of PROVIDERS) {
+for (const { name, retired, cacheReadDefaultsToInput } of PROVIDERS) {
   const models = data[name]?.models ?? {};
   for (const [id, m] of Object.entries<any>(models)) {
     if (retired.has(id)) continue; // retired upstream — see note above
@@ -93,17 +94,17 @@ for (const { name, retired, flatCache } of PROVIDERS) {
     // replaces the old cross-source dup-throw in pricing.mergeRawPrices, now that Tinfoil is synced here too.)
     if (id in out) throw new Error(`duplicate priced model id "${id}" across providers (${(out[id] as { provider: string }).provider} vs ${name}) — pricing must key by (provider, id)`);
     const c = m.cost;
-    // cache_read: a real discount from models.dev when present. Absent → 0 for discount-providers (they
-    // never report cached tokens), but → INPUT for a flatCache provider (Tinfoil): its vLLM can report a
-    // cache hit yet bills it at the full input rate, so 0 would under-charge. cache_write is absent for
-    // providers with no cache-WRITE token fee (OpenAI before gpt-5.6, Tinfoil) → 0; the hold's
+    // cache_read: a real discount from models.dev when present. Absent → 0 for providers that never report
+    // cached tokens, but → INPUT where cacheReadDefaultsToInput is set: Tinfoil's vLLM can report a cache
+    // hit, so 0 would under-charge. cache_write is absent for providers with no cache-WRITE token fee
+    // (OpenAI before gpt-5.6, Tinfoil) → 0; the hold's
     // max(input, cache_read, cache_write) still resolves to input.
     const cache_write = c.cache_write ?? 0;
     const entry = {
       provider: name,
       input: c.input,
       output: c.output,
-      cache_read: c.cache_read ?? (flatCache ? c.input : 0),
+      cache_read: c.cache_read ?? (cacheReadDefaultsToInput ? c.input : 0),
       cache_write,
       // cache_write_1h: the 1-hour-TTL cache-write tier, emitted explicitly so the runtime cost engine is
       // purely table-driven (no provider conditionals). models.dev doesn't model the tier, so: Anthropic →

@@ -24,9 +24,10 @@ or a request that ends up billing nothing — always returns to the same token.
 live price fetch mid-request. Each model lists input, output, cache-read, and cache-write rates.
 Don't hand-edit `prices.json` — regenerate it with the dev-only `bun run cli/sync-prices.ts`,
 then review the diff and commit it. All providers (Anthropic, OpenAI, and Tinfoil) are synced from
-models.dev into the one `prices.json`; Tinfoil is flat — no cache discount, so cached reads bill at
-the input rate. A duplicate model id across providers is a hard error at sync time — the tripwire
-for when an id is served by more than one provider.
+models.dev into the one `prices.json`; source-declared cache discounts pass through per model. If
+models.dev omits a Tinfoil cache-read rate, the generator safely falls back to the input rate rather
+than treating a reported cache hit as free. A duplicate model id across providers is a hard error at
+sync time — the tripwire for when an id is served by more than one provider.
 
 A request's model is matched by exact id or dated suffix, longest match first — `claude-opus-4-1`
 matches `claude-opus-4-1-20250805` but not `claude-opus-4-12345`. Each provider reports usage in
@@ -40,18 +41,21 @@ tokens at a fraction of the input rate. nullsink passes both sides through at th
 rate:
 
 - **Cache reads** — tokens served from an existing cache entry, billed far below the normal input
-  rate. This is where the saving is.
+  rate when that model's rate card declares a discount. This is where the saving is.
 - **Cache writes** — the one-time cost of creating the entry. On Anthropic that's 1.25× the input
-  rate for the default 5-minute TTL, 2× for the 1-hour TTL; OpenAI charges no cache-write fee.
+  rate for the default 5-minute TTL and 2× for the 1-hour TTL. OpenAI rates are model-specific:
+  older cards may charge nothing, while GPT-5.6 charges 1.25× input. Tinfoil currently declares no
+  cache-write fee.
 
-Tinfoil bills flat — there's no cache tier to pass through, so a cached token costs the same as a
-normal input token.
+Tinfoil cache reads use the per-model rate from models.dev when present. If the source omits one,
+nullsink bills cached reads at that model's normal input rate instead of under-charging them as free.
 
 You decide what gets cached from your own request (the provider's `cache_control` breakpoints) —
-nullsink only meters the result. The two providers report cache usage differently (Anthropic's
-input count excludes cached tokens, OpenAI's includes them, and Anthropic reports the 1-hour write
-slice in a nested field), so nullsink normalizes both before pricing: the cache total is never
-double-counted, and the 1-hour slice is billed at its own 2× tier (`cost/pricing.ts`).
+nullsink only meters the result. The provider shapes report cache usage differently: Anthropic's
+input count excludes cached tokens, while the OpenAI-compatible shape used by OpenAI and Tinfoil
+includes them; Anthropic also reports the 1-hour write slice in a nested field. nullsink normalizes
+all of them before pricing, so the cache total is never double-counted and the 1-hour slice is billed
+at its own 2× tier (`cost/pricing.ts`).
 
 ## Outside the flat card
 
