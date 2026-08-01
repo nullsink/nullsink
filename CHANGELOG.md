@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.4](https://github.com/nullsink/nullsink/compare/v1.11.3...v1.11.4) (2026-08-01)
+
+
+### Bug Fixes
+
+* **pricing:** make rate sync resilient to price changes ([#146](https://github.com/nullsink/nullsink/issues/146)) ([159c2e0](https://github.com/nullsink/nullsink/commit/159c2e0ff8167edfacc96433f98c1caab230e268))
+
 ## [1.11.3](https://github.com/nullsink/nullsink/compare/v1.11.2...v1.11.3) (2026-07-30)
 
 
