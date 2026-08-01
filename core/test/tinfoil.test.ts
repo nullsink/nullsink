@@ -1,9 +1,9 @@
 // Tinfoil provider + namespaced model routing through createHandler — in-memory stores, stubbed upstream,
 // no network. Covers what's Tinfoil-specific and what the shared /v1/chat/completions path now requires:
 // routing by model (bare id → owner, `provider/model` prefix, wrong-path prefix), the prefix strip on
-// forward, flat billing (cache_read == input), forced stream_options.include_usage with NO store:false, and
-// forceReasoning (a disconnect bills the output cap for a model that isn't a REASONING_MARKER). The shared
-// hold/refund skeleton is covered in billing.property.test.ts.
+// forward, source-declared cached-input billing, forced stream_options.include_usage with NO store:false,
+// and forceReasoning (a disconnect bills the output cap for a model that isn't a REASONING_MARKER). The
+// shared hold/refund skeleton is covered in billing.property.test.ts.
 import { test, expect } from "bun:test";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
@@ -82,7 +82,7 @@ function stream(chunks: object[], onCancel?: () => void): Upstream {
 
 // --- Routing on the shared /v1/chat/completions path ----------------------------------------------
 
-test("a bare Tinfoil model routes to Tinfoil and bills FLAT (cache_read == input)", async () => {
+test("a bare Tinfoil model routes to Tinfoil and bills source-declared cached-input pricing", async () => {
   const usage = { prompt_tokens: 1000, completion_tokens: 200, prompt_tokens_details: { cached_tokens: 400 } };
   const { fetchImpl, calls } = capturing(TF, usage);
   const token = "pr_tf_bare";
@@ -92,9 +92,12 @@ test("a bare Tinfoil model routes to Tinfoil and bills FLAT (cache_read == input
   expect(res.status).toBe(200);
   expect(calls[0]!.url).toBe("https://tinfoil.example/v1/chat/completions"); // routed to Tinfoil, not OpenAI
   expect("store" in calls[0]!.body).toBe(false); // OpenAI-specific; never sent to Tinfoil (buffered path)
-  // 400 of the 1000 prompt tokens are cached, but Tinfoil's cache_read rate == input rate → the bill equals
-  // charging the whole prompt at the input rate. Flatness, proven against an independent shape.
-  expect(debit(balances, token)).toBe(priceUsage(TF, { input_tokens: 1000, output_tokens: 200 }));
+  // The OpenAI-compatible usage adapter splits cached prompt tokens out of input_tokens. Price the
+  // independent normalized shape so a models.dev cache discount is honored when present, while the
+  // generator's input-rate fallback still prevents free cache reads when the source omits that rate.
+  expect(debit(balances, token)).toBe(
+    priceUsage(TF, { input_tokens: 600, cache_read_input_tokens: 400, output_tokens: 200 }),
+  );
 });
 
 test("a `tinfoil/<model>` prefix routes to Tinfoil and forwards the native (stripped) id", async () => {

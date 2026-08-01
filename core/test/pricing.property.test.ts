@@ -184,9 +184,12 @@ test("a NAMED variant is never absorbed by its base id; dated releases still are
   expect(isPriced("gpt-5.6120260101")).toBe(false); // no-dash char + valid date: the dash is load-bearing
   expect(isPriced("o3-deep-research")).toBe(false); // off-card id can't ride its priced base either
   expect(isPriced("gpt-4o-audio-preview")).toBe(false);
-  // Dated releases of a priced id resolve to that id's own rate — the most specific one.
+  // Dated releases of a priced id resolve to that id's own rate — the most specific one. Compare with
+  // the source-backed base id instead of pinning a models.dev dollar value that legitimately changes.
   expect(isPriced("gpt-5.6-luna-2026-01-01")).toBe(true);
-  expect(priceUsage("gpt-5.6-luna-2026-01-01", { input_tokens: 1_000_000 })).toBe(1_000_000); // luna $1, not base $5
+  expect(priceUsage("gpt-5.6-luna-2026-01-01", { input_tokens: 1_000_000 })).toBe(
+    priceUsage("gpt-5.6-luna", { input_tokens: 1_000_000 }),
+  );
   expect(isPriced("claude-opus-4-8-20260101")).toBe(true);
 });
 
