@@ -49,7 +49,7 @@ function mapOpenAIResponsesUsage(u: any): Usage {
 export function extractOpenAIChatUsage(text: string): Metered {
   try {
     const obj = JSON.parse(text);
-    if (obj?.model && obj?.usage) return { model: obj.model, usage: mapOpenAIChatUsage(obj.usage) };
+    if (obj?.model && obj?.usage) return { model: obj.model, usage: mapOpenAIChatUsage(obj.usage), evidence: "reported" };
   } catch {}
   return null;
 }
@@ -74,7 +74,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   let finalUsage: Usage | null = null; // exact, from the include_usage final chunk
   let contentChars = 0; // accumulated streamed output text (content + reasoning/reasoning_content), for the disconnect estimate
   let sawAny = false; // any parseable event → generation started (bill the partial, not a full refund)
-  let failed = false; // upstream signalled an error mid-stream (not a client disconnect) → full refund
+  let failed = false; // upstream signalled an error mid-stream (not a client disconnect)
 
   return {
     feed(chunk: string): void {
@@ -104,10 +104,9 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
             if (typeof c === "string") contentChars += c.length;
             // Reasoning streams in a side field on OpenAI-compatible hosts and bills as output — count it too,
             // or a disconnect estimate would be blind to it. Tinfoil/vLLM uses `reasoning` (verified live);
-            // DeepSeek-style hosts use `reasoning_content`. Genuine OpenAI emits NEITHER on chat (its reasoning
-            // is hidden, billed as a count only), so this is a strict no-op there — o-series/gpt-5 stay on the
-            // isReasoningModel output-cap path in disconnectOutput. (Tinfoil models that reason in `content`,
-            // e.g. deepseek/gemma, are already covered by the content count above.)
+            // DeepSeek-style hosts use `reasoning_content`. Genuine OpenAI emits NEITHER on chat; its hidden
+            // reasoning is unavailable before terminal usage. We do not speculate about it:
+            // a reservation maximum is not evidence and must never become the disconnect charge.
             const r = d?.reasoning ?? d?.reasoning_content;
             if (typeof r === "string") contentChars += r.length;
           }
@@ -115,36 +114,41 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
       }
     },
 
-    result(): Metered {
-      if (finalUsage) return { model: model ?? ctx.model, usage: finalUsage }; // clean close → exact
-      // No usage. Distinguish an UPSTREAM failure (error frame, or nothing arrived) — nothing billable
-      // happened, full refund, like a non-2xx — from a CLIENT disconnect (generation started, the client
-      // got partial output), which bills the partial below.
-      if (failed || !sawAny) return null;
+    result(mode?: "evidenced_only"): Metered {
+      if (finalUsage) return { model: model ?? ctx.model, usage: finalUsage, evidence: "reported" }; // clean close → exact
+      if (!sawAny) return null;
+      // OpenAI reports usage only in the terminal chunk. If the upstream fails after visible text, bill a
+      // conservative estimate of work the caller actually received: counted/discounted input plus visible output.
+      // Never apply the output reservation here: charging speculative invisible work would be unfair. An
+      // operator/provider-caused termination before visible output still fully refunds.
+      if (mode === "evidenced_only") {
+        if (contentChars === 0) return null;
+        return {
+          model: model ?? ctx.model,
+          evidence: "estimated",
+          usage: {
+            input_tokens: ctx.inputTokens,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: Math.ceil(contentChars / CHARS_PER_TOKEN),
+          },
+        };
+      }
+      // An in-band upstream failure with no requested failure estimate is not a caller disconnect.
+      if (failed) return null;
       return {
         model: model ?? ctx.model,
+        evidence: "estimated",
         usage: {
           input_tokens: ctx.inputTokens,
           cache_read_input_tokens: 0,
           cache_creation_input_tokens: 0,
-          output_tokens: disconnectOutput(contentChars, ctx),
+          output_tokens: Math.ceil(contentChars / CHARS_PER_TOKEN),
         },
       };
     },
-    errored: () => failed, // an upstream error frame → caller full-refunds (never the input floor) even on a client abort
+    errored: () => failed,
   };
-}
-
-// Output-token estimate for a mid-stream disconnect (no final usage chunk): the char heuristic over all
-// streamed text (content + any reasoning_content, both summed into contentChars above). For a model whose
-// reasoning is HIDDEN from the stream (ctx.reasoning — OpenAI's o-series / gpt-5, where thinking tokens bill
-// as output but never stream), the char count is systematically blind, so bill the output CAP instead (a
-// sound upper bound). Open-weight models that STREAM their reasoning (reasoning_content, counted above) are
-// not flagged reasoning, so they take the char path like any model. The cap can OVER-bill an honest early
-// disconnect (≤ the hold already reserved). maxTokens absent (e.g. tests) → falls back to the char estimate.
-function disconnectOutput(contentChars: number, ctx: ScannerCtx): number {
-  const est = Math.ceil(contentChars / CHARS_PER_TOKEN);
-  return ctx.reasoning ? Math.max(est, ctx.maxTokens ?? 0) : est;
 }
 
 // --- OpenAI Responses shape ----------------------------------------------------------------------
@@ -158,7 +162,7 @@ function disconnectOutput(contentChars: number, ctx: ScannerCtx): number {
 export function extractOpenAIResponsesUsage(text: string): Metered {
   try {
     const obj = JSON.parse(text);
-    if (obj?.model && obj?.usage) return { model: obj.model, usage: mapOpenAIResponsesUsage(obj.usage) };
+    if (obj?.model && obj?.usage) return { model: obj.model, usage: mapOpenAIResponsesUsage(obj.usage), evidence: "reported" };
   } catch {}
   return null;
 }
@@ -174,7 +178,7 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
   let finalUsage: Usage | null = null;
   let contentChars = 0;
   let sawAny = false;
-  let failed = false; // a response.failed / error event (no usage) → upstream failure → full refund
+  let failed = false; // a response.failed / error event (no usage) → upstream failure
 
   return {
     feed(chunk: string): void {
@@ -202,19 +206,34 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
       }
     },
 
-    result(): Metered {
-      if (finalUsage) return { model: model ?? ctx.model, usage: finalUsage }; // clean close → exact
-      if (failed || !sawAny) return null; // upstream failure / nothing arrived → full refund
+    result(mode?: "evidenced_only"): Metered {
+      if (finalUsage) return { model: model ?? ctx.model, usage: finalUsage, evidence: "reported" }; // clean close → exact
+      if (!sawAny) return null;
+      if (mode === "evidenced_only") {
+        if (contentChars === 0) return null;
+        return {
+          model: model ?? ctx.model,
+          evidence: "estimated",
+          usage: {
+            input_tokens: ctx.inputTokens,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            output_tokens: Math.ceil(contentChars / CHARS_PER_TOKEN),
+          },
+        };
+      }
+      if (failed) return null;
       return {
         model: model ?? ctx.model,
+        evidence: "estimated",
         usage: {
           input_tokens: ctx.inputTokens,
           cache_read_input_tokens: 0,
           cache_creation_input_tokens: 0,
-          output_tokens: disconnectOutput(contentChars, ctx),
+          output_tokens: Math.ceil(contentChars / CHARS_PER_TOKEN),
         },
       };
     },
-    errored: () => failed, // an upstream error frame → caller full-refunds (never the input floor) even on a client abort
+    errored: () => failed,
   };
 }

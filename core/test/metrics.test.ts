@@ -18,6 +18,12 @@ test("record / observe / snapshot / reset track every counter and high-water mar
     gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
     balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
     credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
+    failure: {
+      streamReported: { count: 0, micros: 0 },
+      streamEstimated: { count: 0, micros: 0 },
+      streamRefunded: 0,
+      bufferedInputFloor: { count: 0, micros: 0 },
+    },
     requests: 0,
     served: 0,
     servedPartial: 0,
@@ -57,6 +63,10 @@ test("record / observe / snapshot / reset track every counter and high-water mar
   metrics.recordCredit("acked", 2);
   metrics.recordCredit("alreadyApplied");
   metrics.recordCredit("blocked");
+  metrics.recordFailure("streamReported", 120);
+  metrics.recordFailure("streamEstimated", 80);
+  metrics.recordFailure("streamRefunded");
+  metrics.recordFailure("bufferedInputFloor", 45);
   metrics.recordRequest();
   metrics.recordRequest();
   metrics.recordServed();
@@ -76,6 +86,12 @@ test("record / observe / snapshot / reset track every counter and high-water mar
     gate: { auth: 1, request: 1, model: 1, premium: 1, funds: 1 },
     balance: { ok: 1, unknown: 1, throttled: 1, error: 1 },
     credit: { enqueued: 3, acked: 2, alreadyApplied: 1, blocked: 1 },
+    failure: {
+      streamReported: { count: 1, micros: 120 },
+      streamEstimated: { count: 1, micros: 80 },
+      streamRefunded: 1,
+      bufferedInputFloor: { count: 1, micros: 45 },
+    },
     requests: 2,
     served: 1,
     servedPartial: 1,
@@ -95,6 +111,12 @@ test("record / observe / snapshot / reset track every counter and high-water mar
     gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
     balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
     credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
+    failure: {
+      streamReported: { count: 0, micros: 0 },
+      streamEstimated: { count: 0, micros: 0 },
+      streamRefunded: 0,
+      bufferedInputFloor: { count: 0, micros: 0 },
+    },
     requests: 0,
     served: 0,
     servedPartial: 0,
@@ -471,6 +493,12 @@ const EMPTY = {
   gate: { auth: 0, request: 0, model: 0, premium: 0, funds: 0 },
   balance: { ok: 0, unknown: 0, throttled: 0, error: 0 },
   credit: { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 },
+  failure: {
+    streamReported: { count: 0, micros: 0 },
+    streamEstimated: { count: 0, micros: 0 },
+    streamRefunded: 0,
+    bufferedInputFloor: { count: 0, micros: 0 },
+  },
   requests: 0,
   served: 0,
   servedPartial: 0,
@@ -594,6 +622,27 @@ test("formatMetricsLine: streamed partial/abort outcomes ride the routine heartb
   expect(
     metrics.formatMetricsLine({ ...EMPTY, served: 94, requests: 100, servedPartial: 2, streamAborted: 3 }, 60 * 60_000),
   ).toEqual({ level: "info", line: "served=94 req=100 stream:partial=2 stream:aborted=3 (last 60m)" });
+});
+
+test("formatMetricsLine: accepted-failure detail is visible but does not create another primary request outcome", () => {
+  expect(
+    metrics.formatMetricsLine({
+      ...EMPTY,
+      served: 7,
+      requests: 10,
+      servedPartial: 2,
+      streamAborted: 1,
+      failure: {
+        streamReported: { count: 2, micros: 120 },
+        streamEstimated: { count: 3, micros: 80 },
+        streamRefunded: 1,
+        bufferedInputFloor: { count: 1, micros: 45 },
+      },
+    }, 60 * 60_000),
+  ).toEqual({
+    level: "info",
+    line: "served=7 req=10 stream:partial=2 stream:aborted=1 failure:stream-reported=2 failure:stream-reported-microusd=120 failure:stream-estimated=3 failure:stream-estimated-microusd=80 failure:stream-refunded=1 failure:http-input-floor=1 failure:http-input-floor-microusd=45 (last 60m)",
+  });
 });
 
 test("formatMetricsLine: recovered:holds rides the routine heartbeat → INFO (boot gauge; the [boot] WARN is the alert)", () => {

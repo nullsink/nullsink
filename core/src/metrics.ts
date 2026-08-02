@@ -28,6 +28,14 @@
 //       other       a masked non-2xx that is none of the buckets above (a rare 405/409/…) — our/provider
 //                   side, masked to 503. WARN. Emitted as `upstream:other`. With notfound + other, EVERY
 //                   forwarded non-2xx is now bucketed, so served + Σ upstream.* = req (the gap reconciles).
+//   failure.*  — detail counters for the ambiguous accepted-request failures whose rate and exposure we need to
+//     measure. These do NOT add another primary request outcome; they annotate servedPartial,
+//     streamAborted, or upstream.unreachable so the reconciliation identity below remains unchanged.
+//       streamReported     upstream-failed SSE billed provider-reported partial usage (count + microdollars)
+//       streamEstimated    upstream-failed SSE billed a visible-work estimate (count + microdollars)
+//       streamRefunded     upstream-failed SSE had no usage evidence and fully refunded
+//       bufferedInputFloor buffered HTTP received 2xx headers, then its body broke; caller got 502 and paid
+//                          the conservative input floor (count + microdollars)
 //   reject.*   — LOCAL shedding WE did, before/without an upstream call (our own limits, not the vendor):
 //       buy       /buy global rate-limit 429
 //       read      /balance + /order-status + /rails read-throttle 429
@@ -62,11 +70,11 @@
 //     The per-window `served=N req=M` heartbeat makes "successful serving silently stopped" (served → 0 while
 //     the box is still up) VISIBLE — the one drop /healthz can't.
 //   servedPartial / streamAborted — the streamed-request outcomes that aren't a clean bill (so NOT in served):
-//       servedPartial   caller disconnect, deadline, or shutdown drain after forwarding → billed the metered
-//                       usage when available, otherwise an INPUT-FLOOR for caller/deadline termination. ROUTINE —
-//                       real, bounded billing. Emitted `stream:partial`.
-//       streamAborted   a 2xx SSE that failed upstream mid-flight, or a shutdown drain before any usage →
-//                       refunded in full. ROUTINE (the client got an error or nothing billable) — NOT the money
+//       servedPartial   a caller disconnect, deadline, metered shutdown drain, or upstream failure after
+//                       evidenced usage → billed the reported/conservative partial; otherwise an INPUT-FLOOR
+//                       for caller/deadline termination. ROUTINE — real, bounded billing. Emitted `stream:partial`.
+//       streamAborted   a 2xx SSE that failed upstream before any usage evidence, or a shutdown drain before
+//                       any usage → refunded in full. ROUTINE (nothing billable was observed) — NOT the money
 //                       leak (that's bill.refundedInFull, which pages). Emitted `stream:aborted`.
 //   peakStreams / peakOpenOrders — high-water marks for concurrent live streams and open payment orders, so
 //     saturation toward the in-flight ceilings is visible before it bites.
@@ -83,6 +91,14 @@ export type BillKind = "refundedInFull" | "holdExceeded";
 export type GateKind = "auth" | "request" | "model" | "premium" | "funds";
 export type BalanceKind = "ok" | "unknown" | "throttled" | "error";
 export type CreditKind = "enqueued" | "acked" | "alreadyApplied" | "blocked";
+export type FailureKind = "streamReported" | "streamEstimated" | "streamRefunded" | "bufferedInputFloor";
+type ChargedFailure = { count: number; micros: number };
+type FailureMetrics = {
+  streamReported: ChargedFailure;
+  streamEstimated: ChargedFailure;
+  streamRefunded: number;
+  bufferedInputFloor: ChargedFailure;
+};
 
 const upstream = { throttle: 0, server: 0, auth: 0, billing: 0, timeout: 0, unreachable: 0, relayed4xx: 0, notfound: 0, other: 0 };
 const reject = { buy: 0, read: 0, orders: 0 };
@@ -90,10 +106,16 @@ const bill = { refundedInFull: 0, holdExceeded: 0 };
 const gate = { auth: 0, request: 0, model: 0, premium: 0, funds: 0 }; // metered requests shed at a pre-forward gate (NOT in requests/served)
 const balance = { ok: 0, unknown: 0, throttled: 0, error: 0 };
 const credit = { enqueued: 0, acked: 0, alreadyApplied: 0, blocked: 0 };
+const failure: FailureMetrics = {
+  streamReported: { count: 0, micros: 0 },
+  streamEstimated: { count: 0, micros: 0 },
+  streamRefunded: 0,
+  bufferedInputFloor: { count: 0, micros: 0 },
+};
 let requests = 0; // metered requests forwarded upstream (post-gates)
 let served = 0; // of those, the ones we billed cleanly (a 2xx we metered actual usage on)
-let servedPartial = 0; // streamed, locally terminated after forwarding → billed metered usage or input floor
-let streamAborted = 0; // streamed 2xx failed upstream, or drained before usage → fully refunded
+let servedPartial = 0; // streamed, non-clean termination → billed evidenced usage/estimate or input floor
+let streamAborted = 0; // streamed 2xx failed upstream with no usage evidence, or drained before usage → refunded
 let peakStreams = 0;
 let peakOpenOrders = 0;
 let peakOutbox = 0;
@@ -130,6 +152,18 @@ export function recordCredit(kind: CreditKind, count = 1): void {
   credit[kind] += count;
 }
 
+// Detail-only classification for ambiguous accepted-request failures. Charged cases retain both frequency
+// and microdollar exposure, split by reported vs estimated evidence. These are secondary dimensions and must
+// never be added into the primary request reconciliation formula.
+export function recordFailure(kind: FailureKind, micros = 0): void {
+  if (kind === "streamRefunded") {
+    failure.streamRefunded += 1;
+    return;
+  }
+  failure[kind].count += 1;
+  failure[kind].micros += Math.max(0, micros);
+}
+
 // One metered request forwarded upstream (handler.ts, just before the upstream fetch).
 export function recordRequest(): void {
   requests += 1;
@@ -140,12 +174,12 @@ export function recordServed(): void {
   served += 1;
 }
 
-// One locally terminated stream billed from observed usage or an input floor; not a completed `served`.
+// One non-clean stream billed from evidenced usage, a conservative visible-work estimate, or an input floor.
 export function recordServedPartial(): void {
   servedPartial += 1;
 }
 
-// One upstream-failed stream, or shutdown drain before usage, refunded in full; not a billing anomaly.
+// One upstream-failed stream with no usage evidence, or shutdown drain before usage, refunded in full.
 export function recordStreamAborted(): void {
   streamAborted += 1;
 }
@@ -177,6 +211,7 @@ export type MetricsSnapshot = {
   gate: { auth: number; request: number; model: number; premium: number; funds: number };
   balance: { ok: number; unknown: number; throttled: number; error: number };
   credit: { enqueued: number; acked: number; alreadyApplied: number; blocked: number };
+  failure: FailureMetrics;
   requests: number;
   served: number;
   servedPartial: number;
@@ -195,6 +230,12 @@ export function snapshot(): MetricsSnapshot {
   return {
     upstream: { ...upstream }, reject: { ...reject }, bill: { ...bill }, gate: { ...gate },
     balance: { ...balance }, credit: { ...credit },
+    failure: {
+      streamReported: { ...failure.streamReported },
+      streamEstimated: { ...failure.streamEstimated },
+      streamRefunded: failure.streamRefunded,
+      bufferedInputFloor: { ...failure.bufferedInputFloor },
+    },
     requests, served, servedPartial, streamAborted,
     peakStreams, peakOpenOrders, peakOutbox, maxOutboxAgeMs, recoveredHolds, windowStart,
   };
@@ -232,6 +273,21 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   // streamed money LEAK is bill:refunded, in the problem segment above).
   if (m.servedPartial) routine.push(`stream:partial=${m.servedPartial}`);
   if (m.streamAborted) routine.push(`stream:aborted=${m.streamAborted}`);
+  // Detail-only accepted-failure telemetry. It lets us measure whether a more elaborate reconciliation
+  // architecture is warranted without creating per-request state or changing the primary req identity.
+  if (m.failure.streamReported.count) routine.push(
+    `failure:stream-reported=${m.failure.streamReported.count}`,
+    `failure:stream-reported-microusd=${m.failure.streamReported.micros}`,
+  );
+  if (m.failure.streamEstimated.count) routine.push(
+    `failure:stream-estimated=${m.failure.streamEstimated.count}`,
+    `failure:stream-estimated-microusd=${m.failure.streamEstimated.micros}`,
+  );
+  if (m.failure.streamRefunded) routine.push(`failure:stream-refunded=${m.failure.streamRefunded}`);
+  if (m.failure.bufferedInputFloor.count) routine.push(
+    `failure:http-input-floor=${m.failure.bufferedInputFloor.count}`,
+    `failure:http-input-floor-microusd=${m.failure.bufferedInputFloor.micros}`,
+  );
   // Relayed user 4xx rides here (right after served/req), itemizing the gap — a client error, not an
   // operator-actionable problem, so it never flips the line to WARN on its own.
   if (m.upstream.relayed4xx) routine.push(`upstream:4xx=${m.upstream.relayed4xx}`);
@@ -272,6 +328,10 @@ export function reset(nowMs: number): void {
   gate.auth = gate.request = gate.model = gate.premium = gate.funds = 0;
   balance.ok = balance.unknown = balance.throttled = balance.error = 0;
   credit.enqueued = credit.acked = credit.alreadyApplied = credit.blocked = 0;
+  failure.streamReported.count = failure.streamReported.micros = 0;
+  failure.streamEstimated.count = failure.streamEstimated.micros = 0;
+  failure.streamRefunded = 0;
+  failure.bufferedInputFloor.count = failure.bufferedInputFloor.micros = 0;
   requests = 0;
   served = 0;
   servedPartial = 0;

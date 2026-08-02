@@ -127,7 +127,7 @@ test("openai streaming: a clean close bills the exact usage from the final inclu
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
-test("openai streaming: a reasoning-model disconnect bills input (from the hold) + the output cap (not the char estimate)", async () => {
+test("openai streaming: a reasoning-model disconnect bills estimated input + visible output, never the reservation", async () => {
   let cancelled = false;
   const chunks = [
     { model: "gpt-5", choices: [{ delta: { role: "assistant", content: "" } }] },
@@ -145,17 +145,15 @@ test("openai streaming: a reasoning-model disconnect bills input (from the hold)
   await reader.read(); // "12345678" → 8 content chars metered
   await reader.cancel(); // client disconnects
   expect(cancelled).toBe(true); // upstream generation cancelled → spend stops
-  // gpt-5 is a REASONING model: its thinking tokens never stream, so the char estimate (ceil(8/4)=2) is
-  // blind to them — the disconnect bills the output CAP instead (max_completion_tokens=1000, a sound upper
-  // bound). Bill = ctx.inputTokens (byte-bound hold ⇒ utf8 bytes of the original raw body) at the input
-  // rate + 1000 output tokens, which stays ≤ the hold so billActual doesn't clamp.
-  const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
-  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1000 };
+  // Hidden reasoning cannot be observed before the terminal usage frame. Charging its reservation would
+  // turn a tiny partial into the maximum bill, so the fallback uses bytes/4 input + visible chars/4 output.
+  const inputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 2 };
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
 test("openai streaming disconnect counts as stream:partial, not a completed serve", async () => {
-  // The OpenAI scanner folds a mid-stream disconnect into result() (input + char/cap estimate), but terminal
+  // The OpenAI scanner folds a mid-stream disconnect into result() (input + visible-char estimate), but terminal
   // cause — not the presence of estimated usage — determines the outcome. A caller-aborted response is a
   // billed partial across providers and must never inflate the clean `served` count.
   metrics.reset(0);
@@ -468,7 +466,7 @@ test("responses streaming: a clean close bills the usage from the response.compl
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
-test("responses streaming: a reasoning-model disconnect bills input (from the hold) + the output cap", async () => {
+test("responses streaming: a reasoning-model disconnect bills estimated input + visible output, never the reservation", async () => {
   let cancelled = false;
   const chunks = [
     { type: "response.created", response: { model: "gpt-5" } },
@@ -486,9 +484,8 @@ test("responses streaming: a reasoning-model disconnect bills input (from the ho
   await reader.read(); // first delta (8 chars)
   await reader.cancel();
   expect(cancelled).toBe(true);
-  // gpt-5 reasoning: the disconnect bills the output CAP (max_output_tokens=1000), not the char estimate.
-  const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
-  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 1000 };
+  const inputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+  const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 2 };
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
 });
 
@@ -554,11 +551,10 @@ test("responses endpoint 404s when the provider is not configured", async () => 
   expect(res.status).toBe(404);
 });
 
-test("openai streaming: an upstream error mid-stream refunds in full (not billed as a client disconnect)", async () => {
-  // An error frame after some content is an UPSTREAM failure, not a client disconnect — nothing billable
-  // happened, so the input must NOT be billed via the disconnect fallback. (Regression: a real response
-  // that 200s then fails mid-stream was billing the prompt.) chat: an `error` frame; responses: response.failed.
-  // The full-refund path logs the "[bill] … refunded in full" alert line by design; silence it here.
+test("openai streaming: an upstream error after visible content bills a conservative partial", async () => {
+  // OpenAI reports exact usage only in the terminal chunk, which a failed stream lacks. Charge the known
+  // input plus a visible-text estimate, but never the reasoning output cap: the caller did not cause the
+  // failure. Chat uses an `error` frame; Responses uses response.failed.
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const chat = [
     { model: "gpt-5", choices: [{ delta: { role: "assistant", content: "" } }] },
@@ -569,9 +565,16 @@ test("openai streaming: an upstream error mid-stream refunds in full (not billed
     const token = "pr_chatfail";
     const { handler, balances } = makeHandler(openaiStream(chat));
     fund(balances, token);
-    const res = await handler(chatReq(token, streamBody(1000)));
+    const body = streamBody(1000);
+    const res = await handler(chatReq(token, body));
     await res.text();
-    expect(debit(balances, token)).toBe(0); // full refund
+    const inputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+    expect(debit(balances, token)).toBe(priceUsage("gpt-5", {
+      input_tokens: inputTokens,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 2, // ceil("partial".length / 4), not the 1000-token reasoning cap
+    }));
   }
   const resp = [
     { type: "response.created", response: { model: "gpt-5" } },
@@ -582,9 +585,16 @@ test("openai streaming: an upstream error mid-stream refunds in full (not billed
     const token = "pr_respfail";
     const { handler, balances } = makeHandler(openaiStream(resp));
     fund(balances, token);
-    const res = await handler(responsesReq(token, { model: "gpt-5", max_output_tokens: 1000, stream: true, input: "x".repeat(8000) }));
+    const body = { model: "gpt-5", max_output_tokens: 1000, stream: true, input: "x".repeat(8000) };
+    const res = await handler(responsesReq(token, body));
     await res.text();
-    expect(debit(balances, token)).toBe(0); // full refund
+    const inputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+    expect(debit(balances, token)).toBe(priceUsage("gpt-5", {
+      input_tokens: inputTokens,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 2,
+    }));
   }
   errSpy.mockRestore();
 });

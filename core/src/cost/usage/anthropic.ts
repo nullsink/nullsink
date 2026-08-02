@@ -14,7 +14,7 @@ export function extractUsage(text: string): Metered {
       // to the flat field priceUsage prices at 2× — the SAME shape the streaming scanner below produces, so
       // both paths agree. Absent → 0 (no 1h writes, or a non-Anthropic shape). The flat total
       // (cache_creation_input_tokens) is already top-level on the usage object and passes through verbatim.
-      return { model: obj.model, usage: { ...u, cache_creation_1h_input_tokens: u.cache_creation?.ephemeral_1h_input_tokens ?? 0 } };
+      return { model: obj.model, usage: { ...u, cache_creation_1h_input_tokens: u.cache_creation?.ephemeral_1h_input_tokens ?? 0 }, evidence: "reported" };
     }
   } catch {}
   return null;
@@ -30,7 +30,8 @@ export function streamUsageScanner(): UsageScanner {
   let buf = "";
   let model: string | null = null;
   let usage: Usage | null = null;
-  // saw an `error` event → upstream failed (no usable completion); the caller full-refunds, never the input floor
+  // saw an `error` event → upstream failed. Any provider-reported usage already observed remains billable;
+  // the handler classifies it as a partial rather than a clean serve.
   let errored = false;
 
   return {
@@ -50,7 +51,7 @@ export function streamUsageScanner(): UsageScanner {
         } catch {
           continue; // ignore an unparseable frame rather than abort billing
         }
-        if (evt?.type === "error") errored = true; // upstream error event (e.g. overloaded) → not billable
+        if (evt?.type === "error") errored = true; // upstream error event (e.g. overloaded) → partial/refund at settle
         if (evt?.type === "message_start" && evt.message?.usage) {
           if (typeof evt.message.model === "string") model = evt.message.model;
           const u = evt.message.usage;
@@ -83,7 +84,7 @@ export function streamUsageScanner(): UsageScanner {
     // Snapshot for billing. null until a message_start with usage is seen → caller full-refunds,
     // mirroring extractUsage's "2xx without parseable usage" path.
     result(): Metered {
-      return model && usage ? { model, usage } : null;
+      return model && usage ? { model, usage, evidence: "reported" } : null;
     },
     errored: () => errored,
   };

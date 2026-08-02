@@ -135,7 +135,7 @@ stateDiagram-v2
     Held --> Forwarding: forward upstream with our key
     Forwarding --> Settled: clean completion - charge actual
     Forwarding --> Settled: client disconnect / deadline - charge metered partial or input floor
-    Forwarding --> Settled: upstream error - full refund
+    Forwarding --> Settled: upstream error - charge evidenced partial, or refund with no evidence
     Forwarding --> Settled: shutdown drain - charge metered partial, or refund before usage
     Held --> Settled: crash before settle - refunded at next boot
     Settled --> [*]: refund the rest (clamped between 0 and the hold)
@@ -159,26 +159,51 @@ Three invariants carry the no-overdraft guarantee:
    first — so a double-settle (say, a shutdown drain racing the natural finish) is a no-op and a
    refund happens at most once.
 
+## Buffered responses
+
+For a non-streaming request nullsink buffers the complete upstream response before settling or returning
+it. A 2xx response with parseable usage bills that exact usage. A non-2xx, timeout, or connection failure
+before a response refunds in full. If the provider commits 2xx headers and the body then breaks, the partial
+body is never forwarded, but nullsink charges only a conservative input floor because the provider accepted
+and began the request; unmeasured output is free. A clean 2xx body without parseable usage is forwarded but
+refunded in full and pages as a metering anomaly.
+
+A caller disconnect before nullsink has an upstream response to return is deliberately not propagated to the
+provider. The accepted request continues so nullsink can obtain terminal usage and settle normally. This
+avoids a pre-header abort becoming a full-refund billing-evasion path. Once an SSE response exists, downstream
+cancellation does stop upstream generation and uses the partial-settlement policy below.
+
 ## Streaming and disconnects
 
 For SSE responses the bytes are relayed untouched while a scanner meters usage off the stream.
 Settlement runs once, on whichever happens first: a clean finish (bill exact usage), an upstream
-error (full refund), a client cancel, or a force-settle deadline for a client that opens a stream
-but never reads it. On an early client disconnect nullsink still bills at least the input it
-already paid the provider to ingest (the "input floor"). Reasoning models whose thinking is *hidden*
-from the stream (OpenAI's o-series and GPT-5) bill those tokens as output yet never stream them — so
-counting the visible characters on an early cut would under-bill. For these a mid-stream disconnect
-is billed at the full output cap instead, a sound upper bound. Open-weight reasoning models (Tinfoil)
-*do* stream their thinking — as `content`, or in a `reasoning` field the scanner also counts — so
-they're metered from the streamed text like any model, no cap needed. (Anthropic extended thinking
-needs no special case either: its scanner reads the running output count, thinking included, straight
-off the stream.) Graceful shutdown drains still-open streams, billing the
-metered partial and refunding the rest.
+error, a client cancel, or a force-settle deadline for a client that opens a stream but never reads it.
+
+Settlement follows the strongest available evidence. An upstream failure after provider-reported usage
+(Anthropic sends cumulative usage throughout the stream) bills only that reported partial. OpenAI normally
+sends exact usage only in the terminal frame; if it fails after visible text, nullsink bills the provider
+input count plus a conservative visible-text estimate. When the input counter was unavailable, it discounts
+the deliberately loose byte-bound reservation to a bytes/4 estimate rather than charging the bound as usage.
+An upstream failure before any usage report or visible output refunds in full.
+
+On an early client disconnect nullsink still bills at least the input it already paid the provider to
+ingest (the "input floor"). If terminal usage has not arrived, OpenAI output is estimated only from text
+actually streamed, including visible `reasoning` / `reasoning_content` fields on compatible providers.
+Hidden reasoning is unknowable at that point, so nullsink does not speculate about it. The output maximum
+remains an admission-control reservation and can never become a charge. This intentionally accepts bounded
+under-recovery on a rare early cancellation in exchange for never turning a tiny or metadata-only partial
+into the maximum user bill. Graceful shutdown uses reported usage or visible-output evidence; before either,
+it refunds in full. The settle deadline uses the same evidence when present and otherwise charges input only.
+
+Failure telemetry is aggregate and stateless: provider-reported stream charges, estimated stream charges,
+stream refunds, and buffered input-floor charges are counted separately. Every charged category also sums
+microdollars, which measures actual user charges/exposure without pretending nullsink knows a provider's
+unreported final invoice.
 
 ## Invariants
 
 A balance can't go negative — the conditional debit and the bounded refund guarantee that on
 their own, whatever the hold estimate happens to be.
 
-Every claim above is pinned by property tests in `test/` (`billing`, `hold`, `settle`, `db`)
-plus the `reasoning-disconnect` case.
+Every claim above is pinned by property tests in `test/` (`billing`, `billing-failure-contract`,
+`billing-terminal-state`, `hold`, `settle`, `db`) plus focused disconnect cases.
