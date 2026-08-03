@@ -2,8 +2,7 @@
 // no network. Covers what's Tinfoil-specific and what the shared /v1/chat/completions path now requires:
 // routing by model (bare id → owner, `provider/model` prefix, wrong-path prefix), the prefix strip on
 // forward, source-declared cached-input billing, forced stream_options.include_usage with NO store:false,
-// and forceReasoning (a disconnect bills the output cap for a model that isn't a REASONING_MARKER). The
-// shared hold/refund skeleton is covered in billing.property.test.ts.
+// visible reasoning in disconnect estimates. The shared hold/refund skeleton is covered elsewhere.
 import { test, expect } from "bun:test";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
@@ -13,7 +12,7 @@ import { priceUsage, type Usage } from "../src/cost";
 
 type Upstream = (url: string, init: any) => Promise<Response>;
 const INITIAL = 10_000_000_000; // $10k — covers any hold here
-const TF = "glm-5-2"; // priced under tinfoil (prices.json); NOT a REASONING_MARKER id
+const TF = "glm-5-2"; // priced under tinfoil (prices.json)
 
 const anthropic = { apiKey: "real-anthropic-key", baseUrl: "https://anthropic.example", version: "2023-06-01", estimateHold: byteBoundHold };
 
@@ -159,7 +158,7 @@ test("Tinfoil forward forces stream_options.include_usage (over a client false) 
   expect(calls[0]!.headers.get("authorization")).toBe("Bearer real-tinfoil-key"); // our key injected
 });
 
-// --- forceReasoning: a disconnect bills the cap, not the visible-char estimate --------------------
+// --- Disconnect estimate includes visible reasoning -----------------------------------------------
 
 test("a Tinfoil streaming disconnect counts delta.reasoning (and reasoning_content) in the char estimate, no cap", async () => {
   let cancelled = false;
@@ -185,9 +184,9 @@ test("a Tinfoil streaming disconnect counts delta.reasoning (and reasoning_conte
   await reader.cancel(); // client disconnects
   expect(cancelled).toBe(true); // upstream generation cancelled → spend stops
   // B: open-weight reasoning is visible, so the disconnect uses the char estimate over content + reasoning —
-  // NOT the cap. 24 + 16 + 8 = 48 chars → ceil(48/4) = 12 output tokens. Input is the byte-bound hold's count.
-  // (OpenAI's HIDDEN-reasoning models still bill the cap — see openai.property.test.)
-  const inputTokens = Buffer.byteLength(JSON.stringify(body), "utf8");
+  // NOT the cap. 24 + 16 + 8 = 48 chars → ceil(48/4) = 12 output tokens. Input is bytes/4 because the
+  // byte-bound hold is admission control, not usage evidence.
+  const inputTokens = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
   const expected: Usage = { input_tokens: inputTokens, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 12 };
   expect(debit(balances, token)).toBe(priceUsage(TF, expected));
 });

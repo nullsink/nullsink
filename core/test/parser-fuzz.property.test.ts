@@ -98,7 +98,7 @@ const sseStream = fc
 const chunkOffsets = fc.array(fc.nat({ max: 200 }), { maxLength: 20 });
 
 test("streaming usage scanners never throw and never yield a non-finite / negative bill (torn at any offset)", () => {
-  const ctx = { model: "gpt-4o", inputTokens: 10, maxTokens: 100 };
+  const ctx = { model: "gpt-4o", inputTokens: 10 };
   fc.assert(
     fc.property(sseStream, chunkOffsets, (stream, rawOffsets) => {
       const offsets = [...new Set(rawOffsets.filter((o) => o < stream.length))].sort((a, b) => a - b);

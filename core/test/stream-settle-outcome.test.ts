@@ -1,6 +1,6 @@
 // Steps 1 + 4 of the observability refactor. Step 1: a streaming settle() with no parseable usage is no longer a
 // single "refunded in full" that pages — it splits three ways: shutdown DRAIN (routine, silent), mid-stream ABORT
-// (WARN, provider friction), genuine clean-end-no-usage BREAK (ERROR — the only one that pages); fixing the
+// (WARN, billed when usage is evidenced and refunded otherwise), genuine clean-end-no-usage BREAK (ERROR); fixing the
 // false-page where draining N live streams at restart paged N times. Step 4: each of those outcomes — plus the
 // clean serve and the input-floor partial — is now COUNTED into a disjoint bucket (served / servedPartial /
 // streamAborted / bill.refundedInFull), so `req` reconciles for streams too. These tests pin both.
@@ -10,6 +10,7 @@ import { createHandler, type HandlerDeps, type RailView } from "./support/handle
 import { openDb, hashToken } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";
+import { priceUsage } from "../src/cost";
 
 function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response>, over: Partial<HandlerDeps> = {}) {
   const balances = openDb(":memory:");
@@ -111,7 +112,7 @@ test("mid-stream upstream error → WARN (aborted), NO refunded-in-full page", a
   errSpy.mockRestore();
 });
 
-test("in-band upstream error after message_start → full refund and stream:aborted, not served", async () => {
+test("in-band upstream error after message_start → bills reported partial, not a clean serve", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   try {
     metrics.reset(0);
@@ -130,22 +131,25 @@ test("in-band upstream error after message_start → full refund and stream:abor
     await res.text();
 
     const outcome = metrics.snapshot();
+    const partial = priceUsage("claude-opus-4-8", { input_tokens: 5, output_tokens: 3 });
     expect([
       balances.getBalance(hash),
       outcome.streamAborted,
       outcome.served,
+      outcome.servedPartial,
     ]).toEqual([
-      before, // upstream failure is not billable, even after usage metadata
-      1,
+      before - partial, // provider reported the work before failing; only that observed partial is charged
       0,
+      0,
+      1,
     ]);
-    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+    expect(warnText(errSpy)).toContain("billed metered partial");
   } finally {
     errSpy.mockRestore();
   }
 });
 
-test("transport error after message_start → full refund and stream:aborted, not served", async () => {
+test("transport error after message_start → bills reported partial, not a clean serve", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   try {
     metrics.reset(0);
@@ -159,22 +163,25 @@ test("transport error after message_start → full refund and stream:aborted, no
     try { await res.text(); } catch { /* the response stream propagates the upstream transport failure */ }
 
     const outcome = metrics.snapshot();
+    const partial = priceUsage("claude-opus-4-8", { input_tokens: 5, output_tokens: 3 });
     expect([
       balances.getBalance(hash),
       outcome.streamAborted,
       outcome.served,
+      outcome.servedPartial,
     ]).toEqual([
-      before, // transport failure is not billable after message_start either
-      1,
+      before - partial,
       0,
+      0,
+      1,
     ]);
-    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+    expect(warnText(errSpy)).toContain("billed metered partial");
   } finally {
     errSpy.mockRestore();
   }
 });
 
-test("client cancel after a post-message_start error → upstream failure still wins and refunds", async () => {
+test("client cancel after a post-message_start error → upstream failure bills only reported partial", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   try {
     metrics.reset(0);
@@ -195,13 +202,14 @@ test("client cancel after a post-message_start error → upstream failure still 
     await reader.cancel("client aborts on error");
 
     const outcome = metrics.snapshot();
+    const partial = priceUsage("claude-opus-4-8", { input_tokens: 5, output_tokens: 0 });
     expect([
       balances.getBalance(hash),
       outcome.streamAborted,
       outcome.served,
       outcome.servedPartial,
-    ]).toEqual([before, 1, 0, 0]);
-    expect(warnText(errSpy)).toContain("stream aborted mid-flight");
+    ]).toEqual([before - partial, 0, 0, 1]);
+    expect(warnText(errSpy)).toContain("billed metered partial");
   } finally {
     errSpy.mockRestore();
   }

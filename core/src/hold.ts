@@ -25,10 +25,10 @@ export type HoldInput = {
 };
 
 // The hold (micro-dollars) plus the input-token count it was sized from. `micros` is the hold (padded for
-// headroom); `inputTokens` is the REAL estimate (the unpadded count, or the byte bound on fallback) — billed
-// at the actual input rate, not the hold's max rate, and reused for the OpenAI streaming disconnect bill
-// (see the scanners' fallback in cost/usage/openai.ts).
-export type HoldResult = { micros: number; inputTokens: number };
+// headroom); `inputTokens` is the unpadded provider count or the byte bound on fallback. The source matters
+// at settlement: a byte bound is safe for reservation but far too loose to charge as usage, so the handler
+// converts it once to the standard bytes/4 billable estimate before it reaches any usage scanner.
+export type HoldResult = { micros: number; inputTokens: number; inputTokensSource: "counted" | "byte_bound" };
 
 // Sync today; typed async-capable so a count_tokens estimator (one upstream round-trip) drops in without
 // touching the handler, which already awaits the result.
@@ -45,7 +45,11 @@ export type HoldEstimator = (input: HoldInput) => HoldResult | Promise<HoldResul
 // would NOT be sound.
 export function byteBoundHold({ model, raw, maxTokens, oneHourCache }: HoldInput): HoldResult {
   const utf8Bytes = Buffer.byteLength(raw, "utf8");
-  return { micros: priceHoldBound(model, utf8Bytes, maxTokens, { oneHourCache }), inputTokens: utf8Bytes };
+  return {
+    micros: priceHoldBound(model, utf8Bytes, maxTokens, { oneHourCache }),
+    inputTokens: utf8Bytes,
+    inputTokensSource: "byte_bound",
+  };
 }
 
 // Tighter estimator: asks Anthropic's `/v1/messages/count_tokens` for the EXACT input-token count
@@ -171,6 +175,7 @@ export function makeCountTokensHold(opts: CountTokensHoldOptions): HoldEstimator
       return {
         micros: Math.min(byteBoundHold(input).micros, priceHoldBound(model, padded, maxTokens, { oneHourCache: input.oneHourCache })),
         inputTokens,
+        inputTokensSource: "counted",
       };
     } catch {
       // PURE + SILENT: any failure (down/timeout/malformed/non-positive count) falls back to the SOUND byte
