@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.5](https://github.com/nullsink/nullsink/compare/v1.11.4...v1.11.5) (2026-08-03)
+
+
+### Bug Fixes
+
+* make failure billing evidence-based ([#148](https://github.com/nullsink/nullsink/issues/148)) ([d803ca6](https://github.com/nullsink/nullsink/commit/d803ca66981420b7bca82b408767bb76d7fe1909))
+
 ## [1.11.4](https://github.com/nullsink/nullsink/compare/v1.11.3...v1.11.4) (2026-08-01)
 
 
