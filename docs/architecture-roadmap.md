@@ -4,9 +4,9 @@ Status source for [issue #58](https://github.com/nullsink/nullsink/issues/58). T
 diagram source is [`architecture-roadmap.html`](architecture-roadmap.html); the rendered
 artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
-![nullsink architecture: current system, next release, and target app-box boundary](architecture-roadmap.png)
+![nullsink architecture: current system and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-08-04, after v1.11.5
+## Status — 2026-08-04, v1.12.0
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
-| Operator database access | **Reduced in the next release** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
+| Operator database access | **Reduced in v1.12.0** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -83,7 +83,7 @@ completed the first scheduled pull, and a retained Pi ciphertext passed the revi
 restore on the trusted machine with the offline identity. No plaintext database or decryption identity
 crossed into the collector.
 
-### 3. Retire operator mutation; narrow live reads — partial in the next release
+### 3. Retire operator mutation; narrow live reads — partial, shipped in v1.12.0
 
 Delete issue, top-up, order inspection, and recovery commands instead of building an administrative
 outbox. The normal `/buy` flow handles initial and repeat funding. Keep only the two actively used,

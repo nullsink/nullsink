@@ -99,13 +99,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-08-04<br>after v1.11.5 · Step 3 partial next</div>
+    <div class="stamp">as of 2026-08-04<br>v1.12.0 · Step 3 partial</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
-      <title id="roadmap-title">nullsink current architecture, next release, and target app-box boundary</title>
-      <desc id="roadmap-desc">The current system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector. The next release removes operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
+      <title id="roadmap-title">nullsink current architecture and target app-box boundary</title>
+      <desc id="roadmap-desc">The current system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector. Version 1.12.0 removes operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -114,9 +114,9 @@
         <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#e1a85a"/></marker>
       </defs>
 
-      <!-- CURRENT + NEXT RELEASE -->
+      <!-- CURRENT SYSTEM -->
       <rect class="panel" x="28" y="28" width="1344" height="1160" rx="18"/>
-      <text class="section-kicker" x="60" y="70">CURRENT + NEXT RELEASE</text>
+      <text class="section-kicker" x="60" y="70">CURRENT SYSTEM</text>
       <text class="section-title" x="60" y="101">two code trust domains · one shared OS identity</text>
 
       <!-- user and edge -->
