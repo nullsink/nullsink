@@ -11,7 +11,8 @@
 # Usage:
 #   restore.sh <artifact>            # dry-run: verify integrity, report, change nothing
 #   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts both services)
-# Env: DB_DIR, SVC_USER, PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
+# Env: BALANCES_DB_PATH, PENDING_DB_PATH, DB_DIR (legacy shared-directory fallback), SVC_USER, SVC_GROUP,
+# PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
 set -euo pipefail
 
 apply=0
@@ -23,7 +24,10 @@ if [ -z "$artifact" ] || [ ! -f "$artifact" ]; then
 fi
 
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
 SVC_USER="${SVC_USER:-nullsink}"
+SVC_GROUP="${SVC_GROUP:-$SVC_USER}"
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 RESTORE_MAX_MEMBER_BYTES="${RESTORE_MAX_MEMBER_BYTES:-8589934592}" # 8 GiB/member; real billing DBs are far smaller
@@ -159,10 +163,24 @@ fi
 # so the stale -wal/-shm are dropped.
 [ "$(id -u)" -eq 0 ] || { echo "--apply must run as root (it installs files + (re)starts the services)" >&2; exit 1; }
 
+live_path_for() {
+  case "$1" in
+    balances.db) printf '%s\n' "$BALANCES_DB_PATH" ;;
+    pending.db) printf '%s\n' "$PENDING_DB_PATH" ;;
+    *) echo "unknown restore member: $1" >&2; return 1 ;;
+  esac
+}
+
+stage_path_for() {
+  local live_path
+  live_path="$(live_path_for "$1")"
+  printf '%s/.%s.restoring\n' "$(dirname "$live_path")" "$(basename "$live_path")"
+}
+
 # A balances-only restore over a scrub-era pending.db can rewind the receiver below acknowledgements whose
 # payloads no longer exist. There is nothing safe to redeliver, so prohibit that partial restore. Historical
 # balances-only artifacts remain applicable only to installations that do not yet have pending.db.
-if [ ! -f "$work/pending.db" ] && [ -f "$DB_DIR/pending.db" ]; then
+if [ ! -f "$work/pending.db" ] && [ -f "$PENDING_DB_PATH" ]; then
   echo "unsafe partial restore refused: artifact has balances.db but no pending.db; scrub-era billing DBs must be restored as a matched pair" >&2
   exit 1
 fi
@@ -170,7 +188,8 @@ fi
 staged=()
 for db in balances.db pending.db; do
   [ -f "$work/$db" ] || continue
-  install -o "$SVC_USER" -g "$SVC_USER" -m 600 "$work/$db" "$DB_DIR/.$db.restoring"   # fails here = live DBs untouched
+  stage_path="$(stage_path_for "$db")"
+  install -o "$SVC_USER" -g "$SVC_GROUP" -m 600 "$work/$db" "$stage_path"   # fails here = live DBs untouched
   staged+=("$db")
 done
 
@@ -179,14 +198,16 @@ done
 echo "STOPPING $PAYMENTS_UNIT + $PROXY_UNIT to swap in the restored ledger…"
 systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT"
 for db in "${staged[@]}"; do
+  live_path="$(live_path_for "$db")"
+  stage_path="$(stage_path_for "$db")"
   # Keep the pre-restore ledger, recoverable — but NEVER clobber an existing .prerestore. A failed re-arm tells
   # the operator to re-run this script; on that second --apply the live DB is already the RESTORED one, so a
   # plain `mv -f` would overwrite the ORIGINAL pre-restore copy with restored data and lose the real ledger.
   # `-n` (no-clobber) preserves the first, true pre-restore snapshot across re-runs.
-  [ -e "$DB_DIR/$db" ] && mv -n "$DB_DIR/$db" "$DB_DIR/$db.prerestore" && rm -f "$DB_DIR/$db"
-  mv -f "$DB_DIR/.$db.restoring" "$DB_DIR/$db"
-  rm -f "$DB_DIR/$db-wal" "$DB_DIR/$db-shm"
-  echo "restored $db (previous kept as $db.prerestore)"
+  [ -e "$live_path" ] && mv -n "$live_path" "$live_path.prerestore" && rm -f "$live_path"
+  mv -f "$stage_path" "$live_path"
+  rm -f "$live_path-wal" "$live_path-shm"
+  echo "restored $db to $live_path (previous kept as $live_path.prerestore)"
 done
 
 # --- Re-arm the credit outbox. Any restore rewinds ONE database relative to the other, and the two carry
@@ -210,13 +231,13 @@ done
 # settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
 # Run as the SERVICE USER: root would leave root-owned WAL sidecars and break billing writes.
-if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
+if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
   # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it
   # stopped rather than starting a box whose outbox still claims undelivered credits were delivered.
   rearm_or_abort() {  # $1=sql — run as the service user; echo the last output line; abort with the error on failure
     local out
-    if ! out="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" "$1" 2>&1)"; then
+    if ! out="$(sudo -u "$SVC_USER" sqlite3 "$PENDING_DB_PATH" "$1" 2>&1)"; then
       echo "!! credit-outbox re-arm FAILED — sqlite3 said:" >&2
       printf '%s\n' "$out" >&2
       echo "!! The databases ARE restored but the outbox was NOT re-armed, so a paid credit may be marked" >&2
@@ -227,17 +248,17 @@ if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
     printf '%s\n' "$out" | tail -1
   }
 
-  has_outbox="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/pending.db" \
+  has_outbox="$(sudo -u "$SVC_USER" sqlite3 "$PENDING_DB_PATH" \
     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';" 2>/dev/null || echo 0)"
   has_applied=0
-  if [ -f "$DB_DIR/balances.db" ]; then
-    has_applied="$(sudo -u "$SVC_USER" sqlite3 "$DB_DIR/balances.db" \
+  if [ -f "$BALANCES_DB_PATH" ]; then
+    has_applied="$(sudo -u "$SVC_USER" sqlite3 "$BALANCES_DB_PATH" \
       "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';" 2>/dev/null || echo 0)"
   fi
 
   if [ "$has_outbox" = 1 ] && [ "$has_applied" = 1 ]; then
     rearmed="$(rearm_or_abort \
-      "ATTACH '$DB_DIR/balances.db' AS bal;
+      "ATTACH '$BALANCES_DB_PATH' AS bal;
        UPDATE credit_outbox SET acked_at = NULL
         WHERE acked_at IS NOT NULL
           AND hash <> ''
@@ -260,5 +281,5 @@ systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
 echo "--- restored + both services restarted. Verify with nsk financials, both /healthz endpoints,"
 echo "    the next finalized aggregate report, and credit delivery in:"
 echo "      journalctl -u $PAYMENTS_UNIT -f"
-echo "    then remove the $DB_DIR/*.prerestore safety copies once you're happy. ---"
+echo "    then remove $BALANCES_DB_PATH.prerestore and $PENDING_DB_PATH.prerestore once you're happy. ---"
 exit 0

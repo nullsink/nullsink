@@ -311,8 +311,8 @@ step "Enabling timers (health check, four-hour backup)"
 # refreshed by install_units above. Both always-on timers are safe with their creds unset:
 #   - status-check.timer runs status-check.sh every 10 min; a failure pages Telegram via status-alert@.service
 #     (a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set — still logs to journald).
-#   - backup.timer runs deploy/backup.sh every four hours AS the service user: sqlite3 .backup of balances.db +
-#     pending.db, matched-pair validation, an aggregate-only report, optional age-encryption
+#   - backup.timer runs deploy/backup.sh every four hours AS the service user: sqlite3 .backup of the explicit
+#     balance + payment DB paths, matched-pair validation, an aggregate-only report, optional age-encryption
 #     (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), all configured in $ENV_FILE.
 #     Unset = local-only plaintext snapshots in /var/lib/nullsink/backups (status-check warns if the newest goes
 #     stale). Restore or TEST a backup with deploy/restore.sh (dry-run by default).

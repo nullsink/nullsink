@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,18 +39,24 @@ test("nsk balances JSON preserves full hashes and exact liability", () => {
     const store = openDb(path);
     store.credit("d".repeat(64), 3_405_787);
     store.db.close();
+    chmodSync(path, 0o440);
+    for (const suffix of ["-wal", "-shm"]) if (existsSync(path + suffix)) chmodSync(path + suffix, 0o440);
 
     const result = Bun.spawnSync({
       cmd: [process.execPath, CLI, "balances", "--format", "json"],
-      env: { ...process.env, DB_PATH: path, NSK_ALLOW_ROOT: "1" },
+      env: { ...process.env, BALANCES_DB_PATH: path, NSK_ALLOW_ROOT: "1" },
       stdout: "pipe",
       stderr: "pipe",
     });
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
     expect(JSON.parse(result.stdout.toString())).toEqual({
       balances: [{ hash: "d".repeat(64), usd_balance: "3.405787" }],
       totals: { tokens: 1, prepaid_usd: "3.405787" },
     });
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      expect(existsSync(file)).toBe(true);
+      expect(statSync(file).mode & 0o222).toBe(0);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

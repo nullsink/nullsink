@@ -10,9 +10,11 @@ die() { echo "setup-export: $*" >&2; exit 1; }
 
 EXPORT_USER="nullsink-backup-export"
 EXPORT_GROUP="nullsink-backup-export"
-BACKUP_DIR="/var/lib/nullsink/backups"
+BACKUP_DIR="${BACKUP_DIR:-/var/lib/nullsink/backups}"
 AUTHORIZED_DIR="/var/lib/$EXPORT_USER/.ssh"
 AUTHORIZED_KEYS="$AUTHORIZED_DIR/authorized_keys"
+[[ "$BACKUP_DIR" != / && "$BACKUP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
+  die "BACKUP_DIR must be a simple absolute, non-root path"
 
 command -v useradd >/dev/null || die "useradd not found"
 command -v ssh-keygen >/dev/null || die "ssh-keygen not found"
@@ -59,6 +61,8 @@ cat > /etc/systemd/system/backup.service.d/export.conf <<EOF
 [Service]
 SupplementaryGroups=$EXPORT_GROUP
 Environment=BACKUP_EXPORT_GROUP=$EXPORT_GROUP
+Environment=BACKUP_DIR=$BACKUP_DIR
+ReadWritePaths=$BACKUP_DIR
 EOF
 
 install -d -o nullsink -g nullsink -m 0755 "$BACKUP_DIR"

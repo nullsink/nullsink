@@ -16,9 +16,12 @@ const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
+const backupUnit = readFileSync(deploy("backup.service"), "utf8");
 const backupReport = readFileSync(deploy("backup-report.sh"), "utf8");
 const backupTimer = readFileSync(deploy("backup.timer"), "utf8");
 const restore = readFileSync(deploy("restore.sh"), "utf8");
+const statusCheck = readFileSync(deploy("status-check.sh"), "utf8");
+const statusUnit = readFileSync(deploy("status-check.service"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
 
@@ -115,6 +118,19 @@ test("backup and restore preserve the scrubbed-outbox money invariant", () => {
   expect(restore).toContain("UPDATE credit_outbox SET acked_at = NULL WHERE hash <> '';");
   expect(restore).toContain("unsafe partial restore refused");
   expect(restore).not.toMatch(/SET acked_at = NULL WHERE hash = ''/);
+});
+
+test("control-plane storage paths are explicit while retaining the shared-directory fallback", () => {
+  for (const script of [backup, restore, statusCheck]) {
+    expect(script).toContain('DB_DIR="${DB_DIR:-/var/lib/nullsink}"');
+    expect(script).toContain('BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"');
+    expect(script).toContain('PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"');
+  }
+  for (const unit of [backupUnit, statusUnit]) {
+    expect(unit).toContain("Environment=BALANCES_DB_PATH=/var/lib/nullsink/balances.db");
+    expect(unit).toContain("Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db");
+    expect(unit).toContain("Environment=BACKUP_DIR=/var/lib/nullsink/backups");
+  }
 });
 
 test("backup publication and routine reporting follow the Step 2 egress contract", () => {

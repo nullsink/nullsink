@@ -13,4 +13,9 @@ EnvironmentFile=-/etc/nullsink.env
 # Root: needs to read /etc/monero-wallet-rpc.env and hit the localhost RPC + /healthz without permission
 # friction. It reads the billing DBs only for an integrity pragma — run AS the service user (sudo) so no
 # root-owned sidecars appear — checking page structure, never identity/row content. Privacy-safe.
+Environment=BALANCES_DB_PATH=/var/lib/nullsink/balances.db
+Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
+Environment=BALANCES_DB_USER=nullsink
+Environment=PENDING_DB_USER=nullsink
+Environment=BACKUP_DIR=/var/lib/nullsink/backups
 ExecStart=/opt/nullsink/deploy/status-check.sh

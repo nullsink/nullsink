@@ -12,13 +12,16 @@
 # If BACKUP_PUSH_CMD is set, it's run as a shell snippet with $ARTIFACT = the finished artifact path, to
 # ship it off-box (scp/rsync/rclone — your choice; destination-agnostic). Prunes to BACKUP_KEEP newest.
 #
-# Env (all optional; sane defaults): DB_DIR, BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD,
-# BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP, BACKUP_EXPORT_GROUP.
+# Env (all optional; sane defaults): BALANCES_DB_PATH, PENDING_DB_PATH, DB_DIR (legacy shared-directory
+# fallback), BACKUP_DIR, BACKUP_AGE_RECIPIENT, BACKUP_PUSH_CMD, BACKUP_PUSH_ALLOW_PLAINTEXT, BACKUP_KEEP,
+# BACKUP_EXPORT_GROUP.
 set -euo pipefail
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqlite3)" >&2; exit 1; }
 
 DB_DIR="${DB_DIR:-/var/lib/nullsink}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
 BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-84}"   # six four-hour snapshots/day ≈ fourteen days
 BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
@@ -89,11 +92,11 @@ publish_permissions() {
 # those tombstones cannot reconstruct a credit. restore.sh therefore validates that every tombstone is backed
 # by the later ledger snapshot, and a scrub-era restore must treat these two DBs as one matched artifact.
 files=()
-if [ -f "$DB_DIR/pending.db" ]; then
-  sqlite3 -cmd '.timeout 10000' "$DB_DIR/pending.db" ".backup '$work/pending.db'"
+if [ -f "$PENDING_DB_PATH" ]; then
+  sqlite3 -cmd '.timeout 10000' "$PENDING_DB_PATH" ".backup '$work/pending.db'"
   files+=(pending.db)
 fi
-sqlite3 -cmd '.timeout 10000' "$DB_DIR/balances.db" ".backup '$work/balances.db'"
+sqlite3 -cmd '.timeout 10000' "$BALANCES_DB_PATH" ".backup '$work/balances.db'"
 files+=(balances.db)
 
 # Bitcoin watch-only wallet LABELS (address→order-index map). These are wallet-local metadata — NOT on-chain
