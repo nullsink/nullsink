@@ -1,7 +1,8 @@
 # Architecture
 
 nullsink is a metered proxy in front of Anthropic, OpenAI, and Tinfoil. A user prepays with
-Monero or Bitcoin, gets a bearer token, and spends it against a balance. Each request
+Monero, on-chain Bitcoin, or the experimental Bitcoin Lightning rail, gets a bearer token,
+and spends it against a balance. Each request
 is forwarded upstream with *our* provider key and billed for exact usage. We keep no
 identity and no request logs: a token is a bearer secret, and only its SHA-256 hash is
 ever stored.
@@ -26,7 +27,8 @@ OS-sandbox boundary.
   and at boot it refunds holds an ungraceful crash left stranded. Those are the two recovery
   paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that skipped it.
 - **`src/payments.ts`** (the *payments trust domain*) serves `/buy`, `/order-status`, `/rails`, runs the
-  settlement poller, and owns `pending.db` and the watch-only rail wallets.
+  settlement poller, and owns `pending.db` plus rail access. On-chain wallets are watch-only; an
+  explicitly enabled LND backend is a separate hot-custody dependency.
 
 A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
 The two meet at exactly one place: a unix socket over which payments delivers credits to the
@@ -86,11 +88,13 @@ streaming responses. Each provider is registered only when its key is set — An
 OpenAI, so that path holds more than one provider: a request resolves to the provider that owns
 its model, or to an explicit `provider/model` prefix (stripped before forwarding upstream).
 
-**Rail seam** (`rails/types.ts`) — what it takes to accept a coin: mint a per-order address
-and detect confirmed deposits. A rail is **watch-only**: it observes incoming payments
-but never holds spend authority — custody stays cold. Active rails come from `PAY_RAILS`
-(comma list, first is the default). Monero is the reference implementation; Bitcoin is the
-second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin HD index).
+**Rail seam** (`rails/types.ts`) — what it takes to accept a coin: create a per-order payment
+request and detect settled funds. Active rails come from `PAY_RAILS` (comma list, first is the
+default). The on-chain Monero and Bitcoin rails are view/watch-only and keep spend authority
+cold. The experimental Lightning rail is deliberately different: LND must hold hot channel keys
+and current channel state, so it is disabled by default and belongs to a separately bounded,
+backed-up and monitored custody domain. All three still key orders to integer indices: a Monero
+subaddress, Bitcoin HD index, or LND `add_index`.
 
 ## The ledger: two databases, one per process
 
@@ -158,10 +162,10 @@ counts and high-water marks only; they never include a token hash, address, txid
 ```
 POST /buy {hash, credit_usd, rail?}                              [payments]
   → quote the coin's USD rate, lock it
-  → mint a per-order address
+  → create a per-order payment request (address or amount-bound BOLT11 invoice)
   → store the pending order (pending.db)
-  → return {pay_to, amount, expires_at, ...}
-  ─ ─ ─ ─ ─ (user pays on-chain) ─ ─ ─ ─ ─
+  → return {pay_to, order_id, amount, expires_at, ...}
+  ─ ─ ─ ─ ─ (user pays on-chain or over Lightning) ─ ─ ─ ─ ─
 poller tick → rail.incomingTransfers() → settle()               [payments]
   → one transaction: drop the order, book the sale, enqueue the credit
   → drain the outbox over the credit socket

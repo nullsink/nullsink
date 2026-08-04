@@ -105,6 +105,30 @@ test("checkNow scopes the poll to THIS order: fetchOrderStatus is called with th
   expect(fetchOrderStatus).toHaveBeenCalledWith("aa".repeat(32), quote.pay_to);
 });
 
+test("Lightning uses compact status scope, hides on-chain swap, and exposes invoice wallet actions", async () => {
+  const invoice = `lnbc${"a".repeat(220)}`;
+  const lightningQuote: Quote = {
+    ...quote,
+    rail: "lightning",
+    order_id: "lightning:42",
+    pay_to: invoice,
+    pay_uri: `lightning:${invoice}`,
+    confirmations_required: 0,
+  };
+  fetchOrderStatus.mockImplementation(() => Promise.resolve({ state: "waiting" }));
+  renderPay(() => {}, 0, lightningQuote);
+
+  expect(screen.queryByRole("link", { name: /swap/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /open in lightning wallet/i })).toHaveAttribute("href", lightningQuote.pay_uri);
+  expect(screen.getByRole("button", { name: "copy invoice" })).toBeInTheDocument();
+  expect(screen.queryByText(invoice)).not.toBeInTheDocument(); // shortened preview, full value only in QR/copy/deep-link
+
+  fireEvent.click(screen.getByRole("button", { name: "check" }));
+  await waitFor(() =>
+    expect(fetchOrderStatus).toHaveBeenCalledWith("aa".repeat(32), lightningQuote.order_id),
+  );
+});
+
 // `detected` = the server durably saw an inbound (seen_at) but has no live confirmation count, because it
 // restarted and its wallet is still resyncing. Telling a payer "not seen yet" here is how you get paid twice:
 // pay-once already closed the order on the first deposit, so the second lands on no open order and is lost

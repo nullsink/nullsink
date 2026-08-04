@@ -18,7 +18,7 @@ function router(handlers: Record<string, (params: any[]) => unknown>): typeof fe
   }) as unknown as typeof fetch;
 }
 
-test("createAddress mints, reads its derivation index, and labels the address with it", async () => {
+test("createPayment mints, reads its derivation index, and labels the address with it", async () => {
   const calls: any[] = [];
   const fetchImpl = router({
     getnewaddress: () => "bc1qexample",
@@ -28,16 +28,19 @@ test("createAddress mints, reads its derivation index, and labels the address wi
       return null;
     },
   });
-  const { createAddress } = makeBitcoin({ ...CFG, fetchImpl });
-  expect(await createAddress("pr")).toEqual({ address: "bc1qexample", orderIndex: 7 });
+  const { createPayment } = makeBitcoin({ ...CFG, fetchImpl });
+  expect(await createPayment({ amountAtomic: 100_000, expiresAt: 1234, label: "pr" })).toEqual({
+    payTo: "bc1qexample",
+    orderIndex: 7,
+  });
   expect(calls).toEqual([["bc1qexample", "7"]]); // labelled with its index for the poller's reverse-map
 });
 
-test("createAddress throws BitcoinError when the derivation index can't be read", async () => {
+test("createPayment throws BitcoinError when the derivation index can't be read", async () => {
   // setlabel is mocked to SUCCEED, so the throw must come from the index guard (an empty hdkeypath), not a
   // missing RPC — without the guard, Number("") === 0 would silently key the order to index 0.
   const fetchImpl = router({ getnewaddress: () => "bc1q", getaddressinfo: () => ({ hdkeypath: "" }), setlabel: () => null });
-  await expect(makeBitcoin({ ...CFG, fetchImpl }).createAddress()).rejects.toBeInstanceOf(BitcoinError);
+  await expect(makeBitcoin({ ...CFG, fetchImpl }).createPayment()).rejects.toBeInstanceOf(BitcoinError);
 });
 
 test("incomingTransfers maps watched UTXOs: sats, txid:index key, final by confirmations, filters the rest", async () => {
@@ -82,8 +85,8 @@ test("incomingTransfers skips dust and makes no RPC call when nothing is watched
 
 test("rpc surfaces HTTP and JSON-RPC errors as BitcoinError", async () => {
   const http500 = (async () => new Response("nope", { status: 500 })) as unknown as typeof fetch;
-  await expect(makeBitcoin({ ...CFG, fetchImpl: http500 }).createAddress()).rejects.toThrow("bitcoind HTTP 500");
-  await expect(makeBitcoin({ ...CFG, fetchImpl: router({}) }).createAddress()).rejects.toBeInstanceOf(BitcoinError);
+  await expect(makeBitcoin({ ...CFG, fetchImpl: http500 }).createPayment()).rejects.toThrow("bitcoind HTTP 500");
+  await expect(makeBitcoin({ ...CFG, fetchImpl: router({}) }).createPayment()).rejects.toBeInstanceOf(BitcoinError);
 });
 
 test("incomingTransfers drops a UTXO whose sats exceed safe-integer precision (never mis-credits)", async () => {
@@ -103,12 +106,12 @@ test("incomingTransfers drops a UTXO whose sats exceed safe-integer precision (n
   warnSpy.mockRestore();
 });
 
-test("createAddress throws on a NON-numeric derivation index (would otherwise NaN-key the order)", async () => {
+test("createPayment throws on a NON-numeric derivation index (would otherwise NaN-key the order)", async () => {
   // Complements the empty-hdkeypath case above: a last path segment that isn't a number → pathIndex returns
   // NaN → the guard throws, rather than Number(...) silently producing a colliding key. setlabel is mocked to
   // succeed, so the throw can ONLY come from the index guard.
   const fetchImpl = router({ getnewaddress: () => "bc1q", getaddressinfo: () => ({ hdkeypath: "m/84h/0h/0h/0/x" }), setlabel: () => null });
-  await expect(makeBitcoin({ ...CFG, fetchImpl }).createAddress()).rejects.toBeInstanceOf(BitcoinError);
+  await expect(makeBitcoin({ ...CFG, fetchImpl }).createPayment()).rejects.toBeInstanceOf(BitcoinError);
 });
 
 test("finality is >= the threshold exactly: threshold-1 is not final, the threshold is", async () => {

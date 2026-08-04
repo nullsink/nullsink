@@ -24,7 +24,8 @@ import { EXT } from "../lib/links.ts";
 
 // Hash-poll cadence. Blocks land every couple of minutes (XMR) to ~10 (BTC), so 45s keeps the line moving without
 // hammering the order-status read path.
-const POLL_MS = 45_000;
+const ONCHAIN_POLL_MS = 45_000;
+const LIGHTNING_POLL_MS = 5_000;
 
 // "expires in 23h 58m" — minutes-granular, never negative (the expired notice takes over at 0).
 function fmtLeft(ms: number): string {
@@ -92,7 +93,7 @@ export function QuotePay({
       if (document.visibilityState !== "visible") return;
       void checkNow();
     };
-    const id = window.setInterval(tick, POLL_MS);
+    const id = window.setInterval(tick, quote.rail === "lightning" ? LIGHTNING_POLL_MS : ONCHAIN_POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") tick();
     };
@@ -111,7 +112,7 @@ export function QuotePay({
     setStatusError(null);
     setCreditError(null);
     try {
-      const st = await fetchOrderStatus(await hashToken(token), quote?.pay_to);
+      const st = await fetchOrderStatus(await hashToken(token), quote?.order_id ?? quote?.pay_to);
       setStatus(st);
       // Only spend the raw token on /balance when the payment is plausibly done. `closed` means the
       // order row is gone (credited / reaped / never existed) — /balance is the authoritative tiebreak.
@@ -175,7 +176,7 @@ export function QuotePay({
   } else if (status.state === "confirming") {
     settledStatus = `payment seen, confirming ${status.confirmations}/${status.required}`;
   } else if (status.state === "finalizing") {
-    settledStatus = "confirmed, verifying credit…";
+    settledStatus = quote.rail === "lightning" ? "payment received, verifying credit…" : "confirmed, verifying credit…";
   } else if (status.state === "detected") {
     // Seen, but the server has no live confirmation count (it restarted; its wallet may still be
     // resyncing). Say we have it — NEVER fall through to "not seen yet", which reads as "send again".
@@ -213,7 +214,7 @@ export function QuotePay({
     return (
       <div className="section">
         <div className="notice" role="alert">
-          This quote expired. Don&apos;t pay this address. If you already sent payment, don&apos;t resend;
+          This quote expired. Don&apos;t pay this {quote.rail === "lightning" ? "invoice" : "address"}. If you already sent payment, don&apos;t resend;
           we&apos;re still checking it.
         </div>
         {statusPanel}
@@ -234,12 +235,14 @@ export function QuotePay({
           fires (leaving with a freshly-minted unfunded key loses it); noreferrer also strips
           the Referer. The URL carries no token/hash — only the address + amount + affiliate ref. The
           third-party + rate fine print is the (*) footnote at the bottom. */}
-      <p className="swap-line">
-        <a href={trocadorSwapUrl(quote)} {...EXT}>
-          hold a different coin? swap to {quote.unit} ↗
-        </a>
-        <span className="fn-ref"> *</span>
-      </p>
+      {quote.rail !== "lightning" && (
+        <p className="swap-line">
+          <a href={trocadorSwapUrl(quote)} {...EXT}>
+            hold a different coin? swap to {quote.unit} ↗
+          </a>
+          <span className="fn-ref"> *</span>
+        </p>
+      )}
 
       <div className="pay">
         <Qr data={quote.pay_uri} />
@@ -260,17 +263,34 @@ export function QuotePay({
               itself is untouched — copy carries it whole. */}
           <div className="pay-to">
             <span>
-              <span className="addr-end">{quote.pay_to.slice(0, 4)}</span>
-              {quote.pay_to.slice(4, -4)}
-              <span className="addr-end">{quote.pay_to.slice(-4)}</span>
+              {quote.rail === "lightning" ? (
+                <>
+                  <span className="addr-end">{quote.pay_to.slice(0, 12)}</span>
+                  {"…"}
+                  <span className="addr-end">{quote.pay_to.slice(-8)}</span>
+                </>
+              ) : (
+                <>
+                  <span className="addr-end">{quote.pay_to.slice(0, 4)}</span>
+                  {quote.pay_to.slice(4, -4)}
+                  <span className="addr-end">{quote.pay_to.slice(-4)}</span>
+                </>
+              )}
             </span>{" "}
-            <Copy value={quote.pay_to} />
+            <Copy value={quote.pay_to} label={quote.rail === "lightning" ? "copy invoice" : "copy"} />
           </div>
+          {quote.rail === "lightning" && (
+            <div className="pay-meta">
+              <a href={quote.pay_uri}>open in lightning wallet ↗</a>
+            </div>
+          )}
           <div className="pay-meta"><RateSource unit={quote.unit} /></div>
           {/* Pay-once: the order closes on its FIRST confirmed payment, so a second send to this address
               cannot be credited. The privacy page says "single-use address"; the payer deciding how to
               send is looking HERE, so the constraint has to be on this screen. */}
-          <div className="pay-meta">send the exact amount in one payment — this address is single-use.</div>
+          <div className="pay-meta">
+            send the exact amount in one payment — this {quote.rail === "lightning" ? "invoice" : "address"} is single-use.
+          </div>
         </div>
       </div>
 
@@ -283,11 +303,13 @@ export function QuotePay({
           of the link itself so the escape hatch stays one short line. Framed in retention terms ("outside
           our no-logs guarantee"), NOT "sees your IP" — every server on earth receives IPs, ours included;
           the differentiator is what gets KEPT, and theirs is governed by their policies, not ours. */}
-      <p className="swap-note">
-        <span className="fn-ref">*</span> swaps run through trocador and a partner exchange. these third
-        parties keep data under their own policies, not ours. paying with {quote.unit} directly involves no
-        third party. swapped credit can land slightly over or under the quote, depending on rate and fees.
-      </p>
+      {quote.rail !== "lightning" && (
+        <p className="swap-note">
+          <span className="fn-ref">*</span> swaps run through trocador and a partner exchange. these third
+          parties keep data under their own policies, not ours. paying with {quote.unit} directly involves no
+          third party. swapped credit can land slightly over or under the quote, depending on rate and fees.
+        </p>
+      )}
     </section>
   );
 }

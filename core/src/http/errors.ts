@@ -14,6 +14,7 @@ export const OWN_API_ERROR_CODES = [
   "invalid_json",
   "invalid_hash",
   "invalid_address",
+  "invalid_order_id",
   "invalid_amount",
   "unknown_rail",
   "busy_try_later",

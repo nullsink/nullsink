@@ -66,7 +66,7 @@ const deps: HandlerDeps = {
   orders: openOrderStore(":memory:"),
   upstreamFetch: fetch,
   rails: new Map<string, RailView>([
-    ["monero", { name: "monero", createAddress: async () => ({ address: "x", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a: string, amt: string) => `monero:${a}?tx_amount=${amt}` }],
+    ["monero", { name: "monero", createPayment: async () => ({ payTo: "x", orderIndex: 0 }), rateUsd: async () => 150, scale: 1_000_000_000_000, unit: "XMR", confirmations: 10, paymentUri: (a: string, amt: string) => `monero:${a}?tx_amount=${amt}` }],
   ]),
   defaultRail: "monero",
 };

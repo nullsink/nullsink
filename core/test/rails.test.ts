@@ -6,6 +6,7 @@ import { selectRails, selectRail, RAILS } from "../src/rails";
 import { RAIL_NAMES } from "../src/rails/catalog";
 import { moneroRail } from "../src/rails/monero";
 import { bitcoinRail } from "../src/rails/bitcoin";
+import { lightningRail } from "../src/rails/lightning";
 
 test("selectRails parses a comma list in order; the first key is the default", () => {
   const m = selectRails("monero,bitcoin");
@@ -35,7 +36,8 @@ test("each rail emits its coin's payment-URI scheme + amount param (what the buy
   // singletons' URIs are pinned only here. amount is the pre-formatted string the handler passes.
   expect(moneroRail.paymentUri("4xyzADDR", "1.5")).toBe("monero:4xyzADDR?tx_amount=1.5");
   expect(bitcoinRail.paymentUri("bc1qADDR", "0.001")).toBe("bitcoin:bc1qADDR?amount=0.001");
-  expect([moneroRail.unit, bitcoinRail.unit]).toEqual(["XMR", "BTC"]); // coin-correct display unit too
+  expect(lightningRail.paymentUri("lnbc1INVOICE", "0.001")).toBe("lightning:lnbc1INVOICE");
+  expect([moneroRail.unit, bitcoinRail.unit, lightningRail.unit]).toEqual(["XMR", "BTC", "BTC"]); // coin-correct display unit too
 });
 
 test("the live rail registry (RAILS) and the display catalog (RAIL_META) enumerate the same rails", () => {

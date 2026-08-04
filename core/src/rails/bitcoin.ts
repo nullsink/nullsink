@@ -10,7 +10,7 @@ import { numEnv } from "../env";
 import { btcUsd } from "./rate";
 import { SATS_PER_BTC } from "./units";
 import { RAIL_META } from "./catalog";
-import type { PayRail, NewAddress, Incoming } from "./types";
+import type { PayRail, NewPayment, CreatePaymentRequest, Incoming } from "./types";
 
 export class BitcoinError extends Error {}
 
@@ -35,7 +35,7 @@ export function makeBitcoin(opts: BitcoinOptions) {
     // idle HTTP connections after rpcservertimeout (default 30s); the settlement poller ticks less often than
     // that, so the pooled socket is already dead by the next tick — Bun reuses it and the request fails with
     // "The socket connection was closed unexpectedly", silently blinding deposit detection (an on-chain,
-    // confirmed payment never credits) while createAddress's burst of back-to-back calls stays inside the
+    // confirmed payment never credits) while createPayment's burst of back-to-back calls stays inside the
     // window and works, masking the outage. A new connection per call is negligible against local RPC.
     headers.connection = "close";
     const res = await fetchImpl(opts.rpcUrl, {
@@ -51,7 +51,7 @@ export function makeBitcoin(opts: BitcoinOptions) {
   }
 
   // The address index from an hdkeypath like "m/84h/0h/0h/0/5" → 5 (the last path element). Returns NaN for
-  // an empty / missing / non-numeric path so the createAddress guard throws — WITHOUT the regex, Number("")
+  // an empty / missing / non-numeric path so the createPayment guard throws — WITHOUT the regex, Number("")
   // === 0 would silently key every order to index 0 (and the 2nd order would collide on the integer PK).
   function pathIndex(hdkeypath: string): number {
     const last = String(hdkeypath).split("/").pop() ?? "";
@@ -63,21 +63,21 @@ export function makeBitcoin(opts: BitcoinOptions) {
   // so indices never repeat (no address reuse); we read that index back (getaddressinfo) and use it as the
   // order's integer key, then LABEL the address with it so the poller can map a deposit → order without
   // re-deriving. (The label arg the handler passes is ignored — we set our own, the index.)
-  async function createAddress(_label?: string): Promise<NewAddress> {
+  async function createPayment(_request?: CreatePaymentRequest): Promise<NewPayment> {
     const address = await rpc("getnewaddress");
     if (typeof address !== "string" || address.length === 0) throw new BitcoinError("getnewaddress: unexpected response");
     const info = await rpc("getaddressinfo", [address]);
     const orderIndex = pathIndex(info?.hdkeypath ?? "");
     if (!Number.isSafeInteger(orderIndex) || orderIndex < 0) throw new BitcoinError("getaddressinfo: could not read derivation index");
     await rpc("setlabel", [address, String(orderIndex)]);
-    return { address, orderIndex };
+    return { payTo: address, orderIndex };
   }
 
   // Confirmed-or-confirming deposits to the watched orders' addresses, normalised to Incoming. listunspent
   // returns one entry per UTXO (txid:vout); we never spend on the box, so deposits stay unspent until the
   // cold sweep — well after they've credited. minconf=0 + include_unsafe surface still-confirming outputs
   // (final=false) so /order-status can animate and settle's seen-set spares the order. Each UTXO's label
-  // (set at createAddress) is its order index; we keep only the watched ones.
+  // (set at createPayment) is its order index; we keep only the watched ones.
   //
   // The idempotency key is `bitcoin:txid:orderIndex` — NOT txid:vout — so multiple outputs of ONE tx to the
   // SAME order aggregate into one credit (pay-once), while one tx paying TWO of our addresses stays two keys.
@@ -112,7 +112,7 @@ export function makeBitcoin(opts: BitcoinOptions) {
     return out;
   }
 
-  return { createAddress, incomingTransfers };
+  return { createPayment, incomingTransfers };
 }
 
 const RPC_URL = process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:8332/wallet/nullsink";
@@ -132,7 +132,7 @@ export const bitcoinRail: PayRail = {
   scale: SATS_PER_BTC,
   confirmations: CONFIRMATIONS,
   unit: RAIL_META.bitcoin.unit,
-  createAddress: wallet.createAddress,
+  createPayment: wallet.createPayment,
   incomingTransfers: wallet.incomingTransfers,
   rateUsd: btcUsd,
   paymentUri: (address, amount) => `bitcoin:${address}?amount=${amount}`,

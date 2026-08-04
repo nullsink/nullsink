@@ -1,13 +1,19 @@
-// The pay-rail contract. A rail mints per-order receive addresses and detects confirmed deposits to them;
-// it never holds spend authority — the box watches, custody stays cold (the "watch-only online, cold
-// custody" invariant; see /docs/trust-model.md). Monero (rails/monero.ts) is the reference
-// implementation; Bitcoin (rails/bitcoin.ts) is next, keyed on the same INTEGER per-order index (Monero's
-// subaddress minor index / Bitcoin's HD derivation index). A string order key is only needed for Lightning
-// (payment_hash) and is deferred until then.
+// The pay-rail contract. A rail creates one payment request per order and detects funds received against
+// it. On-chain rails return a fresh address; Lightning returns an amount-bound BOLT11 invoice. The
+// settlement core deliberately sees the same shape for both.
 
-// A fresh per-order receive address: the address to pay, plus the rail's integer index for it — the key of
-// the pending order (Monero subaddress minor index, Bitcoin HD derivation index).
-export type NewAddress = { address: string; orderIndex: number };
+// The information a rail needs to create a payment destination. Lightning consumes amountAtomic and
+// expiresAt when encoding its invoice; address-based rails currently need only the non-identifying label.
+export type CreatePaymentRequest = {
+  amountAtomic: number;
+  expiresAt: number; // unix ms
+  label?: string;
+};
+
+// A fresh per-order payment destination plus the rail's integer key. `payTo` is an on-chain address or a
+// BOLT11 invoice. Keeping the rail-owned key numeric lets the existing composite (rail, order_index)
+// pending-order key support LND's monotonically increasing add_index without a schema migration.
+export type NewPayment = { payTo: string; orderIndex: number };
 
 // A confirmed-or-confirming incoming deposit, already normalised by the rail. The rail computes finality
 // (`final`) by its own rule and supplies an opaque `idempotencyKey` unique per creditable unit, so the
@@ -31,10 +37,11 @@ export interface PayRail {
   scale: number; // atomic units per whole coin (units.ts)
   confirmations: number; // finality depth this rail credits at — also shown to buyers as confirmations_required
   unit: string; // display ticker shown to buyers, e.g. "BTC"
-  createAddress(label?: string): Promise<NewAddress>;
+  orderTtlMs?: number; // rail-specific quote lifetime; absent uses the service-wide on-chain default
+  createPayment(request: CreatePaymentRequest): Promise<NewPayment>;
   incomingTransfers(orderIndices?: number[]): Promise<Incoming[]>;
   rateUsd(): Promise<number>;
-  paymentUri(address: string, amount: string): string; // the coin's wallet URI for the pay QR (e.g. bitcoin:addr?amount=…)
+  paymentUri(payTo: string, amount: string): string; // wallet URI for the QR; Lightning's payTo already embeds amount
 }
 
 // The per-rail view the request-handling layer needs (a subset of PayRail): mint an address, quote the rate,
@@ -45,10 +52,11 @@ export interface PayRail {
 // cycle.
 export type RailView = {
   name: string;
-  createAddress: (label?: string) => Promise<NewAddress>;
+  createPayment: (request: CreatePaymentRequest) => Promise<NewPayment>;
   rateUsd: () => Promise<number>;
   scale: number;
   unit: string;
   confirmations: number;
+  orderTtlMs?: number;
   paymentUri: (address: string, amount: string) => string;
 };
