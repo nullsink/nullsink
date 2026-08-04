@@ -99,13 +99,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-07-24<br>v1.11.0 · Steps 1–2 shipped</div>
+    <div class="stamp">as of 2026-08-04<br>after v1.11.5 · Step 3 partial next</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
-      <title id="roadmap-title">nullsink shipped architecture and next app-box boundary</title>
-      <desc id="roadmap-desc">The shipped system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and version 1.10.1 scrubs the token hash and amount after definite acknowledgement. Version 1.11.0 ships coordinated encrypted recovery artifacts and aggregate reports through a restricted read-only export to an hourly Raspberry Pi collector; scheduled pulling and an offline dry-run restore are proven. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
+      <title id="roadmap-title">nullsink current architecture, next release, and target app-box boundary</title>
+      <desc id="roadmap-desc">The current system has Caddy routing to separate proxy and payments processes. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector. The next release removes operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap steps one through five, a third ledger service owns balances and the proxy becomes stateless, with separate operating-system identities for all services.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -114,9 +114,9 @@
         <marker id="arrowAmber" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#e1a85a"/></marker>
       </defs>
 
-      <!-- SHIPPED TODAY -->
+      <!-- CURRENT + NEXT RELEASE -->
       <rect class="panel" x="28" y="28" width="1344" height="1160" rx="18"/>
-      <text class="section-kicker" x="60" y="70">SHIPPED TODAY</text>
+      <text class="section-kicker" x="60" y="70">CURRENT + NEXT RELEASE</text>
       <text class="section-title" x="60" y="101">two code trust domains · one shared OS identity</text>
 
       <!-- user and edge -->
@@ -175,8 +175,8 @@
       <text class="label-acid" x="700" y="657" text-anchor="middle">credit.sock</text>
 
       <!-- shared OS boundary callout -->
-      <rect class="node-exception" x="340" y="720" width="720" height="42" rx="8"/>
-      <text class="label-amber" x="700" y="746" text-anchor="middle">current limitation · User=nullsink · shared /etc/nullsink.env · shared /var/lib/nullsink</text>
+      <rect class="node-exception" x="270" y="720" width="860" height="42" rx="8"/>
+      <text class="label-amber" x="700" y="746" text-anchor="middle">temporary exceptions · shared uid / env / state · read-only nsk opens live billing databases</text>
 
       <!-- provider egress -->
       <text class="section-kicker" x="100" y="820">PROVIDER EGRESS</text>
@@ -215,22 +215,26 @@
 
       <!-- control plane -->
       <text class="section-kicker" x="100" y="1092">CONTROL PLANE</text>
-      <rect class="node-exception" x="100" y="1110" width="250" height="58" rx="9"/>
-      <text class="title" x="125" y="1139">nsk · direct DB writer</text>
-      <text class="copy-small" x="125" y="1157">opens both DBs · temporary exception</text>
+      <rect class="node-exception" x="100" y="1110" width="230" height="58" rx="9"/>
+      <text class="title" x="125" y="1139">read-only nsk</text>
+      <text class="copy-small" x="125" y="1157">live DB reads · temporary</text>
 
-      <rect class="node-shipped" x="430" y="1110" width="260" height="58" rx="9"/>
-      <text class="title" x="455" y="1139">coordinated snapshot</text>
-      <text class="copy-small" x="455" y="1157">matched DBs + aggregate report</text>
-      <path class="edge-control" d="M690 1139 L732 1139" marker-end="url(#arrowBlue)"/>
-      <rect class="node-shipped" x="740" y="1110" width="210" height="58" rx="9"/>
-      <text class="title" x="765" y="1139">age encryption</text>
-      <text class="copy-small" x="765" y="1157">offline recipient</text>
-      <path class="edge-control" d="M950 1139 L992 1139" marker-end="url(#arrowBlue)"/>
-      <rect class="node-shipped" x="1000" y="1102" width="300" height="74" rx="9"/>
-      <text class="title" x="1025" y="1132">Pi pull collector</text>
-      <text class="copy-small" x="1025" y="1152">hourly · 90d · no age identity</text>
-      <text class="copy-small" x="1150" y="1170" text-anchor="middle">shipped v1.11 · restore proven</text>
+      <rect class="node-shipped" x="360" y="1110" width="210" height="58" rx="9"/>
+      <text class="title" x="385" y="1139">report reader</text>
+      <text class="copy-small" x="385" y="1157">aggregate · no DB access</text>
+      <path class="edge-control" d="M640 1139 L578 1139" marker-end="url(#arrowBlue)"/>
+      <rect class="node-shipped" x="640" y="1110" width="230" height="58" rx="9"/>
+      <text class="title" x="665" y="1139">coordinated snapshot</text>
+      <text class="copy-small" x="665" y="1157">matched DBs + report</text>
+      <path class="edge-control" d="M870 1139 L912 1139" marker-end="url(#arrowBlue)"/>
+      <rect class="node-shipped" x="920" y="1110" width="145" height="58" rx="9"/>
+      <text class="title" x="945" y="1139">age</text>
+      <text class="copy-small" x="945" y="1157">offline key</text>
+      <path class="edge-control" d="M1065 1139 L1092 1139" marker-end="url(#arrowBlue)"/>
+      <rect class="node-shipped" x="1100" y="1102" width="200" height="74" rx="9"/>
+      <text class="title" x="1125" y="1132">Pi collector</text>
+      <text class="copy-small" x="1125" y="1152">hourly · 90d</text>
+      <text class="copy-small" x="1200" y="1170" text-anchor="middle">restore proven</text>
 
       <!-- AFTER STEPS 1-5 -->
       <rect class="panel" x="28" y="1225" width="1344" height="585" rx="18"/>

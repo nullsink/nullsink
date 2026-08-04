@@ -1,33 +1,19 @@
-// `nsk <command> [args]` — the operator CLI, compiled to a standalone binary (nsk-linux-x64) from the SAME
-// tag/CI run as the server, so the two can't drift. Box-ops subcommands only; they open the on-disk SQLite
-// ledger, so run them as the service user (e.g. `sudo -u nullsink nsk balance <hash>`). The dev-only
-// sync-prices tool and the buyer-side gen-token tool are deliberately NOT bundled here.
-//
-// Subcommands are loaded with dynamic import(), NOT static imports: each opens its on-disk ledger INSIDE its
-// run() (after the root guard below), and lazy-loading keeps `version`/usage from pulling the ledger modules
-// at all. The guard-before-open guarantee now rests on run() opening the DB — never at module top (see the
-// note in each subcommand). KEEP index.ts's own static imports light (version + guard).
+// Transitional on-box reader. It deliberately exposes only the two read-only views still needed by operations;
+// funding and recovery commands are absent. Dynamic imports keep version/usage DB-free and let the root guard
+// run before either SQLite store opens.
 import { BUILD_VERSION } from "../src/version";
 import { refuseRootOrExit } from "./guard";
 
 const COMMANDS: Record<string, () => Promise<(args: string[]) => void>> = {
-  issue: () => import("./issue").then((m) => m.runIssue),
-  topup: () => import("./topup").then((m) => m.runTopup),
-  balance: () => import("./balance").then((m) => m.runBalance),
   balances: () => import("./balances").then((m) => m.runBalances),
   financials: () => import("./financials").then((m) => m.runFinancials),
-  orders: () => import("./orders").then((m) => m.runOrders),
 };
 
 const USAGE =
   "usage: nsk <command> [args]\n\n" +
   "commands:\n" +
-  "  issue <dollars>             mint a token worth $N, print it once\n" +
-  "  topup <hash> <dollars>      add $N to an existing token\n" +
-  "  balance <hash>              print a token's remaining balance\n" +
-  "  balances [--format table|csv|json]                               every token's hash + balance\n" +
-  "  financials [--since ..] [--until ..] [--format table|csv|json]   sales journal + liability\n" +
-  "  orders [--rail monero|bitcoin] [--format table|csv|json]         in-flight (unpaid) payment orders\n" +
+  "  balances [--format table|csv|json]                               every token hash + live balance\n" +
+  "  financials [--since ..] [--until ..] [--format table|csv|json]   live sales journal + liability\n" +
   "  version                     print the build version";
 
 const cmd = process.argv[2];
@@ -40,12 +26,10 @@ if (!load) {
   console.error(cmd ? `${USAGE}\n\nunknown command: ${cmd}` : USAGE);
   process.exit(1);
 }
-// Known ledger-opening command resolved — refuse to run as root BEFORE the dynamic import below opens
-// balances.db (a root open strands root-owned -wal/-shm the service user can't write; see guard.ts).
 refuseRootOrExit(cmd);
 load()
   .then((run) => run(process.argv.slice(3)))
-  .catch((err) => {
-    console.error(err);
+  .catch((error) => {
+    console.error(error);
     process.exit(1);
   });

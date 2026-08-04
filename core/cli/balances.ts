@@ -1,40 +1,24 @@
-// List every token's remaining balance (`nsk balances [--format table|csv|json]`) — the per-token view of
-// outstanding credit, for support / ops. Reads only the local ledger (balances.db), writes nothing: each row
-// is the stored SHA-256 hash (NEVER the token — only the hash is on disk; see src/ledger/db.ts) and its
-// micro-dollar balance, so it holds no usable credential and no identity. The count/total footer is
-// liabilityTotal() — the SAME figures `nsk financials` reports as OUTSTANDING — so the two views can't
-// disagree. Run on the box as the service user, like the other CLIs (a root read leaves root-owned WAL
-// sidecars the service can't write):
-//
-//   sudo -u nullsink nsk balances --format table
-//
-// Rows sort by balance, largest first. `table` (default) is a human view: a short hash PREFIX + balance.
-// `csv`/`json` carry the FULL 64-char hash for export (csv prints the rows to stdout and the summary to
-// stderr, so `> balances.csv` yields a clean import file — same convention as `nsk financials`).
-import { openDb, DB_PATH } from "../src/ledger/db";
+// Read-only live liability view. Table output abbreviates stable token hashes; CSV/JSON expose full hashes
+// for deliberate on-box investigation. Run as the service user so SQLite sidecars retain the right owner.
 import { formatUsd } from "../src/ledger/financials";
 import { parseFormat } from "./format";
+import { readBalances } from "./live-db";
 
-// Hash prefix shown in the table view: 16 hex chars = 64 bits, unambiguous for any realistic token count and
-// narrow enough to read. csv/json print the full hash.
 const HASH_PREFIX = 16;
 
 export function runBalances(args: string[]): void {
   const format = parseFormat(args);
-
-  const { listBalances, liabilityTotal } = openDb(DB_PATH); // opened inside run, post-guard (see cli/index.ts)
-  const rows = listBalances();
-  const { tokens, micros } = liabilityTotal(); // count + total — reconciles with `nsk financials`
+  const { rows, tokens, micros } = readBalances();
 
   if (format === "csv") {
     console.log("hash,usd_balance");
-    for (const r of rows) console.log(`${r.hash},${formatUsd(r.balance)}`);
+    for (const row of rows) console.log(`${row.hash},${formatUsd(row.balance)}`);
     console.error(`# tokens=${tokens} prepaid_usd=${formatUsd(micros)}`);
   } else if (format === "json") {
     console.log(
       JSON.stringify(
         {
-          balances: rows.map((r) => ({ hash: r.hash, usd_balance: formatUsd(r.balance) })),
+          balances: rows.map((row) => ({ hash: row.hash, usd_balance: formatUsd(row.balance) })),
           totals: { tokens, prepaid_usd: formatUsd(micros) },
         },
         null,
@@ -44,17 +28,20 @@ export function runBalances(args: string[]): void {
   } else if (rows.length === 0) {
     console.log("(no tokens)");
   } else {
-    // Pad the hash column to its widest cell and right-align the dollar column so the decimals line up.
-    const cells = rows.map((r) => ({ hash: `${r.hash.slice(0, HASH_PREFIX)}…`, amt: `$${formatUsd(r.balance)}` }));
-    const hashW = Math.max("hash".length, ...cells.map((c) => c.hash.length));
-    const amtW = Math.max("balance".length, ...cells.map((c) => c.amt.length));
-    const row = (h: string, a: string) => `  ${h.padEnd(hashW)}  ${a.padStart(amtW)}`;
+    const cells = rows.map((row) => ({
+      hash: `${row.hash.slice(0, HASH_PREFIX)}…`,
+      amount: `$${formatUsd(row.balance)}`,
+    }));
+    const hashWidth = Math.max("hash".length, ...cells.map((cell) => cell.hash.length));
+    const amountWidth = Math.max("balance".length, ...cells.map((cell) => cell.amount.length));
+    const renderRow = (hash: string, amount: string) =>
+      `  ${hash.padEnd(hashWidth)}  ${amount.padStart(amountWidth)}`;
     console.log(
       [
-        row("hash", "balance"),
-        row("-".repeat(hashW), "-".repeat(amtW)),
-        ...cells.map((c) => row(c.hash, c.amt)),
-        ``,
+        renderRow("hash", "balance"),
+        renderRow("-".repeat(hashWidth), "-".repeat(amountWidth)),
+        ...cells.map((cell) => renderRow(cell.hash, cell.amount)),
+        "",
         `  ${tokens} token${tokens === 1 ? "" : "s"}  ·  $${formatUsd(micros)} outstanding`,
       ].join("\n"),
     );

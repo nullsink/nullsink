@@ -4,9 +4,9 @@
 # alerting stack — the app box stays the single pager and probes this node's RPC over WireGuard.
 # Run as root on a fresh Ubuntu box: `bash setup-nodes.sh`. Idempotent — safe to re-run.
 #
-# The watch-only wallet is MIGRATED from the app box (backupwallet -> transfer over WG -> restorewallet),
-# NEVER re-imported: an order's PK is the wallet's derivation index (src/rails/bitcoin.ts pathIndex), so a
-# fresh keypool would collide with already-keyed orders, and a pruned node can't rescan history.
+# This script installs the common host prerequisites only. Chain bootstrap, wallet migration/recovery,
+# authentication, and cutover are incident-specific operations: review the live topology and generate a
+# fresh, bounded procedure when needed instead of relying on a permanently maintained migration runbook.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 
@@ -96,21 +96,18 @@ else
 fi
 
 step "Configuring bitcoind"
-# (Re)start only once the conf AND a chain exist. The blocks/ check is load-bearing: a re-run between
-# runbook steps 2 (conf written) and 3 (chain path chosen) must NOT start bitcoind — a started daemon
-# creates its own LevelDB + block-obfuscation key, which poisons the fast-path rsync seed (recovery is
-# stop + rm -rf blocks/ chainstate/). The operator starts it per the runbook's step-3 path instead.
+# (Re)start only once the box-specific conf AND a chain exist. Starting prematurely creates local chain
+# state and can invalidate a planned seeded-chain transfer, so setup leaves an incomplete node stopped.
 if [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ] && [ -d /var/lib/bitcoind/blocks ]; then
   systemctl enable bitcoind
   systemctl restart bitcoind   # restart so a unit/conf change takes effect
   note "bitcoind (re)started — watch: bitcoin-cli -datadir=/var/lib/bitcoind getblockchaininfo (wait for initialblockdownload:false)"
 elif [ -f /var/lib/bitcoind/bitcoin.conf ]; then
-  note "conf present but no chain yet — choose the runbook's step-3 path (fast-path seed or IBD) before starting bitcoind"
+  note "conf present but no chain yet — choose and review a chain-bootstrap plan before starting bitcoind"
 else
-  note "bitcoind NOT started yet — finish the runbook, then: systemctl enable --now bitcoind"
+  note "bitcoind NOT started — finish box-specific chain, wallet, WireGuard, and RPC configuration first"
 fi
 
-step "Done — continue with the node-box runbook"
-note "NEXT: deploy/node-box-runbook.md — the ordered runbook (7 steps: WG -> conf -> SYNC -> drain+migrate -> rpcauth -> verify -> decommission)."
-note "Two absolutes: let IBD FINISH before draining the rail (the drain window must be minutes, not the sync),"
-note "and MIGRATE the wallet (backupwallet -> restorewallet) — never re-import from the xpub."
+step "Done — prerequisites installed"
+note "Before enabling Bitcoin, generate and review a procedure for this box's current chain, wallet, RPC,"
+note "WireGuard, drain, verification, and rollback state. setup-nodes.sh intentionally does not encode it."

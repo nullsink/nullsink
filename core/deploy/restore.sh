@@ -209,8 +209,7 @@ done
 # proved each scrubbed tombstone has a matching ledger marker. `hash <> ''` selects real credits only:
 # settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
-# Run as the SERVICE USER: root would open these WAL databases and strand root-owned -wal/-shm sidecars that
-# break the services' billing writes (the same trap cli/guard.ts exists to prevent).
+# Run as the SERVICE USER: root would leave root-owned WAL sidecars and break billing writes.
 if [ -f "$DB_DIR/pending.db" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
   # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it
@@ -258,8 +257,8 @@ else
 fi
 
 systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
-echo "--- restored + both services restarted. Verify with the financials CLI + curl localhost:8080/healthz"
-echo "    and localhost:8081/healthz; watch for '[credit] delivered N credit(s)' in:"
+echo "--- restored + both services restarted. Verify with nsk financials, both /healthz endpoints,"
+echo "    the next finalized aggregate report, and credit delivery in:"
 echo "      journalctl -u $PAYMENTS_UNIT -f"
 echo "    then remove the $DB_DIR/*.prerestore safety copies once you're happy. ---"
 exit 0

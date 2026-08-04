@@ -1,51 +1,63 @@
-// `nsk financials` is a TWO-DB command: the sales journal comes from pending.db
-// (listRevenue) and the outstanding-credit liability from balances.db (liabilityTotal). Drive the REAL CLI in a
-// subprocess (same pattern as guard.test.ts) so a DB swap — reading `revenue` from balances.db, where the table
-// no longer exists — would surface as a "no such table" crash here rather than silently in prod.
-import { test, expect, afterEach } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { openOrderStore } from "../src/ledger/orders";
 import { openDb } from "../src/ledger/db";
+import { openOrderStore } from "../src/ledger/orders";
 import { ATOMIC_PER_XMR } from "../src/rails/units";
 
-const B = "/tmp/nullsink-fin-balances.db";
-const P = "/tmp/nullsink-fin-pending.db";
+const BALANCES = "/tmp/nullsink-fin-balances.db";
+const PENDING = "/tmp/nullsink-fin-pending.db";
 const CLI = fileURLToPath(new URL("../cli/index.ts", import.meta.url));
-const rm = (p: string) => {
-  for (const s of ["", "-wal", "-shm"]) {
+
+function removeDb(path: string): void {
+  for (const suffix of ["", "-wal", "-shm"]) {
     try {
-      unlinkSync(p + s);
+      unlinkSync(path + suffix);
     } catch {
-      /* absent */
+      // absent
     }
   }
-};
+}
+
 afterEach(() => {
-  rm(B);
-  rm(P);
+  removeDb(BALANCES);
+  removeDb(PENDING);
 });
 
-test("nsk financials reads the sales journal from pending.db and the liability from balances.db", () => {
-  rm(B);
-  rm(P);
-  // a $16.50-gross monero sale in pending.db; a separate $40 token balance in balances.db.
-  const orders = openOrderStore(P);
-  orders.recordRevenue(1_700_000_000_000, "monero", 100_000_000_000, ATOMIC_PER_XMR, 15_000_000, 16_500_000);
+test("nsk financials reads exact live sales and liability from their owning databases", () => {
+  removeDb(BALANCES);
+  removeDb(PENDING);
+  const orders = openOrderStore(PENDING);
+  orders.recordRevenue(
+    1_700_000_000_000,
+    "monero",
+    100_000_000_000,
+    ATOMIC_PER_XMR,
+    15_000_000,
+    16_500_000,
+  );
   orders.db.close();
-  const balances = openDb(B);
+  const balances = openDb(BALANCES);
   balances.credit("h".repeat(64), 40_000_000);
   balances.db.close();
 
-  const r = Bun.spawnSync({
+  const result = Bun.spawnSync({
     cmd: [process.execPath, CLI, "financials", "--format", "json"],
-    env: { ...process.env, DB_PATH: B, PENDING_DB_PATH: P, NSK_ALLOW_ROOT: "1" },
+    env: { ...process.env, DB_PATH: BALANCES, PENDING_DB_PATH: PENDING, NSK_ALLOW_ROOT: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });
-  expect(r.exitCode).toBe(0); // no "no such table" crash from a mis-wired DB
-  const out = JSON.parse(r.stdout.toString());
-  expect(out.totals.sales).toBe(1); // the sale — from pending.db
-  expect(out.totals.gross_usd).toBe("16.500000"); // gross — from the pending.db revenue row
-  expect(out.outstanding.prepaid_usd).toBe("40.000000"); // liability — from balances.db (a different store)
+  expect(result.exitCode).toBe(0);
+  const output = JSON.parse(result.stdout.toString());
+  expect(output.sales).toEqual([
+    {
+      date: "2023-11-14T22:13:20.000Z",
+      asset: "monero",
+      coin: "0.100000000000",
+      usd_credited: "15.000000",
+      usd_gross: "16.500000",
+    },
+  ]);
+  expect(output.totals).toMatchObject({ sales: 1, credit_usd: "15.000000", gross_usd: "16.500000" });
+  expect(output.outstanding).toEqual({ tokens: 1, prepaid_usd: "40.000000" });
 });

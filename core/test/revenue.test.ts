@@ -1,4 +1,4 @@
-// Revenue book (cli/financials.ts data source), PAYMENTS TRUST DOMAIN state in pending.db. settle() books a
+// Revenue book, PAYMENTS TRUST DOMAIN state in pending.db. settle() books a
 // sale in the SAME transaction as the outbox enqueue: booked iff a credit is requested, a re-scan double-counts
 // neither, gross (USD paid) is valued at the order's LOCKED rate so it never drifts when MARGIN changes, and
 // each row carries its coin (asset + scale) so a multi-rail book renders every coin exactly. The balance credit
@@ -74,10 +74,10 @@ test("listRevenue filters by [fromMs, toMs) — from inclusive, to exclusive", (
   expect(store.listRevenue(150, 300).map((r) => r.at)).toEqual([200]); // 100 below `from`, 300 == `to` (exclusive)
 });
 
-test("the manual-issuance path (creditOnce) credits but books no sale — revenue is settle's job now", () => {
+test("ledger credit application does not book payment-side revenue", () => {
   const balances = openDb(":memory:");
   const hash = "c".repeat(64);
-  expect(balances.creditOnce(hash, 1_000_000, "manual:1", 1)).toBe(true);
+  expect(balances.creditOnce(hash, 1_000_000, "payment:1", 1)).toBe(true);
   expect(balances.getBalance(hash)).toBe(1_000_000);
   // creditOnce no longer touches any sales book — the balance ledger holds no revenue table.
 });

@@ -73,7 +73,7 @@ export function openOrderStore(path: string) {
 )`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_outbox_unacked ON credit_outbox (created_at) WHERE acked_at IS NULL`);
 
-  // revenue: append-only sales book (cli/financials.ts data source). One row per credited payment: WHEN, the
+  // revenue: append-only sales book. One row per credited payment: WHEN, the
   // coin (`asset` + `scale` = atomic-units-per-whole) and how much of it landed (`asset_atomic`), and the USD
   // credit issued. Holds NO token hash / address / identity — a "$X sale at time T", not a request log. It
   // lives here rather than in balances.db so coin amounts, locked rates, and txid-derived keys stay out of
@@ -259,7 +259,7 @@ export function openOrderStore(path: string) {
     recordRevenueStmt.run(atMs, asset, assetAtomic, scale, usdMicros, grossMicros);
   }
 
-  // Sales rows in [fromMs, toMs) (default: everything). The cli/financials.ts data source.
+  // Sales rows in [fromMs, toMs) (default: everything). Used by tests and invariants.
   function listRevenue(fromMs = 0, toMs = Number.MAX_SAFE_INTEGER): { at: number; asset: string; asset_atomic: number; scale: number; usd_micros: number; gross_micros: number }[] {
     return listRevenueStmt.all(fromMs, toMs);
   }
@@ -297,9 +297,8 @@ export function openOrderStore(path: string) {
 
 export type OrdersStore = ReturnType<typeof openOrderStore>;
 
-// Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The composition root
-// (src/payments.ts) and `nsk orders` pass this to openOrderStore(); nothing opens at import time — see the
-// note in ledger/db.ts on why the two-process design forbids a module-load singleton.
+// Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The payments composition root
+// passes this to openOrderStore(); nothing opens at import time.
 export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
 
 function defaultPendingPath(): string {

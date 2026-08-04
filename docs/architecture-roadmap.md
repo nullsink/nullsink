@@ -4,17 +4,18 @@ Status source for [issue #58](https://github.com/nullsink/nullsink/issues/58). T
 diagram source is [`architecture-roadmap.html`](architecture-roadmap.html); the rendered
 artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
-![nullsink architecture: shipped today and the next app-box boundary](architecture-roadmap.png)
+![nullsink architecture: current system, next release, and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-07-24, v1.11.0
+## Status — 2026-08-04, after v1.11.5
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
-| Dedicated Bitcoin node box | **Shipped** in v1.4.x | `deploy/node-box-runbook.md`; RPC crosses WireGuard. |
+| Dedicated Bitcoin node box | **Shipped** in v1.4.x | `deploy/setup-nodes.sh`; RPC crosses WireGuard. |
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
+| Operator database access | **Reduced in the next release** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -35,8 +36,9 @@ Production is two application processes on one box:
   code out of the proxy binary.
 
 This is an application-level trust boundary, not yet an OS security boundary. Both units run
-under the same Linux identity and read the same environment file. `nsk` is the explicit
-cross-boundary exception: operator commands may open both databases directly.
+under the same Linux identity and read the same environment file, so either process can still bypass the
+TypeScript boundary through filesystem permissions. Read-only `nsk financials` is the explicit operator
+exception: it opens both databases for live reconciliation but cannot mutate them.
 
 Provider routing is deliberately asymmetric. Anthropic and OpenAI are reached directly over
 TLS. Only Tinfoil traffic traverses the local `tinfoil-proxy`, which attests Tinfoil's remote
@@ -81,13 +83,21 @@ completed the first scheduled pull, and a retained Pi ciphertext passed the revi
 restore on the trusted machine with the offline identity. No plaintext database or decryption identity
 crossed into the collector.
 
-### 3. Retire direct database access by `nsk`
+### 3. Retire operator mutation; narrow live reads — partial in the next release
 
-Move issue/top-up onto an operator-authenticated administrative outbox that uses the same one-way
-credit crossing. Replace balance and financial direct reads with narrow read interfaces or
-offline snapshot reporting. The raw token is minted locally; only its hash crosses the admin path.
+Delete issue, top-up, order inspection, and recovery commands instead of building an administrative
+outbox. The normal `/buy` flow handles initial and repeat funding. Keep only the two actively used,
+read-only live views: per-token balances and the sales/liability financial view. They are on-box tools;
+stable token hashes and exact sale rows never enter retained reports.
 
-Gate: no operator command needs write access to both live databases.
+Finalized aggregate reports remain the routine off-box view. The local report reader validates the exact
+schema and shows sales, liability, open orders, and undelivered-credit diagnostics without opening SQLite.
+The obsolete Bitcoin recovery runbook is removed; generate a bounded procedure from live topology if an
+exceptional recovery is required.
+
+Gate for this slice: the released CLI exposes exactly `balances` and `financials`, neither can write, and
+all funding uses `/buy`. Remaining gate: replace both database readers with service-owned read interfaces
+during OS separation and ledger extraction, then retire `nsk`.
 
 ### 4. Enforce OS privilege separation
 
