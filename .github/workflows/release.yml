@@ -1,6 +1,5 @@
-# Build the self-contained linux-x64 artifacts (`bun build --compile`) for the two server processes, build
-# the client UI (Vite), and attach them — with a SHA256SUMS file — to the GitHub Release for a tag: the proxy
-# + payments binaries, deploy/ tarball, and client UI tarball.
+# Build the self-contained linux-x64 artifacts (`bun build --compile`) for the two services and the read-only
+# operator CLI, then attach them with the deploy tree, client UI, checksums, and provenance.
 # These are the verifiable artifacts a box downloads + checksums + serves/runs directly (no source/Bun on the
 # box). The two server binaries are ONE release and the box installs them in lockstep (deploy/lib.sh's
 # install_binary): they speak a versioned credit wire, and a mismatched pair fails closed.
@@ -43,13 +42,14 @@ jobs:
         run: |
           printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > core/src/version.ts     # baked into both binaries
           printf 'export const BUILD_VERSION = "%s";\n' "$TAG" > client/src/version.ts   # baked into the client UI bundle (shown by the wordmark)
-      - name: build server binaries (linux-x64)
+      - name: build service and read-only operator binaries (linux-x64)
         run: |
           # `build` compiles BOTH service binaries and then runs assert-trust-domains.ts, which verifies the parsed
           # source graph, Bun's bundled-input metadata, and executable symbols. A cross-trust-domain import fails the
           # release, not just CI.
           bun --filter './core' build       # -> core/nullsink-{proxy,payments}-linux-x64 (same script CI smoke-checks on every PR)
-          mv core/nullsink-proxy-linux-x64 core/nullsink-payments-linux-x64 .   # to repo root so the asset names = basenames the box fetches
+          bun --filter './core' build:nsk   # -> core/nsk-linux-x64 (balances + financials only)
+          mv core/nullsink-proxy-linux-x64 core/nullsink-payments-linux-x64 core/nsk-linux-x64 .
       - name: build client UI (Vite + prerender)
         run: bun --filter './client' build   # -> client/dist (the static UI Caddy serves at the edge)
       - name: package deploy tree + client UI
@@ -57,13 +57,14 @@ jobs:
           tar -czf "deploy-${TAG}.tar.gz" -C core deploy        # box fetches + extracts this instead of cloning source
           tar -czf "nullsink-ui-${TAG}.tar.gz" -C client dist    # box extracts this into the versioned webroot
       - name: checksum
-        run: sha256sum nullsink-proxy-linux-x64 nullsink-payments-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
+        run: sha256sum nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
       - name: attest build provenance   # signed SLSA provenance for each artifact (public repo only)
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             nullsink-proxy-linux-x64
             nullsink-payments-linux-x64
+            nsk-linux-x64
             deploy-${{ env.TAG }}.tar.gz
             nullsink-ui-${{ env.TAG }}.tar.gz
             SHA256SUMS
@@ -82,7 +83,7 @@ jobs:
           done <<< "$release_flags_output"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" \
             "${release_flags[@]}" \
-            --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments server binaries (installed in lockstep) + deploy tree + client UI tarball. The box downloads + checksum-verifies these (no source/Bun). Verify checksums: \`sha256sum -c SHA256SUMS\`. Verify provenance (any authenticated GitHub user): \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments services, read-only operator CLI, deploy tree, and client UI. Verify checksums with \`sha256sum -c SHA256SUMS\` and provenance with \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
           gh release upload "$TAG" \
-            nullsink-proxy-linux-x64 nullsink-payments-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
+            nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
             --clobber

@@ -257,8 +257,8 @@ else
 fi
 
 systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
-echo "--- restored + both services restarted. Verify curl localhost:8080/healthz and localhost:8081/healthz;"
-echo "    generate the next finalized aggregate report, and watch credit delivery in:"
+echo "--- restored + both services restarted. Verify with nsk financials, both /healthz endpoints,"
+echo "    the next finalized aggregate report, and credit delivery in:"
 echo "      journalctl -u $PAYMENTS_UNIT -f"
 echo "    then remove the $DB_DIR/*.prerestore safety copies once you're happy. ---"
 exit 0

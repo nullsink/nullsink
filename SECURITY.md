@@ -36,7 +36,7 @@ This project's threat model is money + privacy, so these rank highest:
 
 ## Scope
 
-**In scope:** the code in this repository — the services and local tools (`core/src`, `core/cli`), the dev
+**In scope:** the code in this repository — the services and operator/local tools (`core/src`, `core/cli`), the dev
 scripts (`core/scripts`), the deploy configuration (`core/deploy`), and the purchase UI (`client/`).
 
 **Out of scope:**

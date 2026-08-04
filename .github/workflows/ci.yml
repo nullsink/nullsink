@@ -26,6 +26,7 @@ jobs:
       - run: bun --filter '*' typecheck
       - run: bun --filter '*' test
       - run: bun --filter '*' build          # core: both service binaries + the compiled-binary trust-domain assert; client static bundle (smoke)
+      - run: bun --filter './core' build:nsk  # transitional read-only operator CLI (smoke)
 
   lint:
     # Runs core/scripts/lint.sh — the same gate a developer runs locally — with pinned linters.

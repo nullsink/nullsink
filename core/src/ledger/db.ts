@@ -162,7 +162,5 @@ export function openDb(path: string) {
 export type BalanceStore = ReturnType<typeof openDb>;
 
 // Default on-disk path. The proxy composition root passes this to openDb(); no store is opened at import
-// time — a module-load singleton would reunify the two DBs across the process boundary (the proxy would open
-// pending.db and payments would open balances.db just by importing a shared module). Callers construct and
-// inject their own store instead.
+// time. Callers construct and inject their own store instead.
 export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";

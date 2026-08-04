@@ -1,37 +1,38 @@
-# Local command-line tools
+# Command-line tools
 
-These are workstation-side tools. None is compiled into a release asset, installed on the
-production box, or permitted to open either live billing database.
+## Read-only `nsk`
 
-## Financial reports
-
-`financials.ts` renders the finalized, aggregate-only `report-*.json` produced with each
-validated backup:
+`nsk` is an optional on-box reader with exactly two live commands:
 
 ```sh
-bun run financials -- report-20260724T080000Z.json
-bun run financials -- report-20260724T080000Z.json --since 2026-07-01 --until 2026-08-01
+sudo -u nullsink nsk balances [--format table|csv|json]
+sudo -u nullsink nsk financials [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--format table|csv|json]
 ```
 
-It accepts `-` for stdin, validates the report's exact versioned allowlist, and keeps all
-micro-dollar arithmetic exact:
+`balances` lists token hashes and current balances. `financials` combines the payment-side sales journal
+with current aggregate liability. Both open SQLite read-only at the application level and refuse root by
+default so SQLite cannot leave root-owned sidecars. They are a temporary boundary exception until
+service-owned read interfaces replace them during ledger extraction.
+
+Table output abbreviates token hashes. CSV and JSON contain full stable hashes; keep those exports on the
+app box. `nsk` cannot issue credit, top up a token, inspect open orders, or perform recovery.
+
+Install it explicitly with `sudo deploy/install-nsk.sh`. Subsequent releases keep an installed copy aligned
+with the service version.
+
+## Aggregate financial reports
+
+`report-financials.ts` is the DB-free, workstation-side view of a finalized `report-*.json`:
 
 ```sh
-ssh nullsink-production '
-  latest=$(find /var/lib/nullsink/backups -maxdepth 1 -type f -name "report-*.json" |
-    sort | tail -n 1)
-  test -n "$latest"
-  cat "$latest"
-' | bun run financials -- -
+bun run financial-report -- report-20260724T080000Z.json
+ssh production 'cat /path/to/report.json' | bun run financial-report -- -
 ```
 
-That SSH command reads a finalized report, not SQLite. The same command can target the retained
-copy on the backup collector.
+Reports contain daily/asset sales totals, aggregate liability, and open/undelivered-credit diagnostics—no
+token hashes, exact payment rows, or live database access.
 
 ## Buyer and development tools
 
 - `gen-token.ts` mints a raw token locally and prints it once.
 - `sync-prices.ts` refreshes the checked-in public price snapshot used by development.
-
-The normal `/buy` flow creates or funds tokens after confirmed payment. Routine operator tools
-do not open the live billing databases.

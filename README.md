@@ -9,7 +9,7 @@ Two Bun + TypeScript workspaces:
 
 | Package | What it is |
 | --- | --- |
-| [`core/`](core/) | The metered proxy, payment rails, box deploy machinery, billing ledger, and local aggregate-report tools. Zero runtime dependencies. |
+| [`core/`](core/) | The metered proxy, payment rails, billing ledger, read-only operator CLI, and box deploy machinery. Zero runtime dependencies. |
 | [`client/`](client/) | The purchase UI (Vite + React), served at the edge as static files. |
 
 ## Connect a client
@@ -171,7 +171,8 @@ bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
 bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
 bun run build      # core service binaries (proxy + payments) + client static bundle
-bun run financials -- report-YYYYMMDDTHHMMSSZ.json  # render a finalized aggregate report locally
+bun run build:nsk  # read-only nsk operator binary
+bun run financial-report -- report-YYYYMMDDTHHMMSSZ.json
 ```
 
 Target one package with `bun --filter`, e.g. `bun --filter './client' dev`. To preview just the
@@ -191,9 +192,10 @@ artifacts and publishes them as a GitHub Release:
 
 - **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
 - **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
+- **`nsk-linux-x64`** — optional read-only live balances and financials.
 - **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the four artifacts; the box verifies with `sha256sum -c` before installing.
+- **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
 
 On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
 atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the

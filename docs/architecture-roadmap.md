@@ -6,7 +6,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: current system, next release, and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-07-30, after v1.11.2
+## Status — 2026-08-04, after v1.11.5
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
-| Live operator database access | **Implemented for the next release** | `nsk` and its live issue/top-up/balance/order/financial commands are retired; financials render finalized aggregate reports locally. |
+| Operator database access | **Reduced in the next release** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
 | Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
@@ -36,9 +36,9 @@ Production is two application processes on one box:
   code out of the proxy binary.
 
 This is an application-level trust boundary, not yet an OS security boundary. Both units run
-under the same Linux identity and read the same environment file, so either process can still
-bypass the TypeScript boundary through filesystem permissions. The shipped operator surface no
-longer adds a second direct database path.
+under the same Linux identity and read the same environment file, so either process can still bypass the
+TypeScript boundary through filesystem permissions. Read-only `nsk financials` is the explicit operator
+exception: it opens both databases for live reconciliation but cannot mutate them.
 
 Provider routing is deliberately asymmetric. Anthropic and OpenAI are reached directly over
 TLS. Only Tinfoil traffic traverses the local `tinfoil-proxy`, which attests Tinfoil's remote
@@ -83,22 +83,21 @@ completed the first scheduled pull, and a retained Pi ciphertext passed the revi
 restore on the trusted machine with the offline identity. No plaintext database or decryption identity
 crossed into the collector.
 
-### 3. Retire direct database access by `nsk` — implemented for the next release
+### 3. Retire operator mutation; narrow live reads — partial in the next release
 
-Delete the live issue/top-up/balance/order/financial commands instead of building a new
-administrative outbox. The normal `/buy` flow already handles both initial and repeat funding.
-Routine financials read the finalized aggregate-only report produced every four hours; the
-reader runs locally, validates the exact report schema, and opens no SQLite database. A raw token
-can still be minted locally for development, but no production operator command can fund it.
+Delete issue, top-up, order inspection, and recovery commands instead of building an administrative
+outbox. The normal `/buy` flow handles initial and repeat funding. Keep only the two actively used,
+read-only live views: per-token balances and the sales/liability financial view. They are on-box tools;
+stable token hashes and exact sale rows never enter retained reports.
 
-The release no longer builds or publishes `nsk`, and deployment explicitly removes a legacy
-installed copy because extracting a newer deploy tarball cannot delete old files. The obsolete
-Bitcoin migration/recovery runbook is also removed; if an exceptional recovery is needed, generate
-a bounded procedure from the live topology rather than maintaining a permanently actionable
-database-credit workaround.
+Finalized aggregate reports remain the routine off-box view. The local report reader validates the exact
+schema and shows sales, liability, open orders, and undelivered-credit diagnostics without opening SQLite.
+The obsolete Bitcoin recovery runbook is removed; generate a bounded procedure from live topology if an
+exceptional recovery is required.
 
-Gate: no routine online operator CLI opens a live database. Production financial access remains
-available through finalized reports copied from production or the Pi collector.
+Gate for this slice: the released CLI exposes exactly `balances` and `financials`, neither can write, and
+all funding uses `/buy`. Remaining gate: replace both database readers with service-owned read interfaces
+during OS separation and ledger extraction, then retire `nsk`.
 
 ### 4. Enforce OS privilege separation
 

@@ -7,7 +7,8 @@
     "typecheck": "bun --filter '*' typecheck",
     "test": "bun --filter '*' test",
     "build": "bun --filter '*' build",
-    "financials": "bun run core/cli/financials.ts",
+    "build:nsk": "bun --filter './core' build:nsk",
+    "financial-report": "bun run core/cli/report-financials.ts",
     "lint": "cd core && scripts/lint.sh",
     "dev": "bun --filter '*' dev"
   }

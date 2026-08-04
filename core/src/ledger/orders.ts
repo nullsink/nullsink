@@ -298,8 +298,7 @@ export function openOrderStore(path: string) {
 export type OrdersStore = ReturnType<typeof openOrderStore>;
 
 // Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The payments composition root
-// passes this to openOrderStore(); nothing opens at import time — see ledger/db.ts on why the two-process
-// design forbids a module-load singleton.
+// passes this to openOrderStore(); nothing opens at import time.
 export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
 
 function defaultPendingPath(): string {

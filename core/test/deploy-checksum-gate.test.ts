@@ -1,6 +1,6 @@
 // The deploy checksum gate is the ONLY thing between a corrupted/tampered release asset and an
 // installed+activated binary — and on the split it guards BOTH the proxy and payments binaries the sealed
-// tier attests. #79 fixed a silent bypass: install_binary/install_deploy_tree/install_client_ui
+// tier attests. #79 fixed a silent bypass: install_binary/install_nsk/install_deploy_tree/install_client_ui
 // are invoked as `if install_binary ...` in setup.sh/deploy.sh, and bash SUSPENDS `set -e` for the whole body
 // of a function called in a condition, so a bare `sha256sum -c` failure would fall THROUGH to install + the
 // `ln -sfn` activation while the function still returned success. The fix routes every gate through
@@ -74,10 +74,10 @@ test("the gate holds when called under `if` with set -e suspended — the #79 by
 
 test("every install_* site routes its checksum through verify_sums (no bare `sha256sum -c` at an install site)", () => {
   const lib = readFileSync(LIB, "utf8");
-  // All three asset installers must gate via verify_sums with an explicit `|| return 1`. Tolerant of the temp-var
+  // All four asset installers must gate via verify_sums with an explicit `|| return 1`. Tolerant of the temp-var
   // name and spacing so a benign rename doesn't trip it — only the SHAPE (verify_sums <dir> || return 1) matters.
   const gates = lib.match(/verify_sums "\$\w+"\s*\|\|\s*return 1/g) ?? [];
-  expect(gates.length).toBe(3); // install_binary, install_deploy_tree, install_client_ui
+  expect(gates.length).toBe(4); // install_binary, install_nsk, install_deploy_tree, install_client_ui
   // And none may fall back to the bare form that #79 removed (the shape set -e suspension bypasses). Target the
   // install-site temp var ("$tmp") specifically: verify_sums's OWN body legitimately runs `cd "$1" && sha256sum
   // -c`, so a looser pattern would false-match the very helper this gate routes through.
