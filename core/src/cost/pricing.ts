@@ -163,20 +163,6 @@ export function isOffCardModel(model: string): boolean {
   return OFF_CARD_MODEL_MARKERS.some((m) => model.includes(m));
 }
 
-// OpenAI REASONING model families (o-series, gpt-5). Their billed "thinking" tokens count as OUTPUT but
-// NEVER appear in the streamed text, so the streaming-disconnect char-estimate (usage.ts) is blind to them
-// and would massively under-bill. For these, the disconnect path bills the output CAP instead (a sound
-// upper bound — reasoning can fill it). Anthropic extended-thinking is NOT here: its scanner reads the
-// cumulative output_tokens (thinking included) off each delta, so its disconnect bill is already
-// reasoning-aware. Prefix-matched and curated — maintain as OpenAI ships new reasoning families.
-const REASONING_MARKERS = ["o1", "o3", "o4", "gpt-5"];
-export function isReasoningModel(model: string): boolean {
-  // The -chat variants (gpt-5-chat-latest, gpt-5.x-chat-latest) are the NON-reasoning, chat-tuned members
-  // of an otherwise reasoning family: all their output is visible streamed text, so the disconnect char
-  // estimate is accurate for them and billing the cap would overcharge an honest early abort.
-  return REASONING_MARKERS.some((m) => model.startsWith(m)) && !model.includes("-chat");
-}
-
 // --- Pure cost math: a Rate in, micro-dollars out. No model id, no findRate, no prices.json — so the cost
 // engine is reusable against any rate source. The model-string wrappers below (priceUsage / priceHoldBound)
 // are the ONLY things that touch the table; they resolve a Rate and delegate here. ---

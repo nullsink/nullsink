@@ -279,6 +279,37 @@ test("upstream errors: safe semantics preserved, operator state masked (always r
   errSpy.mockRestore();
 });
 
+test("buffered 2xx body-read failure bills only a conservative input floor", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const upstream: Upstream = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"model":"claude-opus-4-8","content":"partial'));
+        controller.error(new Error("body broke after 2xx"));
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const { handler, balances } = makeHandler(upstream);
+    const token = "pr_buffered_read_fail";
+    const initial = 10_000_000_000;
+    const body = { model: "claude-opus-4-8", max_tokens: 1000, messages: [{ role: "user", content: "hello" }] };
+    balances.credit(hashToken(token), initial);
+
+    const res = await handler(messagesReq(token, body));
+
+    expect(res.status).toBe(502);
+    const inputFloor = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+    expect(initial - balances.getBalance(hashToken(token))!).toBe(priceUsage(body.model, {
+      input_tokens: inputFloor,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    }));
+    expect(holdsCount(balances)).toBe(0);
+  } finally {
+    errSpy.mockRestore();
+  }
+});
+
 test("masked errors preserve a numeric Retry-After so clients still back off on the provider's delay", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const upstream: Upstream = async () => new Response("slow down", { status: 429, headers: { "content-type": "text/plain", "retry-after": "30" } });
@@ -525,7 +556,7 @@ test("streaming: a client disconnect with no usage frame bills the input floor (
   const model = "claude-opus-4-8";
   const body = { model, max_tokens: 1000, stream: true, messages: [{ role: "user", content: "x".repeat(4000) }] };
   const { inputTokens } = byteBoundHold({ model, raw: JSON.stringify(body), body, maxTokens: 1000 });
-  const expectedFloor = priceUsage(model, { input_tokens: inputTokens, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
+  const expectedFloor = priceUsage(model, { input_tokens: Math.ceil(inputTokens / 4), output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 });
 
   let cancelled = false;
   const events = Array.from({ length: 20 }, () => ({ type: "ping" })); // never a message_start → never any usage
@@ -546,8 +577,8 @@ test("streaming: a client disconnect with no usage frame bills the input floor (
 test("streaming: an upstream error frame THEN a client disconnect still refunds in full (no input floor)", async () => {
   // The error+cancel coincidence: a 200-then-error stream where the client aborts on the error event
   // (common client behaviour) must NOT bill the input floor — the upstream failed and the client got
-  // nothing usable. The floor is for a CLEAN early disconnect only; an errored stream full-refunds whether
-  // the client drains it (the test above) or cancels on the error. The upstream has no usage frame, so
+  // nothing usable. With no usage evidence, an errored stream full-refunds whether the client drains it
+  // (the test above) or cancels on the error. The upstream has no usage frame, so
   // result() stays null; scan.errored() (set by the error event) is what blocks the floor here.
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const model = "claude-opus-4-8";
@@ -664,7 +695,13 @@ test("streaming: draining the inflight registry cancels upstream and bills the m
   await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
   expect(inflight.size).toBe(0);
   expect(cancelled).toBe(true); // shutdown must stop upstream work; otherwise server.stop(true) waits for its timeout
-  await expect(reader.read()).rejects.toThrow("shutdown_drain"); // downstream is terminated too; hard stop cannot hang on it
+  // The body must still abort, but with no error reason: Bun prints a supplied Error as an application stack
+  // trace even though this is expected shutdown control flow. An omitted reason rejects the reader silently.
+  const downstreamTermination = await reader.read().then(
+    () => ({ state: "resolved" as const, reason: undefined }),
+    (reason: unknown) => ({ state: "rejected" as const, reason }),
+  );
+  expect(downstreamTermination).toEqual({ state: "rejected", reason: undefined });
   const partial = priceUsage(model, { input_tokens: 1000, output_tokens: 300 });
   expect(initial - balances.getBalance(hashToken(token))!).toBe(partial); // partial billed, not the 9999
   expect([metrics.snapshot().served, metrics.snapshot().servedPartial, metrics.snapshot().streamAborted]).toEqual([0, 1, 0]);

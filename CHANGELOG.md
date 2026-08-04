@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.11.5](https://github.com/nullsink/nullsink/compare/v1.11.4...v1.11.5) (2026-08-04)
+
+
+### Bug Fixes
+
+* make failure billing evidence-based ([#148](https://github.com/nullsink/nullsink/issues/148)) ([d803ca6](https://github.com/nullsink/nullsink/commit/d803ca66981420b7bca82b408767bb76d7fe1909))
+* silence expected shutdown drain error ([#150](https://github.com/nullsink/nullsink/issues/150)) ([b0b91f0](https://github.com/nullsink/nullsink/commit/b0b91f07eb028826a300a1d524ba1ef2641f1b83))
+
+## [1.11.4](https://github.com/nullsink/nullsink/compare/v1.11.3...v1.11.4) (2026-08-01)
+
+
+### Bug Fixes
+
+* **pricing:** make rate sync resilient to price changes ([#146](https://github.com/nullsink/nullsink/issues/146)) ([159c2e0](https://github.com/nullsink/nullsink/commit/159c2e0ff8167edfacc96433f98c1caab230e268))
+
 ## [1.11.3](https://github.com/nullsink/nullsink/compare/v1.11.2...v1.11.3) (2026-07-30)
 
 

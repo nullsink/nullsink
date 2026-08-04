@@ -11,7 +11,7 @@
 //     user (floor), and the response→request fallback (a request can never end up unpriced/free).
 import { test, expect } from "bun:test";
 import fc from "fast-check";
-import { assertRateInvariants, costOf, holdBoundOf, isPriced, isReasoningModel, mergeRawPrices, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
+import { assertRateInvariants, costOf, holdBoundOf, isPriced, mergeRawPrices, priceHoldBound, priceUsage, type Rate, type Usage } from "../src/cost";
 import prices from "../src/cost/prices.json";
 
 type UsdRate = { provider: string; input: number; output: number; cache_read: number; cache_write: number; cache_write_1h: number };
@@ -184,9 +184,12 @@ test("a NAMED variant is never absorbed by its base id; dated releases still are
   expect(isPriced("gpt-5.6120260101")).toBe(false); // no-dash char + valid date: the dash is load-bearing
   expect(isPriced("o3-deep-research")).toBe(false); // off-card id can't ride its priced base either
   expect(isPriced("gpt-4o-audio-preview")).toBe(false);
-  // Dated releases of a priced id resolve to that id's own rate — the most specific one.
+  // Dated releases of a priced id resolve to that id's own rate — the most specific one. Compare with
+  // the source-backed base id instead of pinning a models.dev dollar value that legitimately changes.
   expect(isPriced("gpt-5.6-luna-2026-01-01")).toBe(true);
-  expect(priceUsage("gpt-5.6-luna-2026-01-01", { input_tokens: 1_000_000 })).toBe(1_000_000); // luna $1, not base $5
+  expect(priceUsage("gpt-5.6-luna-2026-01-01", { input_tokens: 1_000_000 })).toBe(
+    priceUsage("gpt-5.6-luna", { input_tokens: 1_000_000 }),
+  );
   expect(isPriced("claude-opus-4-8-20260101")).toBe(true);
 });
 
@@ -237,28 +240,6 @@ test("fallback: priced primary wins; unpriced primary falls back; neither throws
       expect(() => priceUsage(bad, usage, "also-not-real")).toThrow();
     }),
   );
-});
-
-// The reasoning classification drives the streaming-disconnect bill (usage.ts disconnectOutput): a
-// reasoning model bills the output CAP (its thinking tokens never stream as text), a non-reasoning one
-// the char estimate. The -chat variants are the NON-reasoning members of an otherwise reasoning family —
-// classifying them as reasoning would bill an honest early disconnect the full cap.
-test("isReasoningModel: reasoning families yes, their -chat variants no", () => {
-  expect(isReasoningModel("o1")).toBe(true);
-  expect(isReasoningModel("o3-mini")).toBe(true);
-  expect(isReasoningModel("o4-mini")).toBe(true);
-  expect(isReasoningModel("gpt-5")).toBe(true);
-  expect(isReasoningModel("gpt-5.2-codex")).toBe(true);
-  // The gpt-5.6 tiers reason like the rest of the family (mini/nano precedent) — re-verify against OpenAI's
-  // docs when the family leaves limited preview; a chat-tuned tier without "-chat" in its id would need one.
-  expect(isReasoningModel("gpt-5.6")).toBe(true);
-  expect(isReasoningModel("gpt-5.6-sol")).toBe(true);
-  expect(isReasoningModel("gpt-5.6-terra")).toBe(true);
-  expect(isReasoningModel("gpt-5.6-luna")).toBe(true);
-  expect(isReasoningModel("gpt-5-chat-latest")).toBe(false);
-  expect(isReasoningModel("gpt-5.2-chat-latest")).toBe(false);
-  expect(isReasoningModel("gpt-4o")).toBe(false);
-  expect(isReasoningModel("claude-opus-4-8")).toBe(false);
 });
 
 // The price-table merge is the tripwire for an id served by >1 provider: a duplicate across sources must
