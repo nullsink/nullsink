@@ -695,7 +695,13 @@ test("streaming: draining the inflight registry cancels upstream and bills the m
   await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
   expect(inflight.size).toBe(0);
   expect(cancelled).toBe(true); // shutdown must stop upstream work; otherwise server.stop(true) waits for its timeout
-  await expect(reader.read()).rejects.toThrow("shutdown_drain"); // downstream is terminated too; hard stop cannot hang on it
+  // The body must still abort, but with no error reason: Bun prints a supplied Error as an application stack
+  // trace even though this is expected shutdown control flow. An omitted reason rejects the reader silently.
+  const downstreamTermination = await reader.read().then(
+    () => ({ state: "resolved" as const, reason: undefined }),
+    (reason: unknown) => ({ state: "rejected" as const, reason }),
+  );
+  expect(downstreamTermination).toEqual({ state: "rejected", reason: undefined });
   const partial = priceUsage(model, { input_tokens: 1000, output_tokens: 300 });
   expect(initial - balances.getBalance(hashToken(token))!).toBe(partial); // partial billed, not the 9999
   expect([metrics.snapshot().served, metrics.snapshot().servedPartial, metrics.snapshot().streamAborted]).toEqual([0, 1, 0]);

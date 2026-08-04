@@ -476,7 +476,9 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
             requestedCause = "shutdown_drain"; // mark before cancel wakes a racing reader.read()
             reader.cancel("shutdown_drain").catch(() => {});
             try {
-              streamController?.error(new Error("shutdown_drain"));
+              // Supplying an Error here makes Bun print an application stack trace for this expected
+              // shutdown path. An omitted reason still aborts the body immediately, without the false alarm.
+              streamController?.error();
             } catch {
               /* stream already closed/errored — nothing to terminate */
             }
