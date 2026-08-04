@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/nullsink/nullsink/compare/v1.11.5...v1.12.0) (2026-08-04)
+
+
+### Features
+
+* **architecture:** retire operator writes and narrow live reads ([#141](https://github.com/nullsink/nullsink/issues/141)) ([3d6887c](https://github.com/nullsink/nullsink/commit/3d6887c6c818a1d3fea37439cb68736343dd8060))
+
 ## [1.11.5](https://github.com/nullsink/nullsink/compare/v1.11.4...v1.11.5) (2026-08-04)
 
 
