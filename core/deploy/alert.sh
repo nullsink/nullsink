@@ -8,7 +8,7 @@
 # prompt-derived error snippet in the app log can never reach a third party (Telegram). The operator
 # investigates on the box.
 #
-# Reads TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID from /etc/nullsink.env (the status-alert@ unit's
+# Reads TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID from /etc/nullsink-monitor.env (the status-alert@ unit's
 # EnvironmentFile). If either is unset it is a NO-OP (logs to journald, exits 0) so an unconfigured box
 # doesn't error the alert unit. Get a bot token from @BotFather and your numeric chat id from @userinfobot.
 set -u
@@ -23,7 +23,7 @@ host="$(hostname 2>/dev/null || echo box)"
 ts="$(date -u '+%Y-%m-%d %H:%M UTC')"
 
 if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-  echo "alert: TELEGRAM_BOT_TOKEN/CHAT_ID unset in /etc/nullsink.env — skipping push for $unit" >&2
+  echo "alert: TELEGRAM_BOT_TOKEN/CHAT_ID unset in /etc/nullsink-monitor.env — skipping push for $unit" >&2
   exit 0
 fi
 

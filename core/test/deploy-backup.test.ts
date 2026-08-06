@@ -18,6 +18,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BACKUP = fileURLToPath(new URL("../deploy/backup.sh", import.meta.url));
+const LABEL_EXPORT = fileURLToPath(
+  new URL("../deploy/backup-bitcoin-labels.sh", import.meta.url),
+);
 const HASH = "a".repeat(64);
 const OTHER_HASH = "b".repeat(64);
 const ADDRESS = "bc1q-private-open-order-address";
@@ -151,11 +154,36 @@ test("backup snapshots a matched pair from explicit, separate state directories"
   mkdirSync(balancesDir);
   mkdirSync(pendingDir);
   seedDatabases(balancesDir, {}, pendingDir);
+  const labelsPath = join(pendingDir, "bitcoin-wallet-labels.json");
+  const fakeCurl = join(w.bin, "curl");
+  writeFileSync(
+    fakeCurl,
+    `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = -o ]; then out="$2"; shift 2; else shift; fi
+done
+printf '%s' '{"result":[{"address":"bc1qtest","label":"order:7"}],"error":null}' > "$out"
+`,
+  );
+  chmodSync(fakeCurl, 0o755);
+  const exported = Bun.spawnSync(["bash", LABEL_EXPORT], {
+    env: {
+      ...process.env,
+      PATH: `${w.bin}:${process.env.PATH}`,
+      PAY_RAILS: "bitcoin,monero",
+      BITCOIN_RPC_URL: "http://node.test/wallet/nullsink",
+      BITCOIN_LABELS_PATH: labelsPath,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(exported.exitCode, exported.stderr.toString()).toBe(0);
 
   const result = runBackup({
     PATH: `${w.bin}:${process.env.PATH}`,
     BALANCES_DB_PATH: join(balancesDir, "balances.db"),
     PENDING_DB_PATH: join(pendingDir, "pending.db"),
+    BITCOIN_LABELS_PATH: labelsPath,
     BACKUP_DIR: w.backups,
     BACKUP_AGE_RECIPIENT: "age1test",
     FAKE_AGE_MARKER: w.ageMarker,
@@ -171,7 +199,11 @@ test("backup snapshots a matched pair from explicit, separate state directories"
 
   const members = Bun.spawnSync(["tar", "-tf", join(w.backups, artifactName!)]);
   expect(members.exitCode, members.stderr.toString()).toBe(0);
-  expect(members.stdout.toString().trim().split("\n").sort()).toEqual(["balances.db", "pending.db"]);
+  expect(members.stdout.toString().trim().split("\n").sort()).toEqual([
+    "balances.db",
+    "bitcoin-wallet-labels.json",
+    "pending.db",
+  ]);
 
   const report = JSON.parse(readFileSync(join(w.backups, reportName!), "utf8"));
   expect(report.finance.liability).toEqual({ outstanding_micros: "10000000" });

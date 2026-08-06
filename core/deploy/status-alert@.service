@@ -8,6 +8,6 @@ Description=Telegram alert that %i failed
 
 [Service]
 Type=oneshot
-# Telegram creds live in the app's env file (chmod 600, service-owned). `-` so a missing file doesn't error.
-EnvironmentFile=-/etc/nullsink.env
+# Root-only monitor credentials; `-` so a missing file leaves alert.sh as a safe log-only no-op.
+EnvironmentFile=-/etc/nullsink-monitor.env
 ExecStart=/opt/nullsink/deploy/alert.sh %i

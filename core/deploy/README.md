@@ -9,12 +9,11 @@ no `src/`, no `cli/`, and no Bun. This whole directory ships to the box as a rel
 (`deploy-<tag>.tar.gz`, built by `.github/workflows/release.yml`) and extracts to `/opt/nullsink/deploy/`.
 The units' `ExecStart` lines point straight at these paths.
 
-The app is **two processes**, split by privilege: `nullsink-proxy` serves the metered
+The app is **two processes and two OS principals**, split by privilege: `nullsink-proxy` serves the metered
 `/v1` paths and owns `balances.db`; `nullsink-payments` serves `/buy`, `/order-status`, `/rails`, runs the
 settlement poller, and owns `pending.db`. A request carrying a prompt never reaches the process that holds
-the payment→token link. The only channel between them is a unix socket at `/run/nullsink/credit.sock`, over
-which payments delivers credits in one direction. They share one service user today; splitting the uids
-waits on the admin-plane redesign (see `nullsink-proxy.service` for why).
+the payment→token link. The only channel between them is `/run/nullsink-credit/credit.sock`, where the
+`nullsink-credit` group permits only payments to send one-way credit commands.
 
 See setup.sh to stand up a box, and deploy.sh / upgrade-component.sh / backup.sh for day-2 work (app
 redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This file is just the map.
@@ -28,6 +27,7 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
 | `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
+| `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
 | `install-nsk.sh` | Installs the optional read-only live balances/financials CLI. |
 | `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
 
@@ -37,16 +37,17 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | `status-check.sh` | Rail + app health check (run every 10 min by `status-check.timer`). Privacy-safe: reads the billing DBs only for an integrity pragma, never row content. |
 | `alert.sh` | Pushes a one-line Telegram page. The `OnFailure=` sink for the units, and how `status-check.sh` closes an incident. Sends no request content. |
 | `backup.sh` | Four-hour coordinated (`sqlite3 .backup`) snapshot of the billing DBs; validates the pair, atomically publishes the recovery artifact, optionally age-encrypts/pushes it, and emits an aggregate-only report. |
+| `backup-bitcoin-labels.sh` | Payments-owned, best-effort export of watch-only Bitcoin labels for the next artifact; backup never receives wallet RPC credentials. |
 | `backup-report.sh` | Builds the versioned privacy-safe JSON report from backup snapshots: daily/asset revenue, aggregate liability, and open/undelivered-credit health—never token/payment linkage. |
 | `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` to replace the live DBs, re-arm the credit outbox, and restart both services. |
 | `backup-collector/` | Role-specific Raspberry Pi pull collector: restricted production export, hourly systemd pull, ciphertext/report retention and freshness validation, plus the recovery-drill runbook. Its units are deliberately outside the app box's top-level install glob. |
-| `regen-bitcoin-rpcauth.sh` | Break-glass: regenerate bitcoind's `rpcauth` + the proxy's RPC password as one matched pair. The cure for a BTC-rail 401. |
+| `regen-bitcoin-rpcauth.sh` | Break-glass: regenerate bitcoind's `rpcauth` + payments' RPC password as one matched pair. The cure for a BTC-rail 401. |
 
 ### systemd units & timers
 `nullsink-proxy.service` + `nullsink-payments.service` (the app's two halves) · `bitcoind.service` ·
 `monero-wallet-rpc.service` (the two rail watchers) ·
 `tinfoil-proxy.service` (the Tinfoil verifying proxy / enclave attestation; installed when `TINFOIL_API_KEY` is set) ·
-`backup.service` + `backup.timer` · `status-check.service` + `status-check.timer` ·
+`nullsink-bitcoin-label-export.service` · `backup.service` + `backup.timer` · `status-check.service` + `status-check.timer` ·
 `status-alert@.service` (the templated `OnFailure=` paging sink).
 
 ### Public edge & firewall
@@ -82,8 +83,23 @@ an explicit subdirectory, as `backup-collector/` does; this keeps its Pi-only un
 glob while still including them in the release tarball and deploy lint. (The lint runner lives in
 [`scripts/lint.sh`](../scripts/lint.sh), *not* here — it is a dev/CI tool.)
 
-**Nothing box-specific is committed.** Per-box config (domain, node address, RPC creds, Telegram token,
-backup keys) lives only in `/etc/nullsink.env` and systemd drop-ins on the box, never in this tree.
+**Nothing box-specific is committed.** Per-box config is split by authority:
+`/etc/nullsink-proxy.env`, `/etc/nullsink-payments.env`, `/etc/nullsink-backup.env`, and the root-only
+`/etc/nullsink-monitor.env`. Storage and socket paths remain unit-owned.
+
+## One-time shared-layout migration
+
+The first deploy containing Step 4 installs the verified deploy tree but refuses before changing units when
+the prepared marker is absent. Review and run `migrate-service-isolation.sh --prepare` during a financial
+quiet window, then immediately rerun the same deploy. Preparation stops the old app and timers, checks that
+there are no holds, open orders, or undelivered/partial credits, copies and verifies both databases, splits
+the env, and leaves the legacy layout untouched for rollback.
+Preparation also refuses an active same-box `bitcoind`: the supported app-box topology uses the dedicated
+node box, and silently reusing the read-only operator uid for a daemon would defeat the new boundary.
+
+After the isolated services pass health and access checks, create a new encrypted artifact and prove its
+offline dry-run restore. Only then run `migrate-service-isolation.sh --finalize`; this retains the legacy
+copy but makes it root-only. Finalization is never automatic.
 
 ## Backup and reporting boundary
 
@@ -94,9 +110,9 @@ directory, then atomically renamed. A collector therefore sees a complete final 
 in-progress artifact.
 
 Backup, restore, status, and the temporary live readers accept explicit `BALANCES_DB_PATH` and
-`PENDING_DB_PATH` values. The installed units pin both to `/var/lib/nullsink` today; `DB_DIR` remains the
-backward-compatible shared-directory fallback. Keeping the inputs explicit lets the OS-separation migration
-move the stores independently without changing the matched-pair archive format or snapshot order.
+`PENDING_DB_PATH` values. Installed units pin them to `/var/lib/nullsink-proxy/balances.db` and
+`/var/lib/nullsink-payments/pending.db`; `DB_DIR` remains an explicit legacy/test fallback. The archive
+format and pending-first snapshot order do not change.
 
 For the production/off-box workflow, set `BACKUP_AGE_RECIPIENT` to an `age` **public recipient** whose
 private identity remains offline. The finished recovery artifact is `backup-<UTC>.tar.age`; a production
@@ -136,8 +152,9 @@ Read finalized financials on a trusted workstation without opening either live d
 bun run financial-report -- report-20260721T120000Z.json
 ```
 
-For live investigation, install `nsk` explicitly and run it as the service user. It exposes only `balances`
-and `financials`; `/buy` remains the only supported way to create or add token credit.
+For live investigation, install `nsk` explicitly and run `sudo -u nullsink nsk …`. The operator principal
+has group-read access to both stores but no write bit; the wrapper pins both isolated paths. It exposes only
+`balances` and `financials`; `/buy` remains the only supported way to create or add token credit.
 
 **Release fetch is plain `curl`.** The release helpers in `lib.sh` pull public GitHub Release assets
 over HTTPS and verify them against `SHA256SUMS` — no `gh`, no auth on the box. Build provenance is attested

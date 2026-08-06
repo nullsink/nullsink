@@ -27,7 +27,7 @@ const PORT = numEnv("PAYMENTS_PORT", 8081, 1, 65535);
 const HOST = process.env.HOST ?? "127.0.0.1";
 // The credit crossing. The proxy binds this socket; we connect. Our write permission on the socket file IS the
 // authentication (Linux checks it at connect(2)), granted by the deploy — see credit-server.ts.
-const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink/credit.sock";
+const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink-credit/credit.sock";
 const CREDIT_TIMEOUT_MS = numEnv("CREDIT_TIMEOUT_MS", 5_000, 100, 60_000);
 // Alert when the oldest undelivered credit is older than this. /healthz cannot see a wedged credit socket or a
 // stalled sender, but credits piling up in the outbox can — this is the "is money still crossing?" signal.

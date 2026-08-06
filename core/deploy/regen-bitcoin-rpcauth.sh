@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate bitcoind's rpcauth AND the proxy's BITCOIN_RPC_PASSWORD as ONE matched pair, restart the
+# Regenerate bitcoind's rpcauth AND payments' BITCOIN_RPC_PASSWORD as ONE matched pair, restart the
 # services, and verify the app's RPC auth. This is the cure for a 401 on the BTC rail (which surfaces to
 # buyers as `wallet_unavailable` on /buy with rail=bitcoin).
 #
@@ -12,20 +12,20 @@
 #
 # Two modes:
 #   sudo deploy/regen-bitcoin-rpcauth.sh
-#       Same-box (bitcoin.conf + /etc/nullsink.env both here): writes both halves, restarts
+#       Same-box (bitcoin.conf + /etc/nullsink-payments.env both here): writes both halves, restarts
 #       bitcoind + nullsink-payments, and verifies the app's Basic-auth path end-to-end.
 #   sudo PRINT_PASSWORD=1 deploy/regen-bitcoin-rpcauth.sh
 #       NODE BOX (split deploy — bitcoin.conf here, the app env on the app box): writes rpcauth= to the
 #       local bitcoin.conf, restarts bitcoind, and PRINTS the matched BITCOIN_RPC_PASSWORD= line ONCE for
-#       the operator to paste into the APP box's /etc/nullsink.env. Nothing is written locally beyond the
+#       the operator to paste into the APP box's payments env. Nothing is written locally beyond the
 #       conf — the node box never holds the app's env. Then, on the app box:
 #         systemctl restart nullsink-payments && systemctl start status-check.service   # instant rpcauth verify
 #
-# Env overrides (all optional): BITCOIN_CONF, ENV_FILE, BTC_RPC_USER, PRINT_PASSWORD.
+# Env overrides (all optional): BITCOIN_CONF, PAYMENTS_ENV_FILE, BTC_RPC_USER, PRINT_PASSWORD.
 set -euo pipefail
 
 CONF="${BITCOIN_CONF:-/var/lib/bitcoind/bitcoin.conf}"
-ENVF="${ENV_FILE:-/etc/nullsink.env}"
+ENVF="${PAYMENTS_ENV_FILE:-/etc/nullsink-payments.env}"
 USER_NAME="${BTC_RPC_USER:-nullsink}"
 PRINT_PW="${PRINT_PASSWORD:-0}"
 
@@ -49,7 +49,7 @@ conf = pathlib.Path(conf_path)
 conf.write_text("\n".join([l for l in conf.read_text().splitlines() if not l.startswith(f"rpcauth={user}:")] + [rpcauth]) + "\n")
 if print_pw == "1":
     print("wrote matched rpcauth -> %s" % conf_path)
-    print("paste this line into the APP box's /etc/nullsink.env (replacing any existing one), then restart nullsink-payments:")
+    print("paste this line into the APP box's /etc/nullsink-payments.env (replacing any existing one), then restart nullsink-payments:")
     print("BITCOIN_RPC_PASSWORD=%s" % pw)
 else:
     env = pathlib.Path(env_path)

@@ -297,12 +297,6 @@ export function openOrderStore(path: string) {
 
 export type OrdersStore = ReturnType<typeof openOrderStore>;
 
-// Default on-disk path (pending.db beside balances.db, or PENDING_DB_PATH). The payments composition root
-// passes this to openOrderStore(); nothing opens at import time.
-export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? defaultPendingPath();
-
-function defaultPendingPath(): string {
-  const balances = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
-  const slash = balances.lastIndexOf("/");
-  return slash === -1 ? "pending.db" : balances.slice(0, slash + 1) + "pending.db";
-}
+// Production has a distinct payments state root. Local tests/dev set PENDING_DB_PATH explicitly.
+export const PENDING_DB_PATH =
+  process.env.PENDING_DB_PATH ?? "/var/lib/nullsink-payments/pending.db";

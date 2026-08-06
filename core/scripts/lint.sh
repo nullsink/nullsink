@@ -19,7 +19,7 @@ shellcheck "${scripts[@]}"
 
 # --- Caddyfile: parses + canonical formatting ---
 echo ">>> caddy validate"
-# The Caddyfile is a {$NULLSINK_DOMAIN} template (the real value reaches Caddy from /etc/nullsink.env via a
+# The Caddyfile is a {$NULLSINK_DOMAIN} template (the real value reaches Caddy from /etc/nullsink-monitor.env via a
 # systemd drop-in on the box); supply a dummy here so validation has a non-empty site address to parse.
 NULLSINK_DOMAIN=lint.example caddy validate --adapter caddyfile --config deploy/Caddyfile
 echo ">>> caddy fmt (formatting check)"

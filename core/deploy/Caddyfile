@@ -1,6 +1,6 @@
 # Caddyfile — nullsink public edge (clearnet, automatic TLS). Host-agnostic template.
 #
-# The served domain comes from {$NULLSINK_DOMAIN}: set NULLSINK_DOMAIN in /etc/nullsink.env and setup.sh
+# The served domain comes from {$NULLSINK_DOMAIN}: set NULLSINK_DOMAIN in /etc/nullsink-monitor.env and setup.sh
 # feeds it to Caddy via a systemd drop-in (so this file hardcodes no host). Point that domain's A/AAAA
 # record at this box. The UI web root defaults to /var/www/nullsink/current-web — the versioned-UI symlink
 # deploy.sh maintains (override with NULLSINK_WEBROOT). No ACME `email` is set: Caddy issues + renews certs

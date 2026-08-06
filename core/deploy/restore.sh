@@ -11,7 +11,7 @@
 # Usage:
 #   restore.sh <artifact>            # dry-run: verify integrity, report, change nothing
 #   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts both services)
-# Env: BALANCES_DB_PATH, PENDING_DB_PATH, DB_DIR (legacy shared-directory fallback), SVC_USER, SVC_GROUP,
+# Env: BALANCES_DB_PATH, PENDING_DB_PATH, DB_DIR (legacy shared-directory fallback), per-DB USER/GROUP,
 # PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
 set -euo pipefail
 
@@ -23,11 +23,17 @@ if [ -z "$artifact" ] || [ ! -f "$artifact" ]; then
   exit 1
 fi
 
-DB_DIR="${DB_DIR:-/var/lib/nullsink}"
-BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
-PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
-SVC_USER="${SVC_USER:-nullsink}"
-SVC_GROUP="${SVC_GROUP:-$SVC_USER}"
+DB_DIR="${DB_DIR:-}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-proxy/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-/var/lib/nullsink-payments/pending.db}"
+SVC_USER="${SVC_USER:-}"
+SVC_GROUP="${SVC_GROUP:-}"
+BALANCES_DB_USER="${BALANCES_DB_USER:-${SVC_USER:-nullsink-proxy}}"
+PENDING_DB_USER="${PENDING_DB_USER:-${SVC_USER:-nullsink-payments}}"
+BALANCES_DB_GROUP="${BALANCES_DB_GROUP:-${SVC_GROUP:-nullsink-proxy-read}}"
+PENDING_DB_GROUP="${PENDING_DB_GROUP:-${SVC_GROUP:-nullsink-payments-read}}"
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 RESTORE_MAX_MEMBER_BYTES="${RESTORE_MAX_MEMBER_BYTES:-8589934592}" # 8 GiB/member; real billing DBs are far smaller
@@ -177,6 +183,22 @@ stage_path_for() {
   printf '%s/.%s.restoring\n' "$(dirname "$live_path")" "$(basename "$live_path")"
 }
 
+owner_for() {
+  case "$1" in
+    balances.db) printf '%s\n' "$BALANCES_DB_USER" ;;
+    pending.db) printf '%s\n' "$PENDING_DB_USER" ;;
+    *) echo "unknown restore member: $1" >&2; return 1 ;;
+  esac
+}
+
+group_for() {
+  case "$1" in
+    balances.db) printf '%s\n' "$BALANCES_DB_GROUP" ;;
+    pending.db) printf '%s\n' "$PENDING_DB_GROUP" ;;
+    *) echo "unknown restore member: $1" >&2; return 1 ;;
+  esac
+}
+
 # A balances-only restore over a scrub-era pending.db can rewind the receiver below acknowledgements whose
 # payloads no longer exist. There is nothing safe to redeliver, so prohibit that partial restore. Historical
 # balances-only artifacts remain applicable only to installations that do not yet have pending.db.
@@ -189,7 +211,7 @@ staged=()
 for db in balances.db pending.db; do
   [ -f "$work/$db" ] || continue
   stage_path="$(stage_path_for "$db")"
-  install -o "$SVC_USER" -g "$SVC_GROUP" -m 600 "$work/$db" "$stage_path"   # fails here = live DBs untouched
+  install -o "$(owner_for "$db")" -g "$(group_for "$db")" -m 0640 "$work/$db" "$stage_path"   # fails here = live DBs untouched
   staged+=("$db")
 done
 
@@ -230,14 +252,16 @@ done
 # proved each scrubbed tombstone has a matching ledger marker. `hash <> ''` selects real credits only:
 # settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
-# Run as the SERVICE USER: root would leave root-owned WAL sidecars and break billing writes.
+# The recovery control plane needs to write pending.db while reading balances.db, a capability neither app
+# principal has in steady state. Run this bounded transaction as root while both services are stopped, then
+# normalize every DB/sidecar back to its declared owner and read group before either service starts.
 if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
   # never fail quietly. The service is stopped and the databases are already swapped: abort LOUDLY and leave it
   # stopped rather than starting a box whose outbox still claims undelivered credits were delivered.
-  rearm_or_abort() {  # $1=sql — run as the service user; echo the last output line; abort with the error on failure
+  rearm_or_abort() {  # $1=sql — echo the last output line; abort with the error on failure
     local out
-    if ! out="$(sudo -u "$SVC_USER" sqlite3 "$PENDING_DB_PATH" "$1" 2>&1)"; then
+    if ! out="$(sqlite3 "$PENDING_DB_PATH" "$1" 2>&1)"; then
       echo "!! credit-outbox re-arm FAILED — sqlite3 said:" >&2
       printf '%s\n' "$out" >&2
       echo "!! The databases ARE restored but the outbox was NOT re-armed, so a paid credit may be marked" >&2
@@ -248,11 +272,11 @@ if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
     printf '%s\n' "$out" | tail -1
   }
 
-  has_outbox="$(sudo -u "$SVC_USER" sqlite3 "$PENDING_DB_PATH" \
+  has_outbox="$(sqlite3 -readonly "$PENDING_DB_PATH" \
     "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='credit_outbox';" 2>/dev/null || echo 0)"
   has_applied=0
   if [ -f "$BALANCES_DB_PATH" ]; then
-    has_applied="$(sudo -u "$SVC_USER" sqlite3 "$BALANCES_DB_PATH" \
+    has_applied="$(sqlite3 -readonly "$BALANCES_DB_PATH" \
       "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='applied_orders';" 2>/dev/null || echo 0)"
   fi
 
@@ -273,6 +297,17 @@ if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
   else
     echo "skip credit-outbox re-arm (this pending.db predates the outbox)"
   fi
+
+  for path in "$BALANCES_DB_PATH" "$PENDING_DB_PATH"; do
+    [ -e "$path" ] || continue
+    if [ "$path" = "$BALANCES_DB_PATH" ]; then owner="$BALANCES_DB_USER"; group="$BALANCES_DB_GROUP"
+    else owner="$PENDING_DB_USER"; group="$PENDING_DB_GROUP"; fi
+    for file in "$path" "$path-wal" "$path-shm"; do
+      [ -e "$file" ] || continue
+      chown "$owner:$group" "$file"
+      chmod 0640 "$file"
+    done
+  done
 else
   echo "skip credit-outbox re-arm (no pending.db, or sqlite3 not installed — apt-get install sqlite3)"
 fi

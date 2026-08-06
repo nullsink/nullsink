@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Consistent, optionally-encrypted backup of the billing DBs. Run every four hours by backup.timer AS THE SERVICE USER
-# (User=nullsink in backup.service), so the SQLite sidecars it touches stay service-owned — a root
-# `.backup` leaves root-owned -wal/-shm that break the service's billing writes.
+# Consistent, optionally-encrypted backup of the billing DBs. Run every four hours by backup.timer as the
+# dedicated backup user, which has read-only group access to both stores and writes only its artifact directory.
 #
 # Uses sqlite3 `.backup`, which snapshots a CONSISTENT copy even while the service is writing under WAL (a
 # plain `cp` is NOT safe). Validates the matched pair, then atomically publishes ONE timestamped recovery
@@ -19,10 +18,14 @@ set -euo pipefail
 
 command -v sqlite3 >/dev/null || { echo "sqlite3 not found (apt-get install sqlite3)" >&2; exit 1; }
 
-DB_DIR="${DB_DIR:-/var/lib/nullsink}"
-BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
-PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
-BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"
+DB_DIR="${DB_DIR:-}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"
+BACKUP_DIR="${BACKUP_DIR:-${DB_DIR:+$DB_DIR/backups}}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-proxy/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-/var/lib/nullsink-payments/pending.db}"
+BACKUP_DIR="${BACKUP_DIR:-/var/lib/nullsink-backup}"
+BITCOIN_LABELS_PATH="${BITCOIN_LABELS_PATH:-/var/lib/nullsink-payments/bitcoin-wallet-labels.json}"
 BACKUP_KEEP="${BACKUP_KEEP:-84}"   # six four-hour snapshots/day ≈ fourteen days
 BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
 [[ "$BACKUP_KEEP" =~ ^[0-9]+$ ]] && [ "$BACKUP_KEEP" -gt 0 ] || {
@@ -93,30 +96,21 @@ publish_permissions() {
 # by the later ledger snapshot, and a scrub-era restore must treat these two DBs as one matched artifact.
 files=()
 if [ -f "$PENDING_DB_PATH" ]; then
-  sqlite3 -cmd '.timeout 10000' "$PENDING_DB_PATH" ".backup '$work/pending.db'"
+  sqlite3 -readonly -cmd '.timeout 10000' "$PENDING_DB_PATH" ".backup '$work/pending.db'"
   files+=(pending.db)
 fi
-sqlite3 -cmd '.timeout 10000' "$BALANCES_DB_PATH" ".backup '$work/balances.db'"
+sqlite3 -readonly -cmd '.timeout 10000' "$BALANCES_DB_PATH" ".backup '$work/balances.db'"
 files+=(balances.db)
 
 # Bitcoin watch-only wallet LABELS (address→order-index map). These are wallet-local metadata — NOT on-chain
 # and NOT re-derivable from the descriptor/seed — so a bitcoind datadir loss would orphan the deposit→order
 # mapping for any paid-but-unconfirmed BTC order (the spend key being cold-recoverable does NOT recover them).
 # pending.db is the authoritative recovery source for open orders' address→index; this duplicates it into
-# the same artifact as a belt-and-suspenders. Persist the RPC's RAW JSON (no bash JSON
-# assembly) via ONE read-only listreceivedbyaddress call. Skipped unless the BTC rail is configured
-# (BITCOIN_RPC_URL set, e.g. via EnvironmentFile in backup.service) and the node answers — a transient
-# bitcoind outage must NOT fail the money-DB backup, so this only WARNs.
-if [ -n "${BITCOIN_RPC_URL:-}" ] && command -v curl >/dev/null; then
-  auth=()
-  [ -n "${BITCOIN_RPC_USER:-}" ] && auth=(--user "$BITCOIN_RPC_USER:${BITCOIN_RPC_PASSWORD:-}")
-  if curl -fsS --max-time 15 "${auth[@]}" -H 'content-type: application/json' \
-      --data '{"jsonrpc":"1.0","id":"backup","method":"listreceivedbyaddress","params":[0,true,true]}' \
-      "$BITCOIN_RPC_URL" -o "$work/bitcoin-wallet-labels.json" 2>/dev/null; then
-    files+=(bitcoin-wallet-labels.json)
-  else
-    echo "backup: WARN bitcoind label export skipped (BITCOIN_RPC_URL set but node/wallet unreachable)" >&2
-  fi
+# the same artifact as a belt-and-suspenders. A payments-owned oneshot refreshes the raw RPC JSON before this
+# service starts, so the backup principal never receives Bitcoin RPC credentials.
+if [ -s "$BITCOIN_LABELS_PATH" ]; then
+  cp "$BITCOIN_LABELS_PATH" "$work/bitcoin-wallet-labels.json"
+  files+=(bitcoin-wallet-labels.json)
 fi
 
 # Archive the named snapshots only (not `.`), so the in-progress tar can't include itself.

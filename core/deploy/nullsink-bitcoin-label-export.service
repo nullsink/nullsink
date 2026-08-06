@@ -1,0 +1,18 @@
+[Unit]
+Description=nullsink watch-only Bitcoin label export for the next billing backup
+
+[Service]
+Type=oneshot
+User=nullsink-payments
+Group=nullsink-payments-read
+EnvironmentFile=-/etc/nullsink-payments.env
+StateDirectory=nullsink-payments
+StateDirectoryMode=0750
+UMask=0027
+Environment=BITCOIN_LABELS_PATH=/var/lib/nullsink-payments/bitcoin-wallet-labels.json
+ExecStart=/opt/nullsink/deploy/backup-bitcoin-labels.sh
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true

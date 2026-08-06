@@ -14,9 +14,13 @@ const caddy = readFileSync(deploy("Caddyfile"), "utf8");
 const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
 const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
+const tinfoilUnit = readFileSync(deploy("tinfoil-proxy.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
+const deployScript = readFileSync(deploy("deploy.sh"), "utf8");
+const migration = readFileSync(deploy("migrate-service-isolation.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
 const backupUnit = readFileSync(deploy("backup.service"), "utf8");
+const labelUnit = readFileSync(deploy("nullsink-bitcoin-label-export.service"), "utf8");
 const backupReport = readFileSync(deploy("backup-report.sh"), "utf8");
 const backupTimer = readFileSync(deploy("backup.timer"), "utf8");
 const restore = readFileSync(deploy("restore.sh"), "utf8");
@@ -43,25 +47,62 @@ function namedMatcher(name: string): string {
 test("the two roots, setup defaults, Caddy routes, and service units agree on the split ports", () => {
   expect(proxy).toContain('numEnv("PORT", 8080');
   expect(payments).toContain('numEnv("PAYMENTS_PORT", 8081');
-  expect(setup).toMatch(/\nPORT=8080\nPAYMENTS_PORT=8081\n/);
+  expect(migration).toContain("PORT=8080");
+  expect(migration).toContain("PAYMENTS_PORT=8081");
+  expect(proxyUnit).toContain("EnvironmentFile=/etc/nullsink-proxy.env");
+  expect(paymentsUnit).toContain("EnvironmentFile=/etc/nullsink-payments.env");
 
   for (const path of ["/v1/messages", "/v1/chat/completions", "/v1/responses", "/v1/models", "/balance"])
     expect(upstreamFor(path)).toBe("8080");
   for (const path of ["/buy", "/order-status", "/rails"]) expect(upstreamFor(path)).toBe("8081");
 });
 
-test("both systemd units and both roots use the one owner-authenticated credit socket", () => {
-  const socket = "/run/nullsink/credit.sock";
+test("both systemd units and both roots use the one credit-group-authenticated socket", () => {
+  const socket = "/run/nullsink-credit/credit.sock";
   expect(proxy).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
   expect(payments).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
   expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
+  expect(proxyUnit).toContain("RuntimeDirectory=nullsink-credit");
+  expect(proxyUnit).toContain("ExecStartPre=+/bin/chgrp nullsink-credit /run/nullsink-credit");
+  expect(proxyUnit).toContain("chgrp nullsink-credit /run/nullsink-credit/credit.sock");
+  expect(proxyUnit).toContain("chmod 0660 /run/nullsink-credit/credit.sock");
+  expect(paymentsUnit).toContain("SupplementaryGroups=nullsink-credit");
 });
 
 test("payments starts only after the proxy credit socket is ready", () => {
-  expect(proxyUnit).toContain("ExecStartPost=/bin/sh -c 'until [ -S /run/nullsink/credit.sock ]; do sleep 0.1; done'");
+  expect(proxyUnit).toContain("ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-credit/credit.sock ]");
   expect(proxyUnit).toContain("TimeoutStartSec=60");
   expect(paymentsUnit).toContain("After=nullsink-proxy.service");
+});
+
+test("the deployed principal, environment, state, and read-group matrix is least-privilege", () => {
+  expect(proxyUnit).toContain("User=nullsink-proxy\nGroup=nullsink-proxy-read");
+  expect(proxyUnit).toContain("StateDirectory=nullsink-proxy");
+  expect(proxyUnit).not.toContain("nullsink-payments-read");
+  expect(proxyUnit).not.toContain("/etc/nullsink-payments.env");
+
+  expect(paymentsUnit).toContain("User=nullsink-payments\nGroup=nullsink-payments-read");
+  expect(paymentsUnit).toContain("StateDirectory=nullsink-payments");
+  expect(paymentsUnit).not.toContain("nullsink-proxy-read");
+  expect(paymentsUnit).not.toContain("/etc/nullsink-proxy.env");
+
+  expect(backupUnit).toContain("User=nullsink-backup\nGroup=nullsink-backup");
+  expect(backupUnit).toContain("SupplementaryGroups=nullsink-proxy-read nullsink-payments-read");
+  expect(backupUnit).toContain("EnvironmentFile=-/etc/nullsink-backup.env");
+  expect(backupUnit).not.toContain("/etc/nullsink-payments.env");
+  expect(labelUnit).toContain("User=nullsink-payments\nGroup=nullsink-payments-read");
+  expect(labelUnit).toContain("EnvironmentFile=-/etc/nullsink-payments.env");
+
+  expect(walletUnit).toContain("User=nullsink-payments\nGroup=nullsink-payments-read");
+  expect(tinfoilUnit).toContain("User=nullsink-proxy\nGroup=nullsink-proxy-read");
+  expect(tinfoilUnit).not.toContain("EnvironmentFile=");
+
+  expect(migration).toContain('usermod -a -G "$PROXY_READ_GROUP,$PAYMENTS_READ_GROUP" "$OPERATOR_USER"');
+  expect(migration).toContain('usermod -a -G "$PROXY_READ_GROUP,$PAYMENTS_READ_GROUP" "$BACKUP_USER"');
+  expect(migration).toContain('usermod -a -G "$CREDIT_GROUP" "$PAYMENTS_USER"');
+  expect(migration).not.toMatch(/usermod -a -G "\$CREDIT_GROUP" "\$(?:PROXY|BACKUP)_USER"/);
+  expect(migration).toContain("active same-box bitcoind still uses the legacy operator uid");
 });
 
 test("the Monero wallet keeps ring metadata outside its protected home", () => {
@@ -120,17 +161,33 @@ test("backup and restore preserve the scrubbed-outbox money invariant", () => {
   expect(restore).not.toMatch(/SET acked_at = NULL WHERE hash = ''/);
 });
 
-test("control-plane storage paths are explicit while retaining the shared-directory fallback", () => {
+test("control-plane storage paths are isolated while retaining an explicit legacy fallback", () => {
   for (const script of [backup, restore, statusCheck]) {
-    expect(script).toContain('DB_DIR="${DB_DIR:-/var/lib/nullsink}"');
-    expect(script).toContain('BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"');
-    expect(script).toContain('PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"');
+    expect(script).toContain('DB_DIR="${DB_DIR:-}"');
+    expect(script).toContain('BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"');
+    expect(script).toContain('PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"');
+    expect(script).toContain('/var/lib/nullsink-proxy/balances.db');
+    expect(script).toContain('/var/lib/nullsink-payments/pending.db');
   }
   for (const unit of [backupUnit, statusUnit]) {
-    expect(unit).toContain("Environment=BALANCES_DB_PATH=/var/lib/nullsink/balances.db");
-    expect(unit).toContain("Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db");
-    expect(unit).toContain("Environment=BACKUP_DIR=/var/lib/nullsink/backups");
+    expect(unit).toContain("Environment=BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db");
+    expect(unit).toContain("Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db");
+    expect(unit).toContain("Environment=BACKUP_DIR=/var/lib/nullsink-backup");
   }
+});
+
+test("the first isolated deploy refuses before unit activation until explicit preparation", () => {
+  const tree = deployScript.indexOf('install_deploy_tree "$REF" "$APP_DIR"');
+  const marker = deployScript.indexOf("if [ ! -f /etc/nullsink-service-isolation.prepared ]");
+  const apply = deployScript.indexOf("apply_repo_config                      #");
+  const restart = deployScript.indexOf("restart_app", apply);
+  expect(tree).toBeGreaterThan(-1);
+  expect(marker).toBeGreaterThan(tree);
+  expect(apply).toBeGreaterThan(marker);
+  expect(restart).toBeGreaterThan(apply);
+  expect(deployScript.slice(marker, apply)).toContain("units and services were NOT changed");
+  expect(deployScript.slice(marker, apply)).not.toContain("prepare_service_isolation");
+  expect(setup).toContain("Existing billing state requires an explicit, quiet-window migration");
 });
 
 test("backup publication and routine reporting follow the Step 2 egress contract", () => {

@@ -11,14 +11,16 @@
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
-ENV_FILE="${ENV_FILE:-/etc/nullsink.env}"
+PROXY_ENV_FILE="${PROXY_ENV_FILE:-/etc/nullsink-proxy.env}"
+PAYMENTS_ENV_FILE="${PAYMENTS_ENV_FILE:-/etc/nullsink-payments.env}"
+MONITOR_ENV_FILE="${MONITOR_ENV_FILE:-/etc/nullsink-monitor.env}"
 WEB_BASE="${WEB_BASE:-/var/www/nullsink}"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web)
 REF="${1:-}"                              # release tag to deploy (vX.Y.Z) — required; the box is binary-only
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"    # seconds to wait for EACH service's /healthz before declaring failure
 
 # install_units() + health_ok() + the PROXY_UNIT/PAYMENTS_UNIT names live here — the shared "apply repo
 # config" library, so the unit-install glob is the single source of truth for both this script and setup.sh.
-# Sourced after APP_DIR/ENV_FILE (env_val reads ENV_FILE).
+# Sourced after APP_DIR and the role-specific env paths.
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -29,7 +31,7 @@ sync_caddy() {  # refresh the Caddy edge config from the repo; validate first, r
   # NOT — so pass the domain in, or validation sees an empty site address and fails. reload (not restart) is
   # correct on a redeploy: the domain is unchanged, and reload re-resolves {$VAR} from the running env.
   local domain
-  domain="$(grep -E '^NULLSINK_DOMAIN=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+  domain="$(grep -E '^NULLSINK_DOMAIN=' "$MONITOR_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if NULLSINK_DOMAIN="$domain" caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
     systemctl reload caddy
   else
@@ -65,8 +67,16 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   prev_web="$(readlink "$WEB_BASE/current-web" 2>/dev/null || true)"                       # roll the UI back in lockstep
   echo ">>> Deploying $REF  (proxy was ${prev_proxy:-none}, payments was ${prev_pay:-none}, UI was ${prev_web:-none})"
   install_binary "$REF"                  # fetch+verify+activate both current-{proxy,payments} symlinks
-  if [ -x /usr/local/bin/nsk ]; then install_nsk "$REF"; fi
   install_deploy_tree "$REF" "$APP_DIR"  # refresh deploy/ (units + scripts + Caddyfile) from the release
+  if [ ! -f /etc/nullsink-service-isolation.prepared ]; then
+    echo "!! service isolation is not prepared; units and services were NOT changed" >&2
+    echo "!! Review and run: $APP_DIR/deploy/migrate-service-isolation.sh --prepare" >&2
+    echo "!! Then rerun this exact deploy command. The old services remain live on the legacy layout." >&2
+    [ -z "$prev_proxy" ] || ln -sfn "$prev_proxy" /usr/local/lib/nullsink/current-proxy
+    [ -z "$prev_pay" ] || ln -sfn "$prev_pay" /usr/local/lib/nullsink/current-payments
+    exit 1
+  fi
+  if [ -x /usr/local/bin/nsk ]; then install_nsk "$REF"; fi
   # UI is non-fatal: /healthz tests the BINARIES, which serve fine with a stale UI, so a UI fetch hiccup must not
   # abort (and half-apply) a binary deploy. Activate it; the health gate below still judges the binaries.
   if install_client_ui "$REF" "$WEB_BASE"; then   # fetch+verify+activate $WEB_BASE/current-web -> web-$REF
@@ -79,6 +89,7 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   new_pay="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
   warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
   apply_repo_config                      # refresh units + timers + edge from the now-current deploy/
+  restart_isolation_sidecars             # one-time uid transition only; finalized boxes retain the no-bounce policy
   restart_app                            # proxy, then payments
 
   if health_ok_app; then

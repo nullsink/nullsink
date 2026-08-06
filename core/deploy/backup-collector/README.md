@@ -53,8 +53,8 @@ sudo systemctl status backup.service --no-pager
 ```
 
 `setup-export.sh` creates `nullsink-backup-export`, forces its key through
-`rrsync -ro /var/lib/nullsink/backups`, and gives only `backup.service` the supplementary group needed to
-publish completed files as `0640`. The databases and `/etc/nullsink.env` are not exported.
+`rrsync -ro /var/lib/nullsink-backup`, and gives only `backup.service` the supplementary group needed to
+publish completed files as `0640`. The databases and role environment files are not exported.
 
 ### 3. Pin the production SSH host key and configure the Pi
 

@@ -2,7 +2,12 @@
 # Shared "apply repo config to the box" helpers, SOURCED by setup.sh (bootstrap), deploy.sh (redeploy), and
 # upgrade-component.sh (pinned rail/provider dependencies) so fetch/verify/install logic lives in one place
 # and can't drift. No side effects beyond defining helpers + pins.
-# Caller must set APP_DIR (and ENV_FILE for health_ok).
+# Caller may override the role-specific environment paths before sourcing.
+
+PROXY_ENV_FILE="${PROXY_ENV_FILE:-/etc/nullsink-proxy.env}"
+PAYMENTS_ENV_FILE="${PAYMENTS_ENV_FILE:-/etc/nullsink-payments.env}"
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/etc/nullsink-backup.env}"
+MONITOR_ENV_FILE="${MONITOR_ENV_FILE:-/etc/nullsink-monitor.env}"
 
 # The GitHub repo slug the box pulls release assets from — single source of truth for release fetch helpers.
 # Env-overridable so a public fork/mirror can point elsewhere without editing this file.
@@ -190,8 +195,8 @@ install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app b
   # `current-payments` symlink per service -> the active version (RELATIVE targets, so the dir is
   # self-contained/relocatable). Each unit's ExecStart runs its symlink; activation is an atomic `ln -sfn`
   # swap, rollback is repointing it at the previous target. Each binary is a self-contained
-  # `bun build --compile` artifact (bundles prices.json etc.) — it runs with only /etc/nullsink.env +
-  # /var/lib/nullsink, no source/Bun needed.
+  # `bun build --compile` artifact (bundles prices.json etc.) — it runs with role-specific environment and
+  # state paths, no source/Bun needed.
   #
   # The two are ONE release, deployed in lockstep: they speak a versioned credit wire and a mismatched pair
   # fails closed (the proxy 400s an unknown wire version, credits wait in the durable outbox). So fetch and
@@ -215,13 +220,24 @@ install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app b
 }
 
 install_nsk() {  # $1=tag — install the optional read-only operator CLI
-  local tag="$1" tmp
+  local tag="$1" tmp wrapper
+  mkdir -p /usr/local/lib/nullsink
   tmp="$(mktemp -d)"
   fetch_asset "$tag" 'nsk-linux-x64' "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/nsk-linux-x64"
   verify_sums "$tmp" || return 1
-  install -m755 "$tmp/nsk-linux-x64" /usr/local/bin/nsk
+  install -m755 "$tmp/nsk-linux-x64" "/usr/local/lib/nullsink/nsk-$tag"
+  ln -sfn "nsk-$tag" /usr/local/lib/nullsink/current-nsk
+  wrapper="$tmp/nsk"
+  cat > "$wrapper" <<'EOF'
+#!/bin/sh
+exec env \
+  BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db \
+  PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db \
+  /usr/local/lib/nullsink/current-nsk "$@"
+EOF
+  install -m755 "$wrapper" /usr/local/bin/nsk
   rm -rf "$tmp"
   echo "    read-only operator CLI nsk $tag installed"
 }
@@ -275,9 +291,18 @@ install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client U
   echo "    client UI $tag activated ($webbase/current-web -> web-$tag)"
 }
 
-env_val() { grep -E "^$1=" "${ENV_FILE:-/etc/nullsink.env}" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
-proxy_port()    { local p; p="$(env_val PORT)";          echo "${p:-8080}"; }
-payments_port() { local p; p="$(env_val PAYMENTS_PORT)"; echo "${p:-8081}"; }
+env_val_from() { grep -E "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d= -f2- || true; }
+proxy_port()    { local p; p="$(env_val_from "$PROXY_ENV_FILE" PORT)"; echo "${p:-8080}"; }
+payments_port() { local p; p="$(env_val_from "$PAYMENTS_ENV_FILE" PAYMENTS_PORT)"; echo "${p:-8081}"; }
+
+prepare_service_isolation() { "$APP_DIR/deploy/migrate-service-isolation.sh" --prepare; }
+restart_isolation_sidecars() {
+  [ -f /etc/nullsink-service-isolation.finalized ] && return 0
+  for unit in tinfoil-proxy monero-wallet-rpc; do
+    systemctl is-active --quiet "$unit" 2>/dev/null || continue
+    systemctl restart "$unit"
+  done
+}
 
 health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) s; return 0/1
   # /healthz is localhost-only (Caddy never routes it). Both services serve it on their own port.

@@ -37,8 +37,8 @@ a systemd daemon on `127.0.0.1:3301`, alongside the rail daemons. The app points
 
 The core binary stays zero-dep: the proxy is an ops component like the wallet daemons, not an
 in-process library in the security-critical hot path. The Tinfoil API key stays app-side in
-`/etc/nullsink.env` — the app injects it and the proxy forwards it, so the key never enters the
-proxy unit's environment.
+`/etc/nullsink-proxy.env` — the app injects it and the verifier forwards it, so the key never enters the
+verifier unit's environment.
 
 ## Wiring
 

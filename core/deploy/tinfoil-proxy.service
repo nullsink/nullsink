@@ -16,11 +16,11 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=simple
-# Same low-privilege user as the app and the rail daemons. The proxy holds no secret: the app injects the
-# Tinfoil bearer token and the proxy passes Authorization through unchanged, so the key stays in
-# /etc/nullsink.env (app-side) and never reaches this unit's environment.
-User=nullsink
-Group=nullsink
+# This verifier belongs to the proxy trust domain but receives no provider environment: the app injects the
+# Tinfoil bearer token per request and the verifier only forwards it.
+User=nullsink-proxy
+Group=nullsink-proxy-read
+UMask=0077
 
 # Writable cache for the Sigstore/TUF verifier under ProtectSystem=strict (it refreshes the expected
 # measurements from Tinfoil's latest release on each start). HOME + WorkingDirectory point here so any

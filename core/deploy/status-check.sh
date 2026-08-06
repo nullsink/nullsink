@@ -29,12 +29,16 @@ TOR_SOCKS="${TOR_SOCKS:-127.0.0.1:9050}"
 NODE_ENV_FILE="${NODE_ENV_FILE:-/etc/monero-wallet-rpc.env}"
 LAG_BLOCKS="${LAG_BLOCKS:-3}"                  # wallet may trail the tip by a block or two while scanning; alert past this
 RPC_TIMEOUT="${RPC_TIMEOUT:-15}"
-DB_DIR="${DB_DIR:-/var/lib/nullsink}"    # legacy shared-directory fallback
-BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
-PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
-SVC_USER="${SVC_USER:-nullsink}"         # legacy shared-owner fallback
+DB_DIR="${DB_DIR:-}"                      # optional legacy shared-directory fallback
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-proxy/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-/var/lib/nullsink-payments/pending.db}"
+SVC_USER="${SVC_USER:-}"                 # optional legacy shared-owner fallback
 BALANCES_DB_USER="${BALANCES_DB_USER:-$SVC_USER}"
 PENDING_DB_USER="${PENDING_DB_USER:-$SVC_USER}"
+BALANCES_DB_USER="${BALANCES_DB_USER:-nullsink-proxy}"
+PENDING_DB_USER="${PENDING_DB_USER:-nullsink-payments}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
 # Two app units, two loopback ports, two /healthz. Kept literal (this script is run standalone by systemd
 # and never sources deploy/lib.sh).
@@ -43,7 +47,8 @@ PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 PROXY_HEALTHZ="${PROXY_HEALTHZ_URL:-http://127.0.0.1:8080/healthz}"
 PAYMENTS_HEALTHZ="${PAYMENTS_HEALTHZ_URL:-http://127.0.0.1:8081/healthz}"
 LOG_WINDOW="${LOG_WINDOW:-15 min ago}"         # journal lookback for the error greps (a bit over the 10m tick)
-BACKUP_DIR="${BACKUP_DIR:-$DB_DIR/backups}"    # where backup.sh writes artifacts (for the freshness check)
+BACKUP_DIR="${BACKUP_DIR:-${DB_DIR:+$DB_DIR/backups}}"
+BACKUP_DIR="${BACKUP_DIR:-/var/lib/nullsink-backup}" # where backup.sh writes artifacts
 BACKUP_MAX_AGE_H="${BACKUP_MAX_AGE_H:-6}"      # four-hour timer + up to 15m jitter; leaves headroom for a slow run
 STAMP="${STAMP:-/run/status-check.failed}"     # open-incident marker (tmpfs, clears on reboot) for the recovery page
 MEM_WARN_PCT="${MEM_WARN_PCT:-75}"             # early OOM warning: page when a service's cgroup memory crosses this % of MemoryMax
@@ -112,7 +117,7 @@ if systemctl is-active --quiet tinfoil-proxy 2>/dev/null; then
 fi
 
 # --- 2. host: disk + WAL-sidecar ownership (a full disk or wrong-owner sidecars silently break billing) ---
-# Check each distinct state directory. They are one directory today; Step 4 moves them apart.
+# Check each distinct state directory; proxy and payments stores live on separate permission boundaries.
 check_filesystem() {
   local db_dir="$1" disk_pct inode_pct
   disk_pct="$(df --output=pcent "$db_dir" 2>/dev/null | tail -1 | tr -dc '0-9')"
@@ -213,7 +218,7 @@ if systemctl is-active --quiet "$PAYMENTS_UNIT" 2>/dev/null; then
   # answer 200 and every unit reads "active". This marker (src/payments.ts, emitted once the oldest unacked row
   # passes OUTBOX_AGE_ALERT_MS) is the only signal for it. Keep the token in sync with that log line.
   if grep -qiE 'CREDIT OUTBOX STALLED' <<<"$jlog"; then
-    warn "CREDIT OUTBOX STALLED in the last ${LOG_WINDOW% ago} — PAID credits are not reaching the balance ledger (credit socket wedged / $PROXY_UNIT down / wire-version skew). Customers have paid and hold nothing. Check: systemctl status $PROXY_UNIT; ls -l /run/nullsink/credit.sock"
+    warn "CREDIT OUTBOX STALLED in the last ${LOG_WINDOW% ago} — PAID credits are not reaching the balance ledger (credit socket wedged / $PROXY_UNIT down / wire-version skew). Customers have paid and hold nothing. Check: systemctl status $PROXY_UNIT; ls -l /run/nullsink-credit/credit.sock"
   else ok "credit outbox draining (no CREDIT OUTBOX STALLED, ${LOG_WINDOW% ago})"; fi
 fi
 
