@@ -23,22 +23,6 @@
     "cache_write": 1.25,
     "cache_write_1h": 2
   },
-  "claude-opus-4-1": {
-    "provider": "anthropic",
-    "input": 15,
-    "output": 75,
-    "cache_read": 1.5,
-    "cache_write": 18.75,
-    "cache_write_1h": 30
-  },
-  "claude-opus-4-1-20250805": {
-    "provider": "anthropic",
-    "input": 15,
-    "output": 75,
-    "cache_read": 1.5,
-    "cache_write": 18.75,
-    "cache_write_1h": 30
-  },
   "claude-opus-4-5": {
     "provider": "anthropic",
     "input": 5,
