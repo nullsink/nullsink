@@ -6,21 +6,15 @@
 import { test, expect } from "bun:test";
 import fc from "fast-check";
 import { byteBoundHold, makeCountTokensHold, HOLD_INPUT_MARGIN, HOLD_INPUT_PAD, ANTHROPIC_COUNT_OMIT } from "../src/hold";
-import { priceUsage, priceHoldBound } from "../src/cost";
+import { pricedModels, priceUsage, priceHoldBound } from "../src/cost";
 import { hasOneHourCacheControl } from "../src/providers/anthropic";
 
-// Span the live rate shapes in prices.json (cheapest → priciest), across BOTH cache-fee models: Anthropic
-// (cache_write 1.25× input, cache_write_1h 2×) and gpt-5.6 — the first OpenAI family with a cache-write
-// fee (1.25× input; its cache_write_1h equals cache_write, there is no 1h tier). The bound derives the
-// per-model MAX input rate from the table rather than hardcoding a ratio, so it stays sound for any shape
-// the sync brings in — cache_write_1h included, so 1-hour cache writes are covered.
-const MODELS = [
-  "claude-opus-4-1", // priciest (15/75)
-  "claude-opus-4-8",
-  "claude-haiku-4-5", // cheapest (1/5)
-  "claude-sonnet-4-6",
-  "gpt-5.6", // OpenAI with a cache-write fee (5/30, write 6.25)
-];
+// Exercise every live rate shape in prices.json, including Anthropic's 1-hour cache-write tier and
+// OpenAI's cache-write fee models. Derive the ids from the generated table: provider retirements are a
+// normal sync event and must not strand this validation on a model the same regeneration just removed.
+// The bound derives each model's MAX input rate from that table rather than hardcoding a ratio, so it
+// stays sound for any shape the sync brings in.
+const MODELS = pricedModels().map(({ id }) => id);
 
 test("byteBoundHold ≥ actual cost for any usage the request could produce (never-negative refund)", () => {
   fc.assert(
