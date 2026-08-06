@@ -29,8 +29,12 @@ TOR_SOCKS="${TOR_SOCKS:-127.0.0.1:9050}"
 NODE_ENV_FILE="${NODE_ENV_FILE:-/etc/monero-wallet-rpc.env}"
 LAG_BLOCKS="${LAG_BLOCKS:-3}"                  # wallet may trail the tip by a block or two while scanning; alert past this
 RPC_TIMEOUT="${RPC_TIMEOUT:-15}"
-DB_DIR="${DB_DIR:-/var/lib/nullsink}"    # where balances.db / pending.db (+ WAL sidecars) live
-SVC_USER="${SVC_USER:-nullsink}"         # the user the DBs + sidecars must stay owned by
+DB_DIR="${DB_DIR:-/var/lib/nullsink}"    # legacy shared-directory fallback
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-$DB_DIR/balances.db}"
+PENDING_DB_PATH="${PENDING_DB_PATH:-$DB_DIR/pending.db}"
+SVC_USER="${SVC_USER:-nullsink}"         # legacy shared-owner fallback
+BALANCES_DB_USER="${BALANCES_DB_USER:-$SVC_USER}"
+PENDING_DB_USER="${PENDING_DB_USER:-$SVC_USER}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
 # Two app units, two loopback ports, two /healthz. Kept literal (this script is run standalone by systemd
 # and never sources deploy/lib.sh).
@@ -107,37 +111,51 @@ if systemctl is-active --quiet tinfoil-proxy 2>/dev/null; then
   else warn "tinfoil-proxy not answering :3301 — the proxy is down/failed-closed (attestation) OR the enclave is unreachable; Tinfoil requests will fail (other providers unaffected)"; fi
 fi
 
-# --- 2. host: disk + WAL-sidecar ownership (a full disk or root-owned sidecars silently break billing) ---
-disk_pct="$(df --output=pcent "$DB_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
-inode_pct="$(df --output=ipcent "$DB_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
-# An EMPTY reading means df couldn't stat the mount — the filesystem is in trouble, which is exactly when the
-# headroom warning matters most. Treat unreadable as a WARN, not a silent OK: reporting "disk ?%" and passing
-# the run is a monitor that goes green because it never looked.
-if [ -z "$disk_pct" ]; then warn "could not read disk usage for $DB_DIR (df failed) — filesystem may be unhealthy"
-elif [ "$disk_pct" -ge "$DISK_WARN_PCT" ]; then warn "disk ${disk_pct}% full on $DB_DIR — billing writes at risk"
-else ok "disk ${disk_pct}% on $DB_DIR"; fi
-if [ -z "$inode_pct" ]; then warn "could not read inode usage for $DB_DIR (df failed)"
-elif [ "$inode_pct" -ge "$DISK_WARN_PCT" ]; then warn "inodes ${inode_pct}% used on $DB_DIR"; fi
-sidecar_bad=0
-for sc in "$DB_DIR"/*.db-wal "$DB_DIR"/*.db-shm; do
-  [ -e "$sc" ] || continue
-  owner="$(stat -c '%U' "$sc" 2>/dev/null)"
-  [ "$owner" = "$SVC_USER" ] || { warn "sidecar $(basename "$sc") owned by '$owner' (expected '$SVC_USER') — a root write broke billing perms; chown back"; sidecar_bad=1; }
-done
-[ "$sidecar_bad" -eq 0 ] && ok "DB WAL sidecars owned by $SVC_USER (or none present)"
+# --- 2. host: disk + WAL-sidecar ownership (a full disk or wrong-owner sidecars silently break billing) ---
+# Check each distinct state directory. They are one directory today; Step 4 moves them apart.
+check_filesystem() {
+  local db_dir="$1" disk_pct inode_pct
+  disk_pct="$(df --output=pcent "$db_dir" 2>/dev/null | tail -1 | tr -dc '0-9')"
+  inode_pct="$(df --output=ipcent "$db_dir" 2>/dev/null | tail -1 | tr -dc '0-9')"
+  # An EMPTY reading means df couldn't stat the mount — treat it as a warning, never a silent OK.
+  if [ -z "$disk_pct" ]; then warn "could not read disk usage for $db_dir (df failed) — filesystem may be unhealthy"
+  elif [ "$disk_pct" -ge "$DISK_WARN_PCT" ]; then warn "disk ${disk_pct}% full on $db_dir — billing writes at risk"
+  else ok "disk ${disk_pct}% on $db_dir"; fi
+  if [ -z "$inode_pct" ]; then warn "could not read inode usage for $db_dir (df failed)"
+  elif [ "$inode_pct" -ge "$DISK_WARN_PCT" ]; then warn "inodes ${inode_pct}% used on $db_dir"; fi
+}
+balances_dir="$(dirname "$BALANCES_DB_PATH")"
+pending_dir="$(dirname "$PENDING_DB_PATH")"
+check_filesystem "$balances_dir"
+[ "$pending_dir" = "$balances_dir" ] || check_filesystem "$pending_dir"
 
-# --- 2b. billing-DB integrity + backup freshness. Run the integrity pragma AS THE SERVICE USER so any
-#     sidecar it touches stays service-owned (root would re-create the very breakage section 2 warns about);
-#     quick_check reads page structure for corruption, never identity/row content. ---
+sidecar_bad=0
+check_sidecars() {
+  local db_path="$1" expected_user="$2" sc owner
+  for sc in "$db_path-wal" "$db_path-shm"; do
+    [ -e "$sc" ] || continue
+    owner="$(stat -c '%U' "$sc" 2>/dev/null)"
+    [ "$owner" = "$expected_user" ] || { warn "sidecar $sc owned by '$owner' (expected '$expected_user') — a root write broke billing perms; chown back"; sidecar_bad=1; }
+  done
+}
+check_sidecars "$BALANCES_DB_PATH" "$BALANCES_DB_USER"
+check_sidecars "$PENDING_DB_PATH" "$PENDING_DB_USER"
+[ "$sidecar_bad" -eq 0 ] && ok "DB WAL sidecars have their expected owners (or none present)"
+
+# --- 2b. billing-DB integrity + backup freshness. Run each integrity pragma as that DB's owning service user
+#     so any sidecar it touches stays correctly owned; quick_check reads page structure, never row content. ---
 if command -v sqlite3 >/dev/null; then
-  for db in balances pending; do
-    f="$DB_DIR/$db.db"; [ -e "$f" ] || continue
+  check_integrity() {
+    local db="$1" f="$2" db_user="$3" res
+    [ -e "$f" ] || return 0
     # busy_timeout: the CLI's own connection has none, so a concurrent settler write lock would otherwise
     # return SQLITE_BUSY and read as a false integrity failure.
-    res="$(sudo -u "$SVC_USER" sqlite3 -cmd '.timeout 10000' "$f" 'PRAGMA quick_check;' 2>/dev/null | head -1)"
+    res="$(sudo -u "$db_user" sqlite3 -cmd '.timeout 10000' "$f" 'PRAGMA quick_check;' 2>/dev/null | head -1)"
     if [ "$res" = ok ]; then ok "$db.db integrity ok"
     else warn "$db.db integrity check FAILED ('${res:-no result}') — DB may be corrupt; restore from backup"; fi
-  done
+  }
+  check_integrity balances "$BALANCES_DB_PATH" "$BALANCES_DB_USER"
+  check_integrity pending "$PENDING_DB_PATH" "$PENDING_DB_USER"
 else
   echo "skip DB integrity (sqlite3 not installed — apt-get install sqlite3)"
 fi

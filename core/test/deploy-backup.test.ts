@@ -44,8 +44,12 @@ function workspace(): { root: string; db: string; backups: string; bin: string; 
   return { root, db, backups, bin, ageMarker };
 }
 
-function seedDatabases(dbDir: string, options: { tokensTable?: boolean; missingTombstoneMarker?: boolean } = {}): void {
-  const balances = new Database(join(dbDir, "balances.db"));
+function seedDatabases(
+  balancesDir: string,
+  options: { tokensTable?: boolean; missingTombstoneMarker?: boolean } = {},
+  pendingDir = balancesDir,
+): void {
+  const balances = new Database(join(balancesDir, "balances.db"));
   if (options.tokensTable !== false) {
     balances.run("CREATE TABLE tokens (hash TEXT PRIMARY KEY, balance INTEGER NOT NULL)");
     balances.run("INSERT INTO tokens VALUES (?, ?), (?, ?)", [HASH, 7_500_000, OTHER_HASH, 2_500_000]);
@@ -54,7 +58,7 @@ function seedDatabases(dbDir: string, options: { tokensTable?: boolean; missingT
   if (!options.missingTombstoneMarker) balances.run("INSERT INTO applied_orders VALUES ('delivered-order', 1000)");
   balances.close();
 
-  const pending = new Database(join(dbDir, "pending.db"));
+  const pending = new Database(join(pendingDir, "pending.db"));
   pending.run(`CREATE TABLE pending_orders (
     rail TEXT NOT NULL, order_index INTEGER NOT NULL, address TEXT NOT NULL, hash TEXT NOT NULL,
     expected_atomic INTEGER NOT NULL, credit_micros INTEGER NOT NULL, received_atomic INTEGER NOT NULL,
@@ -79,9 +83,13 @@ function seedDatabases(dbDir: string, options: { tokensTable?: boolean; missingT
 }
 
 function runBackup(env: Record<string, string>) {
+  const inheritedEnv = { ...process.env };
+  delete inheritedEnv.BALANCES_DB_PATH;
+  delete inheritedEnv.PENDING_DB_PATH;
+
   return Bun.spawnSync({
     cmd: ["bash", BACKUP],
-    env: { ...process.env, ...env },
+    env: { ...inheritedEnv, ...env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -134,6 +142,41 @@ test("backup publishes a validated encrypted artifact and an aggregate-only repo
   expect(report.operations.undelivered_credits.oldest_age_seconds).toBeGreaterThan(0);
 
   for (const forbidden of [HASH, OTHER_HASH, ADDRESS, ORDER_ID, "delivered-order"]) expect(raw).not.toContain(forbidden);
+});
+
+test("backup snapshots a matched pair from explicit, separate state directories", () => {
+  const w = workspace();
+  const balancesDir = join(w.root, "proxy-state");
+  const pendingDir = join(w.root, "payments-state");
+  mkdirSync(balancesDir);
+  mkdirSync(pendingDir);
+  seedDatabases(balancesDir, {}, pendingDir);
+
+  const result = runBackup({
+    PATH: `${w.bin}:${process.env.PATH}`,
+    BALANCES_DB_PATH: join(balancesDir, "balances.db"),
+    PENDING_DB_PATH: join(pendingDir, "pending.db"),
+    BACKUP_DIR: w.backups,
+    BACKUP_AGE_RECIPIENT: "age1test",
+    FAKE_AGE_MARKER: w.ageMarker,
+  });
+  const output = result.stdout.toString() + result.stderr.toString();
+  expect(result.exitCode, output).toBe(0);
+
+  const names = readdirSync(w.backups);
+  const artifactName = names.find((name) => /^backup-.*\.tar\.age$/.test(name));
+  const reportName = names.find((name) => /^report-.*\.json$/.test(name));
+  expect(artifactName).toBeDefined();
+  expect(reportName).toBeDefined();
+
+  const members = Bun.spawnSync(["tar", "-tf", join(w.backups, artifactName!)]);
+  expect(members.exitCode, members.stderr.toString()).toBe(0);
+  expect(members.stdout.toString().trim().split("\n").sort()).toEqual(["balances.db", "pending.db"]);
+
+  const report = JSON.parse(readFileSync(join(w.backups, reportName!), "utf8"));
+  expect(report.finance.liability).toEqual({ outstanding_micros: "10000000" });
+  expect(report.finance.revenue_by_day_asset).toHaveLength(2);
+  expect(report.operations.open_orders.count).toBe(1);
 });
 
 test("backup can publish finalized files to one dedicated export group", () => {

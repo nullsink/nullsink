@@ -93,6 +93,11 @@ packages the pair, and runs `restore.sh`'s read-only validation before anything 
 directory, then atomically renamed. A collector therefore sees a complete final file or no file, never an
 in-progress artifact.
 
+Backup, restore, status, and the temporary live readers accept explicit `BALANCES_DB_PATH` and
+`PENDING_DB_PATH` values. The installed units pin both to `/var/lib/nullsink` today; `DB_DIR` remains the
+backward-compatible shared-directory fallback. Keeping the inputs explicit lets the OS-separation migration
+move the stores independently without changing the matched-pair archive format or snapshot order.
+
 For the production/off-box workflow, set `BACKUP_AGE_RECIPIENT` to an `age` **public recipient** whose
 private identity remains offline. The finished recovery artifact is `backup-<UTC>.tar.age`; a production
 box or storage host with only the recipient/ciphertext cannot decrypt it. Plain `.tar` remains available for

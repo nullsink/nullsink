@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { unlinkSync } from "node:fs";
+import { chmodSync, existsSync, statSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
@@ -40,14 +40,18 @@ test("nsk financials reads exact live sales and liability from their owning data
   const balances = openDb(BALANCES);
   balances.credit("h".repeat(64), 40_000_000);
   balances.db.close();
+  for (const path of [BALANCES, PENDING]) {
+    chmodSync(path, 0o440);
+    for (const suffix of ["-wal", "-shm"]) if (existsSync(path + suffix)) chmodSync(path + suffix, 0o440);
+  }
 
   const result = Bun.spawnSync({
     cmd: [process.execPath, CLI, "financials", "--format", "json"],
-    env: { ...process.env, DB_PATH: BALANCES, PENDING_DB_PATH: PENDING, NSK_ALLOW_ROOT: "1" },
+    env: { ...process.env, BALANCES_DB_PATH: BALANCES, PENDING_DB_PATH: PENDING, NSK_ALLOW_ROOT: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });
-  expect(result.exitCode).toBe(0);
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
   const output = JSON.parse(result.stdout.toString());
   expect(output.sales).toEqual([
     {
@@ -60,4 +64,10 @@ test("nsk financials reads exact live sales and liability from their owning data
   ]);
   expect(output.totals).toMatchObject({ sales: 1, credit_usd: "15.000000", gross_usd: "16.500000" });
   expect(output.outstanding).toEqual({ tokens: 1, prepaid_usd: "40.000000" });
+  for (const path of [BALANCES, PENDING]) {
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      expect(existsSync(file)).toBe(true);
+      expect(statSync(file).mode & 0o222).toBe(0);
+    }
+  }
 });

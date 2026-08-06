@@ -2,7 +2,8 @@
 // read-only flag; no service store constructor, schema migration, or write method enters the nsk binary.
 import { Database } from "bun:sqlite";
 
-export const BALANCES_DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
+export const BALANCES_DB_PATH =
+  process.env.BALANCES_DB_PATH ?? process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
 export const PENDING_DB_PATH = process.env.PENDING_DB_PATH ?? siblingPendingPath(BALANCES_DB_PATH);
 
 export type LiveRevenueRow = {
