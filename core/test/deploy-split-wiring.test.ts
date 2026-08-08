@@ -67,8 +67,10 @@ test("both systemd units and both roots use the one credit-group-authenticated s
   expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
   expect(proxyUnit).toContain("RuntimeDirectory=nullsink-credit");
-  expect(proxyUnit).toContain("ExecStartPre=+/bin/chgrp nullsink-credit /run/nullsink-credit");
-  expect(proxyUnit).toContain("chgrp nullsink-credit /run/nullsink-credit/credit.sock");
+  expect(proxyUnit).not.toContain("ExecStartPre=+/bin/chgrp nullsink-credit");
+  expect(proxyUnit).toContain(
+    "chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock",
+  );
   expect(proxyUnit).toContain("chmod 0660 /run/nullsink-credit/credit.sock");
   expect(paymentsUnit).toContain("SupplementaryGroups=nullsink-credit");
 });
@@ -111,6 +113,18 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(migration).not.toContain("nullsink-wallet");
   expect(deployLib).toContain("activate_isolation_sidecars");
   expect(deployLib).toContain("chown root:root /etc/monero-wallet-rpc.env");
+  const restartSidecars = deployLib.slice(
+    deployLib.indexOf("restart_isolation_sidecars()"),
+    deployLib.indexOf("health_ok()"),
+  );
+  expect(restartSidecars.indexOf('systemctl stop "${active_units[@]}"')).toBeGreaterThan(-1);
+  expect(restartSidecars.indexOf("activate_isolation_sidecars")).toBeGreaterThan(
+    restartSidecars.indexOf('systemctl stop "${active_units[@]}"'),
+  );
+  expect(restartSidecars.indexOf('systemctl start "${active_units[@]}"')).toBeGreaterThan(
+    restartSidecars.indexOf("activate_isolation_sidecars"),
+  );
+  expect(restartSidecars).not.toContain("systemctl restart");
   expect(setup.indexOf("activate_isolation_sidecars")).toBeGreaterThan(
     setup.indexOf("install_units"),
   );
@@ -211,6 +225,9 @@ test("the first isolated deploy refuses before unit activation until explicit pr
   expect(deployScript.slice(marker, apply)).toContain("units and services were NOT changed");
   expect(deployScript.slice(marker, apply)).not.toContain("prepare_service_isolation");
   expect(setup).toContain("Existing billing state requires an explicit, quiet-window migration");
+  expect(readFileSync(deploy("README.md"), "utf8")).toContain(
+    "not** the old `/opt/nullsink/deploy/deploy.sh`",
+  );
 });
 
 test("backup publication and routine reporting follow the Step 2 egress contract", () => {
