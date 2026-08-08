@@ -10,7 +10,7 @@ die() { echo "setup-export: $*" >&2; exit 1; }
 
 EXPORT_USER="nullsink-backup-export"
 EXPORT_GROUP="nullsink-backup-export"
-BACKUP_DIR="${BACKUP_DIR:-/var/lib/nullsink/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/var/lib/nullsink-backup}"
 AUTHORIZED_DIR="/var/lib/$EXPORT_USER/.ssh"
 AUTHORIZED_KEYS="$AUTHORIZED_DIR/authorized_keys"
 [[ "$BACKUP_DIR" != / && "$BACKUP_DIR" =~ ^/[A-Za-z0-9._/-]+$ ]] ||
@@ -18,14 +18,14 @@ AUTHORIZED_KEYS="$AUTHORIZED_DIR/authorized_keys"
 
 command -v useradd >/dev/null || die "useradd not found"
 command -v ssh-keygen >/dev/null || die "ssh-keygen not found"
-id nullsink >/dev/null 2>&1 || die "nullsink service user does not exist"
-[ -f /etc/nullsink.env ] || die "/etc/nullsink.env does not exist"
+id nullsink-backup >/dev/null 2>&1 || die "nullsink-backup service user does not exist"
+[ -f /etc/nullsink-backup.env ] || die "/etc/nullsink-backup.env does not exist"
 recipient="$(
-  awk -F= '$1 == "BACKUP_AGE_RECIPIENT" { print $2 }' /etc/nullsink.env |
+  awk -F= '$1 == "BACKUP_AGE_RECIPIENT" { print $2 }' /etc/nullsink-backup.env |
     tail -n 1
 )"
 [ -n "$recipient" ] ||
-  die "BACKUP_AGE_RECIPIENT must be set in /etc/nullsink.env before enabling the export"
+  die "BACKUP_AGE_RECIPIENT must be set in /etc/nullsink-backup.env before enabling the export"
 
 read -r key_type key_blob _ < "$1"
 [ "$key_type" = ssh-ed25519 ] || die "collector key must be ssh-ed25519"
@@ -65,7 +65,7 @@ Environment=BACKUP_DIR=$BACKUP_DIR
 ReadWritePaths=$BACKUP_DIR
 EOF
 
-install -d -o nullsink -g nullsink -m 0755 "$BACKUP_DIR"
+install -d -o nullsink-backup -g "$EXPORT_GROUP" -m 0750 "$BACKUP_DIR"
 find "$BACKUP_DIR" -maxdepth 1 -type f \
   \( -name 'backup-*.tar.age' -o -name 'report-*.json' \) \
   -exec chgrp "$EXPORT_GROUP" {} + \

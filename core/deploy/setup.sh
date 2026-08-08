@@ -9,13 +9,16 @@ export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
 # Runs AS ROOT. The box runs compiled services, optional read-only nsk, and deploy scripts; setup fetches
 # verified release assets via plain curl — no gh, auth, source tree, or Bun.
 APP_DIR="/opt/nullsink"
-SVC_USER="nullsink"
-ENV_FILE="/etc/nullsink.env"
+PROXY_ENV_FILE="/etc/nullsink-proxy.env"
+PAYMENTS_ENV_FILE="/etc/nullsink-payments.env"
+BACKUP_ENV_FILE="/etc/nullsink-backup.env"
+MONITOR_ENV_FILE="/etc/nullsink-monitor.env"
+LEGACY_ENV_FILE="/etc/nullsink.env"
 WEB_BASE="/var/www/nullsink"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web symlink)
 
 # Shared "apply repo config" library (install_units + health_ok + the PROXY_UNIT/PAYMENTS_UNIT names), also
 # sourced by deploy.sh so the unit-install glob is one source of truth across bootstrap + redeploy. The app
-# is TWO units; both run as $SVC_USER. Needs APP_DIR/ENV_FILE (set above).
+# is TWO units with distinct identities and role-specific environments.
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -40,26 +43,26 @@ RELEASE_TAG="${RELEASE_TAG:-v1.12.0}" # x-release-please-version
 # All external dependency pins and verified installers live in lib.sh. setup.sh uses them for bootstrap;
 # upgrade-component.sh uses the same definitions for narrow day-two upgrades, so the two paths cannot drift.
 # --- Env/rail helpers. ---
-rail_active() {  # $1=rail — true if listed in PAY_RAILS (or legacy PAY_RAIL) in $ENV_FILE
-  [ -f "$ENV_FILE" ] || return 1
+rail_active() {  # $1=rail — true if listed in PAY_RAILS (or legacy PAY_RAIL) in the payments env
+  [ -f "$PAYMENTS_ENV_FILE" ] || return 1
   local rails
-  rails="$(grep -E '^(PAY_RAILS|PAY_RAIL)=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  rails="$(grep -E '^(PAY_RAILS|PAY_RAIL)=' "$PAYMENTS_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   case ",${rails// /}," in *",$1,"*) return 0 ;; *) return 1 ;; esac
 }
 proxy_disabled() {  # true if the env sets MONERO_PROXY_ARG empty (direct/clearnet node, no Tor — e.g. staging)
   [ -f /etc/monero-wallet-rpc.env ] && grep -qE '^MONERO_PROXY_ARG=[[:space:]]*$' /etc/monero-wallet-rpc.env
 }
-tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in $ENV_FILE — gates the Tinfoil verifying proxy
-  [ -f "$ENV_FILE" ] || return 1
+tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in the proxy env
+  [ -f "$PROXY_ENV_FILE" ] || return 1
   local k
-  k="$(grep -E '^TINFOIL_API_KEY=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  k="$(grep -E '^TINFOIL_API_KEY=' "$PROXY_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
 }
 btc_node_local() {  # true when BITCOIN_RPC_URL is unset/localhost — i.e. THIS box runs the bitcoind node.
   # After a node-box split the URL points at the WireGuard peer; a setup.sh re-run must then neither
   # reinstall nor resurrect a local bitcoind (the decommissioned datadir/conf may still exist).
   local url
-  url="$(grep -E '^BITCOIN_RPC_URL=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+  url="$(grep -E '^BITCOIN_RPC_URL=' "$PAYMENTS_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   [ -z "$url" ] && return 0   # unset = the app's built-in localhost default
   case "$url" in http://127.0.0.1:*|http://localhost:*) return 0 ;; *) return 1 ;; esac
 }
@@ -83,11 +86,6 @@ cat > /etc/apt/apt.conf.d/51nullsink-no-reboot <<'EOF'
 Unattended-Upgrade::Automatic-Reboot "false";
 EOF
 
-step "Creating service user '$SVC_USER'"
-if ! id "$SVC_USER" &>/dev/null; then
-  useradd --system --create-home --shell /usr/sbin/nologin "$SVC_USER"
-fi
-
 step "Installing the deploy tree to $APP_DIR (release tarball)"
 # Fetch+verify+extract the release's deploy tarball instead of git-cloning source (source-free box).
 # SELF-OVERWRITE GUARD: setup.sh is itself run from $APP_DIR/deploy (per the bootstrap procedure),
@@ -101,79 +99,37 @@ elif install_deploy_tree "$RELEASE_TAG" "$APP_DIR"; then
 else
   todo "deploy tree not installed (check network/tag + re-run) — backup/status-check/alert units can't run until $APP_DIR/deploy exists"
 fi
-chown -R "$SVC_USER:$SVC_USER" "$APP_DIR"
+chown -R root:root "$APP_DIR"
+chmod -R go-w "$APP_DIR"
 chmod +x "$APP_DIR"/deploy/*.sh   # status-check.sh + alert.sh + backup.sh are run by systemd; keep the exec bit
 
-step "Ensuring env file at $ENV_FILE"
+step "Preparing isolated service identities, environments, and state"
 FRESH_ENV=0
-if [ ! -f "$ENV_FILE" ]; then
-  FRESH_ENV=1
-  cat > "$ENV_FILE" <<EOF
-ANTHROPIC_API_KEY=replace-me
-HOST=127.0.0.1
-# Loopback ports, one per service. PORT is nullsink-proxy (the metered /v1 paths + /balance); PAYMENTS_PORT
-# is nullsink-payments (/buy, /order-status, /rails). Caddy routes each path to exactly one of them; change
-# either here and the Caddyfile's matching reverse_proxy line together.
-PORT=8080
-PAYMENTS_PORT=8081
-# Public edge (Caddy): the domain this box serves on. setup.sh feeds it to Caddy via a systemd drop-in, so
-# the committed Caddyfile hardcodes no host. EMPTY = setup.sh skips the public edge (the app still runs on
-# 127.0.0.1); re-run after setting it. Keep bare (no inline # comment).
-NULLSINK_DOMAIN=
-# Buy rail (POST /buy) — optional; the edge routes /buy publicly when a rail is active. PAY_RAILS is a comma list
-# of active rails (default monero; legacy PAY_RAIL=<one name> still works); the FIRST is the /buy default, and
-# each rail reads its own MONERO_CONFIRMATIONS / BITCOIN_CONFIRMATIONS. Monero needs a view-only
-# monero-wallet-rpc + node; Bitcoin needs a pruned watch-only bitcoind — add "bitcoin" only once its
-# node is 100% synced.
-PAY_RAILS=monero
-MONERO_WALLET_RPC_URL=http://127.0.0.1:18083/json_rpc
-# MONERO_CONFIRMATIONS=10   # XMR finality depth (default 10; ~10 is the floor — outputs lock ~10 blocks)
-# Bitcoin rail (add "bitcoin" to PAY_RAILS): the wallet-scoped RPC endpoint + rpcauth creds. Keep these bare.
-# RPC port is 8332 on mainnet; a signet/testnet box uses 38332. PASSWORD is written by
-# deploy/regen-bitcoin-rpcauth.sh (matched with the conf's rpcauth=) — leave it empty here.
-BITCOIN_RPC_URL=http://127.0.0.1:8332/wallet/nullsink
-BITCOIN_RPC_USER=
-BITCOIN_RPC_PASSWORD=
-# BITCOIN_CONFIRMATIONS=3   # BTC finality depth (default 3)
-# Telegram health alerts (status-check OnFailure). EMPTY = alerts disabled (a safe no-op). Bot token from
-# @BotFather, numeric chat id from @userinfobot. Keep these lines BARE (no inline # comment — systemd keeps
-# everything after = as the value).
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-# Dead-man's-switch ping target (a healthchecks.io URL or a self-hosted Uptime Kuma push URL). EMPTY =
-# disabled. The health check pings this on success so an OFF-BOX monitor alerts if the ping STOPS (a dead
-# box/network/timer that OnFailure can't catch). Keep bare (no inline # comment).
-HEARTBEAT_URL=
-# --- Backups (deploy/backup.sh, run every four hours by backup.timer; restore/verify with deploy/restore.sh) ---
-# OFF-BOX copies MUST be encrypted: set BACKUP_AGE_RECIPIENT to an age PUBLIC key whose private key you keep
-# OFFLINE, so the box can only ENCRYPT, never decrypt past backups (apt-get install age; age-keygen on your
-# secure machine). EMPTY = local-only PLAINTEXT snapshots (fine on-box; never push those off). Keep bare.
-BACKUP_AGE_RECIPIENT=
-# Six snapshots/day × 14 days. This is an artifact count, so extra manual backups shorten the time window.
-BACKUP_KEEP=84
-# Shell snippet to ship each finished artifact off-box, run with \$ARTIFACT = the file path, e.g.:
-#   BACKUP_PUSH_CMD=rclone copy "\$ARTIFACT" remote:nullsink-backups/
-# EMPTY = keep backups on-box only. Keep this line bare (no inline # comment).
-BACKUP_PUSH_CMD=
-EOF
-  chmod 600 "$ENV_FILE"
-  chown "$SVC_USER:$SVC_USER" "$ENV_FILE"
-  note "Templated $ENV_FILE with placeholders"
+[ -f "$PROXY_ENV_FILE" ] || [ -f "$LEGACY_ENV_FILE" ] || FRESH_ENV=1
+if [ ! -f /etc/nullsink-service-isolation.prepared ] \
+  && { [ -f /var/lib/nullsink/balances.db ] || [ -f /var/lib/nullsink/pending.db ]; }; then
+  echo "    Existing billing state requires an explicit, quiet-window migration. No units were changed."
+  echo "    Review and run: $APP_DIR/deploy/migrate-service-isolation.sh --prepare"
+  echo "    Then rerun setup.sh."
+  exit 1
 fi
+prepare_service_isolation
 
 # Attestation: when the Tinfoil rail is active and TINFOIL_BASE_URL is UNSET, default it to the local verifying proxy
 # (the real upgrade path — the earlier template never wrote this line). Any EXPLICIT value is respected and
 # survives re-runs — there's no self-reverting flip of a value the operator can see: http://127.0.0.1:3301 routes
 # through the attesting proxy; the public endpoint forwards directly (unverified) and is flagged each run. Done
 # here, BEFORE the app (re)start below, so the app reads the value; the proxy itself is installed + started in its
-# own step further down (also before the app restart). Append is in-place (`>>`), preserving the file's 600/owner.
+# own step further down (also before the app restart). Root may append; service identities cannot modify the
+# root-owned environment files that systemd reads before dropping privileges.
 if tinfoil_active; then
-  _tbu="$(grep -E '^TINFOIL_BASE_URL=' "$ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
+  _tbu="$(grep -E '^TINFOIL_BASE_URL=' "$PROXY_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_tbu" ]; then
     { echo "# Tinfoil enclave attestation: the local verifying proxy (tinfoil-proxy.service). Set to"
       echo "# https://inference.tinfoil.sh to forward directly, WITHOUT attestation (respected on re-runs)."
       echo "TINFOIL_BASE_URL=http://127.0.0.1:3301"
-    } >> "$ENV_FILE"
+    } >> "$PROXY_ENV_FILE"
+    chmod 0600 "$PROXY_ENV_FILE"
     note "TINFOIL_BASE_URL defaulted to the local attesting proxy (http://127.0.0.1:3301)"
   elif [ "$_tbu" = "http://127.0.0.1:3301" ]; then
     : # already routing through the local proxy — nothing to do
@@ -187,6 +143,9 @@ step "Installing systemd units"
 # deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
 # per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
 install_units
+# Fresh boxes have no sidecar state; migrations transition any existing wallet/verifier state only now, when
+# the isolated units are about to activate. The reversible preparation phase never changes these permissions.
+activate_isolation_sidecars
 
 step "Installing the app binaries (pinned release)"
 # Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in
@@ -230,19 +189,19 @@ step "Installing systemd services"
 # Each unit's ExecStart points at its binary (/usr/local/lib/nullsink/current-{proxy,payments}), installed in
 # the step above.
 enable_app_units
-# The env file EXISTING isn't the same as it being CONFIGURED. On a re-run (env present) we (re)start so the
+# The proxy env EXISTING isn't the same as it being CONFIGURED. On a re-run we (re)start so the
 # buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the box boots and the rails
 # work, yet /v1/messages will 401 until a real Anthropic key is set (or run OpenAI-only via OPENAI_API_KEY —
 # at least one provider key is required for nullsink-proxy to boot). A freshly templated env is left for the
 # operator to fill; nullsink-payments would start fine, but there's no reason to run half the app.
 if [ "$FRESH_ENV" -eq 0 ]; then
   restart_app
-  _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+  _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$PROXY_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_akey" ] || [ "$_akey" = replace-me ]; then
-    todo "ANTHROPIC_API_KEY is still the placeholder in $ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $PROXY_UNIT"
+    todo "ANTHROPIC_API_KEY is still the placeholder in $PROXY_ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $PROXY_UNIT"
   fi
 else
-  todo "Edit $ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $PROXY_UNIT $PAYMENTS_UNIT"
+  todo "Edit $PROXY_ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $PROXY_UNIT $PAYMENTS_UNIT"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"
@@ -284,7 +243,7 @@ if [ -f /etc/monero-wallet-rpc.env ] && [ -f /var/lib/nullsink-wallet/prview ]; 
 elif rail_active monero; then
   todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc"
 else
-  todo "XMR rail (optional): add 'monero' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install the wallet binaries"
+  todo "XMR rail (optional): add 'monero' to PAY_RAILS in $PAYMENTS_ENV_FILE + re-run setup.sh to install the wallet binaries"
 fi
 
 step "Configuring bitcoind (BTC buy-rail watcher)"
@@ -303,7 +262,7 @@ elif [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ]; th
 elif rail_active bitcoin; then
   todo "BTC rail: create the pruned datadir + bitcoin.conf + watch-only wallet, then: systemctl enable --now bitcoind"
 else
-  todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $ENV_FILE + re-run setup.sh to install bitcoind"
+  todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $PAYMENTS_ENV_FILE + re-run setup.sh to install bitcoind"
 fi
 
 step "Enabling timers (health check, four-hour backup)"
@@ -313,8 +272,8 @@ step "Enabling timers (health check, four-hour backup)"
 #     (a NO-OP until TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID are set — still logs to journald).
 #   - backup.timer runs deploy/backup.sh every four hours AS the service user: sqlite3 .backup of the explicit
 #     balance + payment DB paths, matched-pair validation, an aggregate-only report, optional age-encryption
-#     (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), all configured in $ENV_FILE.
-#     Unset = local-only plaintext snapshots in /var/lib/nullsink/backups (status-check warns if the newest goes
+#     (BACKUP_AGE_RECIPIENT) + off-box push (BACKUP_PUSH_CMD), all configured in $BACKUP_ENV_FILE.
+#     Unset = local-only plaintext snapshots in /var/lib/nullsink-backup (status-check warns if the newest goes
 #     stale). Restore or TEST a backup with deploy/restore.sh (dry-run by default).
 enable_timers
 # Seed the first backup artifact now, so the freshness check doesn't warn until the four-hour timer first fires AND
@@ -333,18 +292,20 @@ if ! command -v caddy &>/dev/null; then
   apt-get install -y -qq caddy
 fi
 # The committed Caddyfile is a host-agnostic TEMPLATE: the served domain comes from {$NULLSINK_DOMAIN},
-# which Caddy reads from a systemd drop-in we write here from NULLSINK_DOMAIN in $ENV_FILE. So per-box edge
-# config lives in the env file, never in the published Caddyfile. Without a domain set, skip the edge so the
+# which Caddy reads from a systemd drop-in we write here from NULLSINK_DOMAIN in $MONITOR_ENV_FILE. So per-box
+# edge config lives in the monitor file, never in the published Caddyfile. Without a domain set, skip the edge so the
 # rest of the (idempotent) bootstrap still completes; re-run after setting it.
-_domain="$(grep -E '^NULLSINK_DOMAIN=' "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+_domain="$(grep -E '^NULLSINK_DOMAIN=' "$MONITOR_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
+_webroot="$(grep -E '^NULLSINK_WEBROOT=' "$MONITOR_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
 if [ -z "$_domain" ]; then
-  todo "Public edge: set NULLSINK_DOMAIN in $ENV_FILE + re-run setup.sh (Caddy needs the domain)"
+  todo "Public edge: set NULLSINK_DOMAIN in $MONITOR_ENV_FILE + re-run setup.sh (Caddy needs the domain)"
 else
-  # A drop-in (NOT EnvironmentFile=$ENV_FILE) so Caddy gets ONLY the domain — never the upstream API keys.
+  # A drop-in (not an EnvironmentFile) so Caddy gets only the domain.
   install -d -m755 /etc/systemd/system/caddy.service.d
   cat > /etc/systemd/system/caddy.service.d/nullsink.conf <<EOF
 [Service]
 Environment=NULLSINK_DOMAIN=$_domain
+Environment=NULLSINK_WEBROOT=${_webroot:-/var/www/nullsink/current-web}
 EOF
   systemctl daemon-reload
   # Refresh the edge config from the repo template, replacing the stock default the caddy package ships.
@@ -377,6 +338,9 @@ done
 # Extra, non-fatal confirmation that both services actually answer /healthz (a unit being "active" isn't the
 # same as it serving). A fresh env (app not started yet) or a still-warming app simply prints "no" here.
 if health_ok_app; then note "both /healthz responded 200"; else note "/healthz not answering yet on one or both services (fine if the app isn't started / still warming)"; fi
+if [ ! -f /etc/nullsink-service-isolation.finalized ]; then
+  todo "After both services are healthy, create an encrypted backup, prove its offline dry-run restore, then run: $APP_DIR/deploy/migrate-service-isolation.sh --finalize"
+fi
 printf '\n%sAccess%s — the app is PRIVATE on %s127.0.0.1:%s (proxy) + :%s (payments)%s; Caddy is the only public edge:\n' \
   "$_c" "$_z" "$_b" "$(proxy_port)" "$(payments_port)" "$_z"
 echo "  • Direct (SSH tunnel):  ssh -L 8080:localhost:8080 root@<box>   then  curl http://localhost:8080/healthz"

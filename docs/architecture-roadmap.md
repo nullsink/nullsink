@@ -6,7 +6,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: current system and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-08-04, v1.12.0
+## Status — 2026-08-06, after v1.12.0
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -16,13 +16,13 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
 | Operator database access | **Reduced in v1.12.0** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
-| Separate OS principals | **Not started** | Proxy and payments still share `User=nullsink`, `/etc/nullsink.env`, and `/var/lib/nullsink`. |
+| Separate OS principals | **Implemented in source; release and production migration pending** | Distinct users, env files, state roots, read groups, credit-socket group, and an explicit two-phase migration. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
 | nullsink proxy TEE | **Later feasibility work** | Distinct from the live Tinfoil verifier, which attests only Tinfoil's remote enclave. |
 | Public onion / geographic relay | **Later network work** | Not part of the five app-box steps below. |
 
-## Current boundary
+## Production boundary before Step 4
 
 Production is two application processes on one box:
 
@@ -39,6 +39,11 @@ This is an application-level trust boundary, not yet an OS security boundary. Bo
 under the same Linux identity and read the same environment file, so either process can still bypass the
 TypeScript boundary through filesystem permissions. Read-only `nsk financials` is the explicit operator
 exception: it opens both databases for live reconciliation but cannot mutate them.
+
+The Step 4 implementation makes that boundary enforceable by Linux permissions. It preserves the temporary
+operator readers through group-only database access and keeps the matched-pair backup contract through a
+dedicated backup principal. Production remains on the paragraph above until the release is staged, recovery-
+proven, deployed, and finalized.
 
 Provider routing is deliberately asymmetric. Anthropic and OpenAI are reached directly over
 TLS. Only Tinfoil traffic traverses the local `tinfoil-proxy`, which attests Tinfoil's remote
@@ -99,12 +104,19 @@ Gate for this slice: the released CLI exposes exactly `balances` and `financials
 all funding uses `/buy`. Remaining gate: replace both database readers with service-owned read interfaces
 during OS separation and ledger extraction, then retire `nsk`.
 
-### 4. Enforce OS privilege separation
+### 4. Enforce OS privilege separation — implemented; deployment pending
 
 Run proxy and payments under different Linux users, with separate environment files and state
 directories. Grant socket access explicitly with a dedicated group or ACL. A compromised payments
 process must not be able to read provider keys or `balances.db`; a compromised proxy must not be
 able to read wallet credentials or `pending.db`.
+
+The implementation uses `nullsink-proxy`, `nullsink-payments`, and `nullsink-backup` principals; separate
+proxy/payments/backup/monitor env files; separate state roots; read-only groups for the temporary operator
+views and coordinated backup; and a `nullsink-credit` group that grants payments access only to the credit
+socket. The old shared layout is copied during an explicit quiet window and retained root-only for bounded
+rollback. Finalization is deliberately separate from deployment and follows a post-migration encrypted
+backup plus offline restore dry run.
 
 Gate: deployment tests prove the file and socket permission matrix, not only the TypeScript import
 matrix.

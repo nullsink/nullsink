@@ -163,4 +163,4 @@ export type BalanceStore = ReturnType<typeof openDb>;
 
 // Default on-disk path. The proxy composition root passes this to openDb(); no store is opened at import
 // time. Callers construct and inject their own store instead.
-export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink/balances.db";
+export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink-proxy/balances.db";

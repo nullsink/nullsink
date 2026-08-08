@@ -1,26 +1,27 @@
 # One-shot DB backup, run every four hours by backup.timer. Snapshots balances.db + pending.db via sqlite3
 # .backup, validates the pair, optionally age-encrypts it, then atomically publishes the recovery artifact +
-# aggregate report and (if BACKUP_PUSH_CMD is set) ships the artifact off-box. Runs AS THE SERVICE
-# USER so the SQLite sidecars it touches stay service-owned (a root .backup breaks billing writes).
+# aggregate report and (if BACKUP_PUSH_CMD is set) ships the artifact off-box. It has read-only group access
+# to both live stores and write access only to its own artifact directory.
 [Unit]
 Description=nullsink billing-DB backup (one-shot; run by backup.timer)
+Wants=nullsink-bitcoin-label-export.service
+After=nullsink-bitcoin-label-export.service
 # Page Telegram if a backup run fails (a silent backup failure = creeping data-loss risk).
 OnFailure=status-alert@%n.service
 
 [Service]
 Type=oneshot
-User=nullsink
-Group=nullsink
+User=nullsink-backup
+Group=nullsink-backup
+SupplementaryGroups=nullsink-proxy-read nullsink-payments-read
 WorkingDirectory=/opt/nullsink
-# BACKUP_AGE_RECIPIENT / BACKUP_PUSH_CMD / BACKUP_KEEP live here; `-` so a missing file is fine.
-EnvironmentFile=-/etc/nullsink.env
-# Same StateDirectory as both app services, so /var/lib/nullsink (and backups/ under it) is writable under
-# ProtectSystem=strict. The paths are explicit so Step 4 can move each store without changing backup.sh's
-# matched-pair contract; they still resolve to the current shared directory in this release.
-StateDirectory=nullsink
-Environment=BALANCES_DB_PATH=/var/lib/nullsink/balances.db
-Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
-Environment=BACKUP_DIR=/var/lib/nullsink/backups
+EnvironmentFile=-/etc/nullsink-backup.env
+Environment=BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db
+Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db
+Environment=BACKUP_DIR=/var/lib/nullsink-backup
+Environment=BITCOIN_LABELS_PATH=/var/lib/nullsink-payments/bitcoin-wallet-labels.json
+ReadWritePaths=/var/lib/nullsink-backup
+UMask=0077
 ExecStart=/opt/nullsink/deploy/backup.sh
 
 # Hardening (mirrors the app units). NB: ProtectHome=read-only still lets the push step read an

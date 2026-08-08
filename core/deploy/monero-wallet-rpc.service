@@ -10,10 +10,10 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=simple
-# Same low-privilege user as the proxy, so it can own the wallet files and the app
-# never needs elevated rights. The wallet here is VIEW-ONLY — it cannot spend.
-User=nullsink
-Group=nullsink
+# Runs inside the payments trust domain and owns its wallet files. The wallet is VIEW-ONLY — it cannot spend.
+User=nullsink-payments
+Group=nullsink-payments-read
+UMask=0077
 
 # Wallet files (prview, prview.keys) + the rpc password file live here, created
 # service-owned under /var/lib/nullsink-wallet. Persistent so subaddress

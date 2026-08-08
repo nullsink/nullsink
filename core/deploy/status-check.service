@@ -8,14 +8,16 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=oneshot
-# HEARTBEAT_URL (the dead-man's-switch ping target) lives in the app env file; `-` so a missing file is fine.
-EnvironmentFile=-/etc/nullsink.env
+# The root monitor needs payments' watch-only RPC settings plus its own alert/control settings. It never loads
+# provider keys. `-` keeps a fresh, not-yet-configured box a log-only no-op rather than a unit-load failure.
+EnvironmentFile=-/etc/nullsink-payments.env
+EnvironmentFile=-/etc/nullsink-monitor.env
 # Root: needs to read /etc/monero-wallet-rpc.env and hit the localhost RPC + /healthz without permission
 # friction. It reads the billing DBs only for an integrity pragma — run AS the service user (sudo) so no
 # root-owned sidecars appear — checking page structure, never identity/row content. Privacy-safe.
-Environment=BALANCES_DB_PATH=/var/lib/nullsink/balances.db
-Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
-Environment=BALANCES_DB_USER=nullsink
-Environment=PENDING_DB_USER=nullsink
-Environment=BACKUP_DIR=/var/lib/nullsink/backups
+Environment=BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db
+Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db
+Environment=BALANCES_DB_USER=nullsink-proxy
+Environment=PENDING_DB_USER=nullsink-payments
+Environment=BACKUP_DIR=/var/lib/nullsink-backup
 ExecStart=/opt/nullsink/deploy/status-check.sh

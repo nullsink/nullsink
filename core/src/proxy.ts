@@ -26,7 +26,7 @@ const PORT = numEnv("PORT", 8080, 1, 65535);
 const HOST = process.env.HOST ?? "127.0.0.1";
 // The credit crossing. THIS service binds the socket (owner-only; see credit-server.ts) and the payments
 // service connects to the same path — its write permission on this file is the authentication.
-const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink/credit.sock";
+const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink-credit/credit.sock";
 // Total wall-clock cap on the upstream call (reaps hung/stalled connections). Matches the Anthropic SDK's
 // ~10min default; raise it if long generations get cut.
 const UPSTREAM_TIMEOUT_MS = numEnv("UPSTREAM_TIMEOUT_MS", 600_000, 1000, 3_600_000);

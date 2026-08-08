@@ -10,7 +10,8 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 APP_DIR="${APP_DIR:-/opt/nullsink}"
-ENV_FILE="${ENV_FILE:-/etc/nullsink.env}"
+PROXY_ENV_FILE="${PROXY_ENV_FILE:-/etc/nullsink-proxy.env}"
+PAYMENTS_ENV_FILE="${PAYMENTS_ENV_FILE:-/etc/nullsink-payments.env}"
 BIN_DIR="/usr/local/bin"
 ROLLBACK_ROOT="/usr/local/lib/nullsink/component-rollbacks"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"

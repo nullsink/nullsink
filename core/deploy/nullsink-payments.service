@@ -10,27 +10,23 @@ OnFailure=status-alert@%n.service
 
 [Service]
 Type=simple
-# Same uid as nullsink-proxy.service — see the note there. Both open /var/lib/nullsink, but each opens only
-# its OWN database: this service never links the balance store (enforced at the module level by
-# test/trust-domain-isolation.test.ts and on the compiled binary by scripts/assert-trust-domains.ts).
-User=nullsink
-Group=nullsink
+User=nullsink-payments
+Group=nullsink-payments-read
+SupplementaryGroups=nullsink-credit
 WorkingDirectory=/opt/nullsink
-# See nullsink-proxy.service: EnvironmentFile= OVERRIDES Environment=, so the settings below hold only because
-# setup.sh's templated env file omits them. PAYMENTS_PORT is deliberately NOT one of them — the env file owns
-# the port (the code defaults to 8081 too), so an operator retunes it in one place and edits the Caddyfile's
-# reverse_proxy line to match.
-EnvironmentFile=/etc/nullsink.env
+# Rail credentials and payments-only tuning. Storage/socket locations stay unit-owned below.
+EnvironmentFile=/etc/nullsink-payments.env
 ExecStart=/usr/local/lib/nullsink/current-payments
 Restart=always
 RestartSec=2
 
 # In-flight orders (the buy rails), the sales book, and the durable credit outbox — all in pending.db, in the
-# StateDirectory shared with nullsink-proxy.service (which owns balances.db there). While an order is
-# in-flight this DB holds the ONLY payment→token link, and an unacked outbox row is a credit the customer has
+# While an order is in-flight this DB holds the ONLY payment→token link, and an unacked outbox row is a credit the customer has
 # PAID FOR but not yet received — losing it = a paid customer with nothing to credit. BACK IT UP.
-StateDirectory=nullsink
-Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
+StateDirectory=nullsink-payments
+StateDirectoryMode=0750
+UMask=0027
+Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db
 
 # The credit crossing (payments → proxy, one direction, one verb). nullsink-proxy.service binds this socket
 # and owns its RuntimeDirectory; we only connect, so this unit must NOT declare RuntimeDirectory=nullsink —
@@ -38,7 +34,7 @@ Environment=PENDING_DB_PATH=/var/lib/nullsink/pending.db
 # socket out from under a running proxy. ProtectSystem=strict leaves /run read-only, which does not block
 # this: the kernel exempts sockets from the read-only-filesystem check, and connect(2) still enforces the
 # socket file's own write bit. Must match nullsink-proxy.service's CREDIT_SOCK exactly.
-Environment=CREDIT_SOCK=/run/nullsink/credit.sock
+Environment=CREDIT_SOCK=/run/nullsink-credit/credit.sock
 
 # Memory + task containment; the small half of the old single-unit envelope (see nullsink-proxy.service).
 # This service serves tiny JSON bodies and makes short wallet/rate RPC calls — no streaming, no 32 MiB

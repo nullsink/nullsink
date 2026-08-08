@@ -5,7 +5,7 @@
 // directly; this only neutralises the import-time singletons.
 //
 // FORCE the assignment (not `??=`): a dev shell often exports the prod DB_PATH / PENDING_DB_PATH (the
-// operator's profile, or a sourced /etc/nullsink.env), and with `??=` that ambient value wins —
+// operator's profile, or a sourced role environment), and with `??=` that ambient value wins —
 // the singleton then tries to open the real /var/lib store and the whole run errors with SQLITE_CANTOPEN.
 // Tests must NEVER touch prod data, so override unconditionally. (CI has a clean env; this matters locally.)
 process.env.DB_PATH = ":memory:";
