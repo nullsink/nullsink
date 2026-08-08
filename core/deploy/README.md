@@ -89,11 +89,16 @@ glob while still including them in the release tarball and deploy lint. (The lin
 
 ## One-time shared-layout migration
 
-The first deploy containing Step 4 installs the verified deploy tree but refuses before changing units when
-the prepared marker is absent. Review and run `migrate-service-isolation.sh --prepare` during a financial
-quiet window, then immediately rerun the same deploy. Preparation stops the old app and timers, checks that
-there are no holds, open orders, or undelivered/partial credits, copies and verifies both databases, splits
-the root-owned env files, and leaves the legacy layout and sidecar permissions untouched for rollback.
+The installed pre-Step-4 `deploy.sh` cannot contain the new refusal gate retroactively. For this one boundary-
+crossing release, verify the new `deploy-<tag>.tar.gz` off-box, copy it to the app box, extract it into a temporary
+directory, and run `deploy.sh <tag>` from there — **not** the old `/opt/nullsink/deploy/deploy.sh`. It installs the
+verified deploy tree, then exits before changing units because the prepared marker is absent. Subsequent commands
+use the newly installed `/opt/nullsink/deploy/` tree normally.
+
+Review and run `migrate-service-isolation.sh --prepare` during a financial quiet window, then immediately
+rerun `/opt/nullsink/deploy/deploy.sh <tag>`. Preparation stops the old app and timers, checks that there are
+no holds, open orders, or undelivered/partial credits, copies and verifies both databases, splits the root-
+owned env files, and leaves the legacy layout and sidecar permissions untouched for rollback.
 Preparation also refuses an active same-box `bitcoind`: the supported app-box topology uses the dedicated
 node box, and silently reusing the read-only operator uid for a daemon would defeat the new boundary.
 

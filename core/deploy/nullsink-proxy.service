@@ -17,10 +17,10 @@ EnvironmentFile=/etc/nullsink-proxy.env
 # by deploy.sh/setup.sh's install_binary (versioned binary + relative symlink for rollback).
 ExecStart=/usr/local/lib/nullsink/current-proxy
 # Type=simple considers ExecStart launched before the process has bound its owner-only credit socket. Gate the
-# start job on that socket so nullsink-payments.service's After= ordering covers actual crossing readiness,
-# not merely process creation. TimeoutStartSec bounds a broken/mismatched CREDIT_SOCK boot and lets systemd
-# fail + restart the proxy instead of holding the payments start job forever.
-ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-credit/credit.sock ]; do sleep 0.1; done; chgrp nullsink-credit /run/nullsink-credit/credit.sock; chmod 0660 /run/nullsink-credit/credit.sock'
+# start job on that socket, then grant the credit group access to BOTH the directory and socket. This must run
+# in ExecStartPost: the ExecStartPre chgrp did not survive systemd's RuntimeDirectory ownership handling.
+# Payments' After= ordering therefore covers actual crossing readiness, not merely process creation.
+ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-credit/credit.sock ]; do sleep 0.1; done; chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock; chmod 0660 /run/nullsink-credit/credit.sock'
 TimeoutStartSec=60
 Restart=always
 RestartSec=2
@@ -36,12 +36,11 @@ Environment=DB_PATH=/var/lib/nullsink-proxy/balances.db
 
 # The credit crossing. THIS service binds the socket; nullsink-payments connects to it. RuntimeDirectory is
 # created service-owned and torn down when this unit stops — payments then sees ENOENT, which its durable
-# outbox treats as ambiguous (retry next tick), never as a lost credit. ExecStartPre assigns the directory to
-# the dedicated credit group; the runtime binds owner-only, and ExecStartPost widens only the completed socket
-# to 0660 before this unit is considered started. Payments is the group's only non-root member.
+# outbox treats as ambiguous (retry next tick), never as a lost credit. ExecStartPost assigns the completed
+# directory and socket to the dedicated credit group before this unit is considered started. Payments is the
+# group's only non-root member.
 RuntimeDirectory=nullsink-credit
 RuntimeDirectoryMode=0710
-ExecStartPre=+/bin/chgrp nullsink-credit /run/nullsink-credit
 Environment=CREDIT_SOCK=/run/nullsink-credit/credit.sock
 
 # Holds many concurrent, minutes-long upstream connections.

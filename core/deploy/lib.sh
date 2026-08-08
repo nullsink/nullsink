@@ -313,11 +313,15 @@ activate_isolation_sidecars() {
 }
 restart_isolation_sidecars() {
   [ -f /etc/nullsink-service-isolation.finalized ] && return 0
-  activate_isolation_sidecars
+  local unit active_units=()
   for unit in tinfoil-proxy monero-wallet-rpc; do
-    systemctl is-active --quiet "$unit" 2>/dev/null || continue
-    systemctl restart "$unit"
+    systemctl is-active --quiet "$unit" 2>/dev/null && active_units+=("$unit")
   done
+  # Stop legacy-uid processes while they still own their state. In particular, monero-wallet-rpc saves its
+  # view-only wallet during SIGTERM; chowning first makes that final save fail before the isolated restart.
+  [ "${#active_units[@]}" -eq 0 ] || systemctl stop "${active_units[@]}"
+  activate_isolation_sidecars
+  [ "${#active_units[@]}" -eq 0 ] || systemctl start "${active_units[@]}"
 }
 
 health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TIMEOUT (default 60) s; return 0/1
