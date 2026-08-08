@@ -296,8 +296,24 @@ proxy_port()    { local p; p="$(env_val_from "$PROXY_ENV_FILE" PORT)"; echo "${p
 payments_port() { local p; p="$(env_val_from "$PAYMENTS_ENV_FILE" PAYMENTS_PORT)"; echo "${p:-8081}"; }
 
 prepare_service_isolation() { "$APP_DIR/deploy/migrate-service-isolation.sh" --prepare; }
+activate_isolation_sidecars() {
+  [ -f /etc/nullsink-service-isolation.finalized ] && return 0
+  if [ -d /var/lib/nullsink-wallet ]; then
+    chown -R nullsink-payments:nullsink-payments-read /var/lib/nullsink-wallet
+    chmod -R go-rwx /var/lib/nullsink-wallet
+  fi
+  if [ -f /etc/monero-wallet-rpc.env ]; then
+    chown root:root /etc/monero-wallet-rpc.env
+    chmod 0600 /etc/monero-wallet-rpc.env
+  fi
+  if [ -d /var/lib/tinfoil-proxy ]; then
+    chown -R nullsink-proxy:nullsink-proxy-read /var/lib/tinfoil-proxy
+    chmod -R go-rwx /var/lib/tinfoil-proxy
+  fi
+}
 restart_isolation_sidecars() {
   [ -f /etc/nullsink-service-isolation.finalized ] && return 0
+  activate_isolation_sidecars
   for unit in tinfoil-proxy monero-wallet-rpc; do
     systemctl is-active --quiet "$unit" 2>/dev/null || continue
     systemctl restart "$unit"

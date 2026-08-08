@@ -163,15 +163,15 @@ split_or_create_envs() {
     write_default_envs
   fi
 
-  [ -f "$PROXY_ENV" ] || install -o "$PROXY_USER" -g "$ROOT_GROUP" -m 0400 "$tmp_proxy" "$PROXY_ENV"
-  [ -f "$PAYMENTS_ENV" ] || install -o "$PAYMENTS_USER" -g "$ROOT_GROUP" -m 0400 "$tmp_payments" "$PAYMENTS_ENV"
-  [ -f "$BACKUP_ENV" ] || install -o "$BACKUP_USER" -g "$ROOT_GROUP" -m 0400 "$tmp_backup" "$BACKUP_ENV"
+  [ -f "$PROXY_ENV" ] || install -o root -g "$ROOT_GROUP" -m 0600 "$tmp_proxy" "$PROXY_ENV"
+  [ -f "$PAYMENTS_ENV" ] || install -o root -g "$ROOT_GROUP" -m 0600 "$tmp_payments" "$PAYMENTS_ENV"
+  [ -f "$BACKUP_ENV" ] || install -o root -g "$ROOT_GROUP" -m 0600 "$tmp_backup" "$BACKUP_ENV"
   [ -f "$MONITOR_ENV" ] || install -o root -g "$ROOT_GROUP" -m 0600 "$tmp_monitor" "$MONITOR_ENV"
 
-  chown "$PROXY_USER:$ROOT_GROUP" "$PROXY_ENV"; chmod 0400 "$PROXY_ENV"
-  chown "$PAYMENTS_USER:$ROOT_GROUP" "$PAYMENTS_ENV"; chmod 0400 "$PAYMENTS_ENV"
-  chown "$BACKUP_USER:$ROOT_GROUP" "$BACKUP_ENV"; chmod 0400 "$BACKUP_ENV"
-  chown "root:$ROOT_GROUP" "$MONITOR_ENV"; chmod 0600 "$MONITOR_ENV"
+  for role_env in "$PROXY_ENV" "$PAYMENTS_ENV" "$BACKUP_ENV" "$MONITOR_ENV"; do
+    chown "root:$ROOT_GROUP" "$role_env"
+    chmod 0600 "$role_env"
+  done
 
   for role_env in "$PROXY_ENV" "$PAYMENTS_ENV" "$BACKUP_ENV" "$MONITOR_ENV"; do
     if grep -Eq '^(DB_PATH|BALANCES_DB_PATH|PENDING_DB_PATH|CREDIT_SOCK|BACKUP_DIR|BACKUP_EXPORT_GROUP)=' "$role_env"; then
@@ -202,21 +202,6 @@ ensure_directories() {
   if [ -d "$APP_DIR" ]; then
     chown -R "root:$ROOT_GROUP" "$APP_DIR"
     chmod -R go-w "$APP_DIR"
-  fi
-}
-
-prepare_domain_sidecars() {
-  if [ -d "$STATE_ROOT/nullsink-wallet" ]; then
-    chown -R "$PAYMENTS_USER:$PAYMENTS_READ_GROUP" "$STATE_ROOT/nullsink-wallet"
-    chmod -R go-rwx "$STATE_ROOT/nullsink-wallet"
-  fi
-  if [ -f "$ETC_DIR/monero-wallet-rpc.env" ]; then
-    chown "$PAYMENTS_USER:$ROOT_GROUP" "$ETC_DIR/monero-wallet-rpc.env"
-    chmod 0400 "$ETC_DIR/monero-wallet-rpc.env"
-  fi
-  if [ -d "$STATE_ROOT/tinfoil-proxy" ]; then
-    chown -R "$PROXY_USER:$PROXY_READ_GROUP" "$STATE_ROOT/tinfoil-proxy"
-    chmod -R go-rwx "$STATE_ROOT/tinfoil-proxy"
   fi
 }
 
@@ -312,7 +297,6 @@ prepare() {
   split_or_create_envs
   ensure_directories
   if [ -f "$PREPARED_MARKER" ]; then
-    prepare_domain_sidecars
     for db in "$PROXY_STATE/balances.db" "$PAYMENTS_STATE/pending.db"; do
       [ -f "$db" ] || continue
       [ "$(sqlite3 -readonly "$db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "prepared database is corrupt: $db"
@@ -341,7 +325,6 @@ prepare() {
     migrate_backups
   fi
 
-  prepare_domain_sidecars
   write_marker "$PREPARED_MARKER" prepared=1
   trap - EXIT
   echo "service-isolation: prepared; install the new units and start proxy, then payments"

@@ -93,7 +93,7 @@ The first deploy containing Step 4 installs the verified deploy tree but refuses
 the prepared marker is absent. Review and run `migrate-service-isolation.sh --prepare` during a financial
 quiet window, then immediately rerun the same deploy. Preparation stops the old app and timers, checks that
 there are no holds, open orders, or undelivered/partial credits, copies and verifies both databases, splits
-the env, and leaves the legacy layout untouched for rollback.
+the root-owned env files, and leaves the legacy layout and sidecar permissions untouched for rollback.
 Preparation also refuses an active same-box `bitcoind`: the supported app-box topology uses the dedicated
 node box, and silently reusing the read-only operator uid for a daemon would defeat the new boundary.
 

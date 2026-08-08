@@ -40,6 +40,7 @@ function workspace() {
   const app = join(root, "app");
   const bin = join(root, "bin");
   const systemdState = join(root, "systemd-state");
+  const chownLog = join(root, "chown.log");
   for (const dir of [etc, state, systemd, app, bin, systemdState]) mkdirSync(dir);
 
   const user = Bun.spawnSync(["id", "-un"]).stdout.toString().trim();
@@ -56,7 +57,10 @@ exec /usr/bin/id "$@"
   executable(join(bin, "groupadd"), "#!/bin/sh\nexit 0\n");
   executable(join(bin, "useradd"), "#!/bin/sh\nexit 0\n");
   executable(join(bin, "usermod"), "#!/bin/sh\nexit 0\n");
-  executable(join(bin, "chown"), "#!/bin/sh\nexit 0\n");
+  executable(
+    join(bin, "chown"),
+    '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$FAKE_CHOWN_LOG"\n',
+  );
   executable(
     join(bin, "install"),
     `#!/usr/bin/env bash
@@ -96,7 +100,19 @@ esac
 
   const legacy = join(state, "nullsink");
   mkdirSync(join(legacy, "backups"), { recursive: true });
-  return { root, etc, state, systemd, app, bin, systemdState, legacy, user, group };
+  return {
+    root,
+    etc,
+    state,
+    systemd,
+    app,
+    bin,
+    systemdState,
+    chownLog,
+    legacy,
+    user,
+    group,
+  };
 }
 
 function seedQuietState(legacy: string, withHold = false): void {
@@ -139,6 +155,7 @@ function migrationEnv(w: ReturnType<typeof workspace>): Record<string, string> {
     NULLSINK_EXPORT_GROUP: w.group,
     FAKE_SYSTEMD_STATE: w.systemdState,
     FAKE_SERVICE_USER: w.user,
+    FAKE_CHOWN_LOG: w.chownLog,
   };
 }
 
@@ -186,11 +203,24 @@ TELEGRAM_BOT_TOKEN=alert-secret
   expect(backupEnv).toContain("BACKUP_AGE_RECIPIENT=age1recipient");
   expect(monitorEnv).toContain("TELEGRAM_BOT_TOKEN=alert-secret");
   expect(monitorEnv).not.toContain("BITCOIN_RPC_");
-  for (const name of ["nullsink-proxy.env", "nullsink-payments.env", "nullsink-backup.env"]) {
-    expect(statSync(join(w.etc, name)).mode & 0o777).toBe(0o400);
+  for (const name of [
+    "nullsink-proxy.env",
+    "nullsink-payments.env",
+    "nullsink-backup.env",
+    "nullsink-monitor.env",
+  ]) {
+    expect(statSync(join(w.etc, name)).mode & 0o777).toBe(0o600);
   }
-  expect(statSync(join(w.etc, "nullsink-monitor.env")).mode & 0o777).toBe(0o600);
   expect(statSync(join(w.etc, "nullsink.env")).mode & 0o777).toBe(0o600);
+  const chowns = readFileSync(w.chownLog, "utf8");
+  for (const name of [
+    "nullsink-proxy.env",
+    "nullsink-payments.env",
+    "nullsink-backup.env",
+    "nullsink-monitor.env",
+  ]) {
+    expect(chowns).toContain(`root:${w.group} ${join(w.etc, name)}`);
+  }
 
   const migratedBalances = join(w.state, "nullsink-proxy", "balances.db");
   const migratedPending = join(w.state, "nullsink-payments", "pending.db");
@@ -227,6 +257,15 @@ test("service-isolation migration refuses active financial state and restarts th
   const w = workspace();
   seedQuietState(w.legacy, true);
   writeFileSync(join(w.etc, "nullsink.env"), "ANTHROPIC_API_KEY=provider-secret\n");
+  const walletState = join(w.state, "nullsink-wallet");
+  const tinfoilState = join(w.state, "tinfoil-proxy");
+  mkdirSync(walletState);
+  mkdirSync(tinfoilState);
+  chmodSync(walletState, 0o755);
+  chmodSync(tinfoilState, 0o755);
+  const moneroEnv = join(w.etc, "monero-wallet-rpc.env");
+  writeFileSync(moneroEnv, "MONERO_NODE=node.test:18081\n");
+  chmodSync(moneroEnv, 0o644);
 
   const result = Bun.spawnSync(["bash", MIGRATION, "--prepare"], {
     env: migrationEnv(w),
@@ -242,6 +281,9 @@ test("service-isolation migration refuses active financial state and restarts th
   for (const unit of ["nullsink-proxy", "nullsink-payments", "backup.timer", "status-check.timer"]) {
     expect(existsSync(join(w.systemdState, `${unit}.stopped`))).toBe(false);
   }
+  expect(statSync(walletState).mode & 0o777).toBe(0o755);
+  expect(statSync(tinfoilState).mode & 0o777).toBe(0o755);
+  expect(statSync(moneroEnv).mode & 0o777).toBe(0o644);
 });
 
 test("service-isolation migration fails closed on an unclassified legacy setting", () => {
@@ -283,9 +325,13 @@ test("Bitcoin label export is payments-owned data and remains best-effort", () =
   const bin = join(root, "bin");
   mkdirSync(bin);
   const labels = join(root, "bitcoin-wallet-labels.json");
+  const curlArgs = join(root, "curl.args");
+  const curlStdin = join(root, "curl.stdin");
   executable(
     join(bin, "curl"),
     `#!/bin/sh
+printf '%s\n' "$@" > "$FAKE_CURL_ARGS"
+cat > "$FAKE_CURL_STDIN"
 while [ "$#" -gt 0 ]; do
   if [ "$1" = -o ]; then out="$2"; shift 2; else shift; fi
 done
@@ -301,6 +347,8 @@ exit "\${FAKE_CURL_EXIT:-0}"
     BITCOIN_RPC_URL: "http://node.test/wallet/nullsink",
     BITCOIN_RPC_USER: "rpc-user",
     BITCOIN_RPC_PASSWORD: "rpc-secret",
+    FAKE_CURL_ARGS: curlArgs,
+    FAKE_CURL_STDIN: curlStdin,
   };
 
   const body = '{"result":[{"address":"bc1qtest","label":"order:7"}],"error":null,"id":"backup"}';
@@ -312,6 +360,12 @@ exit "\${FAKE_CURL_EXIT:-0}"
   expect(success.exitCode, success.stderr.toString()).toBe(0);
   expect(readFileSync(labels, "utf8")).toBe(body);
   expect(statSync(labels).mode & 0o777).toBe(0o640);
+  expect(readFileSync(curlArgs, "utf8")).not.toContain("rpc-secret");
+  expect(readFileSync(curlArgs, "utf8")).not.toContain("rpc-user");
+  expect(readFileSync(curlArgs, "utf8")).toContain("--config\n-\n");
+  expect(readFileSync(curlStdin, "utf8")).toBe(
+    'user = "rpc-user:rpc-secret"\n',
+  );
 
   const invalid = Bun.spawnSync(["bash", LABEL_EXPORT], {
     env: { ...baseEnv, FAKE_CURL_BODY: '{"result":null,"error":{"code":-18}}' },

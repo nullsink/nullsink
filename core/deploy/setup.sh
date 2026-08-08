@@ -120,8 +120,8 @@ prepare_service_isolation
 # survives re-runs — there's no self-reverting flip of a value the operator can see: http://127.0.0.1:3301 routes
 # through the attesting proxy; the public endpoint forwards directly (unverified) and is flagged each run. Done
 # here, BEFORE the app (re)start below, so the app reads the value; the proxy itself is installed + started in its
-# own step further down (also before the app restart). Root may append, but the service identity cannot write
-# its 0400 environment file.
+# own step further down (also before the app restart). Root may append; service identities cannot modify the
+# root-owned environment files that systemd reads before dropping privileges.
 if tinfoil_active; then
   _tbu="$(grep -E '^TINFOIL_BASE_URL=' "$PROXY_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_tbu" ]; then
@@ -129,7 +129,7 @@ if tinfoil_active; then
       echo "# https://inference.tinfoil.sh to forward directly, WITHOUT attestation (respected on re-runs)."
       echo "TINFOIL_BASE_URL=http://127.0.0.1:3301"
     } >> "$PROXY_ENV_FILE"
-    chmod 0400 "$PROXY_ENV_FILE"
+    chmod 0600 "$PROXY_ENV_FILE"
     note "TINFOIL_BASE_URL defaulted to the local attesting proxy (http://127.0.0.1:3301)"
   elif [ "$_tbu" = "http://127.0.0.1:3301" ]; then
     : # already routing through the local proxy — nothing to do
@@ -143,6 +143,9 @@ step "Installing systemd units"
 # deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
 # per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
 install_units
+# Fresh boxes have no sidecar state; migrations transition any existing wallet/verifier state only now, when
+# the isolated units are about to activate. The reversible preparation phase never changes these permissions.
+activate_isolation_sidecars
 
 step "Installing the app binaries (pinned release)"
 # Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in

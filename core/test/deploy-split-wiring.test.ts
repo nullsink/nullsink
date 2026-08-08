@@ -17,7 +17,10 @@ const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
 const tinfoilUnit = readFileSync(deploy("tinfoil-proxy.service"), "utf8");
 const setup = readFileSync(deploy("setup.sh"), "utf8");
 const deployScript = readFileSync(deploy("deploy.sh"), "utf8");
+const deployLib = readFileSync(deploy("lib.sh"), "utf8");
 const migration = readFileSync(deploy("migrate-service-isolation.sh"), "utf8");
+const labelExport = readFileSync(deploy("backup-bitcoin-labels.sh"), "utf8");
+const alert = readFileSync(deploy("alert.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
 const backupUnit = readFileSync(deploy("backup.service"), "utf8");
 const labelUnit = readFileSync(deploy("nullsink-bitcoin-label-export.service"), "utf8");
@@ -103,6 +106,26 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(migration).toContain('usermod -a -G "$CREDIT_GROUP" "$PAYMENTS_USER"');
   expect(migration).not.toMatch(/usermod -a -G "\$CREDIT_GROUP" "\$(?:PROXY|BACKUP)_USER"/);
   expect(migration).toContain("active same-box bitcoind still uses the legacy operator uid");
+  expect(migration).toContain('chown "root:$ROOT_GROUP" "$role_env"');
+  expect(migration).toContain('chmod 0600 "$role_env"');
+  expect(migration).not.toContain("nullsink-wallet");
+  expect(deployLib).toContain("activate_isolation_sidecars");
+  expect(deployLib).toContain("chown root:root /etc/monero-wallet-rpc.env");
+  expect(setup.indexOf("activate_isolation_sidecars")).toBeGreaterThan(
+    setup.indexOf("install_units"),
+  );
+});
+
+test("credential-bearing curl configuration never appears in process arguments", () => {
+  for (const script of [labelExport, statusCheck, alert]) {
+    expect(script).toContain("curl --config -");
+  }
+  expect(labelExport).not.toContain("--user");
+  expect(statusCheck).not.toContain(
+    '-u "${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}"',
+  );
+  const sendBody = alert.slice(alert.indexOf("send() {"));
+  expect(sendBody).not.toContain("https://api.telegram.org/bot");
 });
 
 test("the Monero wallet keeps ring metadata outside its protected home", () => {

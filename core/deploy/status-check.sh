@@ -298,10 +298,21 @@ case ",${_btc_rails// /}," in *,bitcoin,*)
   # tests what the app would actually dial — never warn about a config the app happily runs with.
   _btc_url="${BITCOIN_RPC_URL:-http://127.0.0.1:8332/wallet/nullsink}"
   {
+    curl_user_config() {
+      local credentials
+      credentials="${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}"
+      [[ "$credentials" != *$'\n'* && "$credentials" != *$'\r'* ]] || return 1
+      credentials="${credentials//\\/\\\\}"
+      credentials="${credentials//\"/\\\"}"
+      printf 'user = "%s"\n' "$credentials"
+    }
+
     # One JSON-RPC call with the app's creds: $1=method, $2=params (JSON array, default []). The URL is
-    # wallet-scoped (/wallet/nullsink), which serves node methods AND wallet methods.
+    # wallet-scoped (/wallet/nullsink), which serves node methods AND wallet methods. Feed credentials through
+    # curl's stdin config so neither the password nor token-shaped auth appears in process arguments.
     btc_rpc() {
-      curl -sS --max-time "$RPC_TIMEOUT" -u "${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}" \
+      curl_user_config | env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD curl --config - \
+        -sS --max-time "$RPC_TIMEOUT" \
         -H 'content-type: application/json' \
         --data "{\"jsonrpc\":\"1.0\",\"id\":\"hc\",\"method\":\"$1\",\"params\":${2:-[]}}" \
         "$_btc_url" 2>/dev/null

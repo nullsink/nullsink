@@ -11,7 +11,7 @@
 # Reads TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID from /etc/nullsink-monitor.env (the status-alert@ unit's
 # EnvironmentFile). If either is unset it is a NO-OP (logs to journald, exits 0) so an unconfigured box
 # doesn't error the alert unit. Get a bot token from @BotFather and your numeric chat id from @userinfobot.
-set -u
+set -uo pipefail
 
 mode=failed
 if [ "${1:-}" = "--recovered" ]; then mode=recovered; shift; fi
@@ -61,9 +61,18 @@ fi
 # -f + --retry-all-errors: a page lost to one flaky curl attempt is a silent monitoring hole, so retry
 # transient network/API failures; if Telegram still rejects the HTML, fall back to plain text rather than
 # dropping the page.
+telegram_curl_config() {
+  local url
+  url="https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+  [[ "$url" != *$'\n'* && "$url" != *$'\r'* ]] || return 1
+  url="${url//\\/\\\\}"
+  url="${url//\"/\\\"}"
+  printf 'url = "%s"\n' "$url"
+}
+
 send() {
-  curl -sS -f --max-time 15 --retry 3 --retry-all-errors --retry-delay 5 \
-    "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+  telegram_curl_config | env -u TELEGRAM_BOT_TOKEN curl --config - \
+    -sS -f --max-time 15 --retry 3 --retry-all-errors --retry-delay 5 \
     --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" -o /dev/null "$@"
 }
 send --data-urlencode "text=${html}" --data-urlencode "parse_mode=HTML" \

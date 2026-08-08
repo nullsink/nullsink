@@ -19,11 +19,26 @@ if [ -z "${BITCOIN_RPC_URL:-}" ]; then
   exit 0
 fi
 
+curl_user_config() {
+  local credentials
+  credentials="${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}"
+  [[ "$credentials" != *$'\n'* && "$credentials" != *$'\r'* ]] || return 1
+  credentials="${credentials//\\/\\\\}"
+  credentials="${credentials//\"/\\\"}"
+  printf 'user = "%s"\n' "$credentials"
+}
+
+bitcoin_curl() {
+  if [ -n "${BITCOIN_RPC_USER:-}" ]; then
+    curl_user_config | env -u BITCOIN_RPC_USER -u BITCOIN_RPC_PASSWORD curl --config - "$@"
+  else
+    curl "$@"
+  fi
+}
+
 tmp="$LABELS_PATH.partial.$$"
 trap 'rm -f -- "$tmp"' EXIT HUP INT TERM
-auth=()
-[ -n "${BITCOIN_RPC_USER:-}" ] && auth=(--user "$BITCOIN_RPC_USER:${BITCOIN_RPC_PASSWORD:-}")
-if curl -fsS --max-time 15 "${auth[@]}" -H 'content-type: application/json' \
+if bitcoin_curl -fsS --max-time 15 -H 'content-type: application/json' \
     --data '{"jsonrpc":"1.0","id":"backup","method":"listreceivedbyaddress","params":[0,true,true]}' \
     "$BITCOIN_RPC_URL" -o "$tmp" 2>/dev/null \
     && grep -Eq '"result"[[:space:]]*:[[:space:]]*\[' "$tmp" \
