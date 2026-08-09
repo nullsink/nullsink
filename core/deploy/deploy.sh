@@ -51,20 +51,18 @@ restore_timers_on_exit() {
   exit "$status"
 }
 
-# Rail daemons (bitcoind, monero-wallet-rpc) are deliberately NOT bounced by a redeploy — restarting a node
-# mid-sync is disruptive. But silently refreshing a daemon's unit FILE while it keeps running the old one is a
-# footgun, so when a redeploy actually CHANGES an enabled daemon's unit, tell the operator to restart it on
-# their schedule. Call BEFORE install_units overwrites /etc/systemd/system (compares the live unit vs the new tree).
+# The app-local Monero watcher is deliberately not bounced by a redeploy. If its unit changes, tell the
+# operator to restart it deliberately after the app deployment. Bitcoin Core lives on the node box and is
+# neither shipped nor managed here.
 warn_changed_daemons() {
-  local u live new
-  for u in monero-wallet-rpc bitcoind; do
-    live="/etc/systemd/system/$u.service"; new="$APP_DIR/deploy/$u.service"
-    [ -f "$new" ] || continue
-    systemctl is-enabled --quiet "$u" 2>/dev/null || continue   # only matters for a daemon that's actually in use
-    if [ -f "$live" ] && ! cmp -s "$live" "$new"; then
-      echo "!! $u.service changed in $REF but the daemon was left running the OLD unit — restart on your schedule: systemctl restart $u" >&2
-    fi
-  done
+  local u="monero-wallet-rpc" live new
+  live="/etc/systemd/system/$u.service"
+  new="$APP_DIR/deploy/$u.service"
+  [ -f "$new" ] || return 0
+  systemctl is-enabled --quiet "$u" 2>/dev/null || return 0
+  if [ -f "$live" ] && ! cmp -s "$live" "$new"; then
+    echo "!! $u.service changed in $REF but the daemon was left running the OLD unit — restart on your schedule: systemctl restart $u" >&2
+  fi
 }
 
 deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both binaries + UI, health-gated

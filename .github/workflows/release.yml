@@ -1,5 +1,6 @@
 # Build the self-contained linux-x64 artifacts (`bun build --compile`) for the two services and the read-only
-# operator CLI, then attach them with the deploy tree, client UI, checksums, and provenance.
+# operator CLI, then attach them with the app deploy tree, dedicated node-box bundle, client UI, checksums,
+# and provenance.
 # These are the verifiable artifacts a box downloads + checksums + serves/runs directly (no source/Bun on the
 # box). The two server binaries are ONE release and the box installs them in lockstep (deploy/lib.sh's
 # install_binary): they speak a versioned credit wire, and a mismatched pair fails closed.
@@ -56,10 +57,13 @@ jobs:
         run: |
           # Never encode the Actions runner's uid/gid into a root-installed artifact. Both consumers also
           # extract with --no-same-owner, so producer and consumer independently enforce neutral ownership.
-          tar --owner=0 --group=0 --numeric-owner -czf "deploy-${TAG}.tar.gz" -C core deploy
+          # The app archive deliberately excludes the dedicated Bitcoin node bundle: an app release cannot
+          # install or manage bitcoind even if its generic unit installer changes later.
+          tar --owner=0 --group=0 --numeric-owner --exclude='deploy/node-box' -czf "deploy-${TAG}.tar.gz" -C core deploy
+          tar --owner=0 --group=0 --numeric-owner -czf "nullsink-node-box-${TAG}.tar.gz" -C core/deploy node-box
           tar --owner=0 --group=0 --numeric-owner -czf "nullsink-ui-${TAG}.tar.gz" -C client dist
       - name: checksum
-        run: sha256sum nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
+        run: sha256sum nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-node-box-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" | tee SHA256SUMS
       - name: attest build provenance   # signed SLSA provenance for each artifact (public repo only)
         uses: actions/attest-build-provenance@v4
         with:
@@ -68,6 +72,7 @@ jobs:
             nullsink-payments-linux-x64
             nsk-linux-x64
             deploy-${{ env.TAG }}.tar.gz
+            nullsink-node-box-${{ env.TAG }}.tar.gz
             nullsink-ui-${{ env.TAG }}.tar.gz
             SHA256SUMS
       - name: attach assets to the GitHub Release
@@ -85,7 +90,7 @@ jobs:
           done <<< "$release_flags_output"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" \
             "${release_flags[@]}" \
-            --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments services, read-only operator CLI, deploy tree, and client UI. Verify checksums with \`sha256sum -c SHA256SUMS\` and provenance with \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
+            --notes "Self-contained linux-x64 build of \`$TAG\`: proxy + payments services, read-only operator CLI, app deploy tree, dedicated node-box bundle, and client UI. Verify checksums with \`sha256sum -c SHA256SUMS\` and provenance with \`gh attestation verify <file> --repo $GITHUB_REPOSITORY\`."
           gh release upload "$TAG" \
-            nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
+            nullsink-proxy-linux-x64 nullsink-payments-linux-x64 nsk-linux-x64 "deploy-${TAG}.tar.gz" "nullsink-node-box-${TAG}.tar.gz" "nullsink-ui-${TAG}.tar.gz" SHA256SUMS \
             --clobber

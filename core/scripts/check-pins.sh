@@ -7,11 +7,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# All three pins live in deploy/lib.sh, shared by bootstrap and narrow component upgrades.
-pin() { grep -oE "$1=\"[^\"]+\"" deploy/lib.sh | head -1 | cut -d'"' -f2; }
-btc_pinned="$(pin BITCOIN_VERSION)"
-xmr_pinned="$(pin MONERO_VERSION)"
-tf_pinned="$(pin TINFOIL_PROXY_VERSION)"   # Tinfoil verifying proxy (kept WITH its leading v, unlike the others)
+# App pins and the standalone node-box pin live with their respective host-role installers.
+pin() { grep -oE "$1=\"[^\"]+\"" "$2" | head -1 | cut -d'"' -f2; }
+btc_pinned="$(pin BITCOIN_VERSION deploy/node-box/lib.sh)"
+xmr_pinned="$(pin MONERO_VERSION deploy/lib.sh)"
+tf_pinned="$(pin TINFOIL_PROXY_VERSION deploy/lib.sh)"   # Tinfoil verifying proxy keeps its leading v
 
 gh_get() {  # GET a URL, adding the auth header only when GH_TOKEN is set (CI); unauth works too (rate-limited)
   if [ -n "${GH_TOKEN:-}" ]; then

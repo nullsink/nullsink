@@ -4,8 +4,8 @@
 #
 # Run every 10 min by status-check.timer; a non-zero exit trips status-check.service's OnFailure= and pages
 # Telegram (deploy/alert.sh). Checks, in order of "is the service actually working for customers?":
-#   1. The ENABLED core units are active (nullsink-proxy, nullsink-payments, caddy, monero-wallet-rpc or
-#      bitcoind, tor) + each app service serves its own /healthz. A unit that is NOT enabled is SKIPPED — so an
+#   1. The ENABLED app-box units are active (nullsink-proxy, nullsink-payments, caddy, monero-wallet-rpc,
+#      tor) + each app service serves its own /healthz. A unit that is NOT enabled is SKIPPED — so an
 #      Anthropic-only box with no buy rail, or a pre-public box with caddy not yet started, doesn't page every
 #      tick; an enabled-but-down unit alerts.
 #   2. Host: disk/inode headroom for the billing DBs, that the SQLite WAL sidecars are still owned by the
@@ -62,7 +62,7 @@ warn() { echo "WARN $*"; fail=1; }
 jnum() { grep -o "\"$2\" *: *[0-9]\+" <<<"$1" | head -1 | grep -o '[0-9]\+'; }
 
 # --- 1. units (skip a unit that isn't enabled — an intentionally-absent component, not a failure) ---
-for unit in "$PROXY_UNIT" "$PAYMENTS_UNIT" caddy monero-wallet-rpc bitcoind tor tinfoil-proxy; do
+for unit in "$PROXY_UNIT" "$PAYMENTS_UNIT" caddy monero-wallet-rpc tor tinfoil-proxy; do
   systemctl is-enabled --quiet "$unit" 2>/dev/null || { echo "skip unit $unit (not enabled)"; continue; }
   if [ "$(systemctl is-active "$unit" 2>/dev/null)" = active ]; then ok "unit $unit active"
   else warn "unit $unit NOT active"; fi
@@ -278,10 +278,8 @@ fi
 
 # --- 4b. Bitcoin buy rail (only when the rail is active): pruned node synced + the watch-only wallet
 #     loaded. Probes JSON-RPC over BITCOIN_RPC_URL with the app's Basic-auth creds — the SAME door the app
-#     uses — so one probe works unchanged against a local node or the WireGuard node box, and a mismatched
-#     rpcauth pair surfaces here as a failed probe (bitcoin-cli's datadir cookie would mask it; see
-#     regen-bitcoin-rpcauth.sh). Gated on PAY_RAILS (the app's source of truth for active rails, matching
-#     setup.sh rail_active), NOT on a local bitcoind unit — monitoring survives the node moving off-box,
+#     uses against the dedicated WireGuard node box, so a mismatched rpcauth pair surfaces here as a failed
+#     probe. Gated on PAY_RAILS (the app's source of truth for active rails, matching setup.sh rail_active),
 #     and goes quiet when an operator deliberately disables the rail. Env vars come from
 #     status-check.service's EnvironmentFile; all read ${VAR:-} — an unset var must skip/warn, never
 #     abort the whole check under set -u. ---
@@ -294,10 +292,13 @@ if [ -z "$_btc_rails" ]; then
   warn "PAY_RAILS is not set — env not loaded (run via: systemctl start status-check.service), so the rail checks were NOT performed"
 fi
 case ",${_btc_rails// /}," in *,bitcoin,*)
-  # Unset URL mirrors the APP's default (bitcoin.ts: local wallet-scoped endpoint) so the probe always
-  # tests what the app would actually dial — never warn about a config the app happily runs with.
-  _btc_url="${BITCOIN_RPC_URL:-http://127.0.0.1:8332/wallet/nullsink}"
-  {
+  _btc_url="${BITCOIN_RPC_URL:-}"
+  case "$_btc_url" in
+    http://127.*|https://127.*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*|"")
+      warn "BITCOIN_RPC_URL must name the dedicated non-loopback node box — BTC probe not performed"
+      ;;
+    http://*|https://*)
+      {
     curl_user_config() {
       local credentials
       credentials="${BITCOIN_RPC_USER:-}:${BITCOIN_RPC_PASSWORD:-}"
@@ -327,7 +328,7 @@ case ",${_btc_rails// /}," in *,bitcoin,*)
     done
     blocks="$(jnum "$chaininfo" blocks)"; headers="$(jnum "$chaininfo" headers)"
     if [ -z "$blocks" ]; then
-      warn "bitcoind unreachable over RPC (getblockchaininfo failed) — node/WireGuard down, or rpcauth mismatched (401): re-pair with regen-bitcoin-rpcauth.sh"
+      warn "bitcoind unreachable over RPC (getblockchaininfo failed) — node/WireGuard down, or rpcauth mismatched (401): re-pair with the node-box regen-rpcauth.sh"
     else
       ok "bitcoind block height $blocks"
       if grep -q '"initialblockdownload" *: *true' <<<"$chaininfo"; then
@@ -354,7 +355,10 @@ case ",${_btc_rails// /}," in *,bitcoin,*)
         warn "BTC listunspent failed — the poller can't see deposits (wallet/RPC issue)"
       fi
     fi
-  }
+      }
+      ;;
+    *) warn "BITCOIN_RPC_URL is not a valid HTTP(S) dedicated-node endpoint — BTC probe not performed" ;;
+  esac
   ;;
 *)
   echo "skip BTC buy rail (bitcoin not in PAY_RAILS)"

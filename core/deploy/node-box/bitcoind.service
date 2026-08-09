@@ -1,5 +1,5 @@
 [Unit]
-Description=bitcoind — pruned, WATCH-ONLY node + wallet for the Bitcoin buy rail
+Description=bitcoind — dedicated pruned WATCH-ONLY node for the Bitcoin buy rail
 After=network-online.target
 Wants=network-online.target
 # Page Telegram if this unit enters `failed`. Secondary to status-check.timer, which catches a stalled or

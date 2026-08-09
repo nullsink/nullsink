@@ -58,13 +58,16 @@ tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in the proxy env
   k="$(grep -E '^TINFOIL_API_KEY=' "$PROXY_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
 }
-btc_node_local() {  # true when BITCOIN_RPC_URL is unset/localhost — i.e. THIS box runs the bitcoind node.
-  # After a node-box split the URL points at the WireGuard peer; a setup.sh re-run must then neither
-  # reinstall nor resurrect a local bitcoind (the decommissioned datadir/conf may still exist).
+bitcoin_rpc_is_remote() {  # the app supports only an explicit dedicated-node endpoint
   local url
   url="$(grep -E '^BITCOIN_RPC_URL=' "$PAYMENTS_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
-  [ -z "$url" ] && return 0   # unset = the app's built-in localhost default
-  case "$url" in http://127.0.0.1:*|http://localhost:*) return 0 ;; *) return 1 ;; esac
+  [ -n "$url" ] || return 1
+  case "$url" in
+    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*)
+      return 1 ;;
+    http://*|https://*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 step "Installing system packages"
 apt-get update -qq
@@ -115,6 +118,12 @@ if [ ! -f /etc/nullsink-service-isolation.prepared ] \
 fi
 prepare_service_isolation
 
+if rail_active bitcoin && ! bitcoin_rpc_is_remote; then
+  echo "    Bitcoin rail requires an explicit non-loopback BITCOIN_RPC_URL for the dedicated node box." >&2
+  echo "    Refusing app setup: this host never installs or runs bitcoind." >&2
+  exit 1
+fi
+
 # Attestation: when the Tinfoil rail is active and TINFOIL_BASE_URL is UNSET, default it to the local verifying proxy
 # (the real upgrade path — the earlier template never wrote this line). Any EXPLICIT value is respected and
 # survives re-runs — there's no self-reverting flip of a value the operator can see: http://127.0.0.1:3301 routes
@@ -139,9 +148,8 @@ if tinfoil_active; then
 fi
 
 step "Installing systemd units"
-# One glob-based install of every deploy/*.service + *.timer (via lib.sh's install_units, shared with
-# deploy.sh) so a newly-added unit can't be silently missed by a hand-maintained per-unit list. The
-# per-rail steps below then only enable/restart (and install binaries / drop-ins) — they no longer cp.
+# Install only the explicit app-box unit allowlist shared with deploy.sh. Other host roles are separate
+# release artifacts and cannot enter this box through a broad unit glob.
 install_units
 # Fresh boxes have no sidecar state; migrations transition any existing wallet/verifier state only now, when
 # the isolated units are about to activate. The reversible preparation phase never changes these permissions.
@@ -244,25 +252,6 @@ elif rail_active monero; then
   todo "XMR rail: create the view-only wallet + /etc/monero-wallet-rpc.env, then: systemctl enable --now monero-wallet-rpc"
 else
   todo "XMR rail (optional): add 'monero' to PAY_RAILS in $PAYMENTS_ENV_FILE + re-run setup.sh to install the wallet binaries"
-fi
-
-step "Configuring bitcoind (BTC buy-rail watcher)"
-# The unit was refreshed by install_units above. The bitcoind BINARY is only installed when the BTC
-# rail is active (below); enable/start only once the pruned datadir + watch-only wallet exist, or it would
-# crash-loop.
-# Install bitcoind + bitcoin-cli when the BTC rail is active AND the node is local — after a node-box
-# split (BITCOIN_RPC_URL → the WireGuard peer) this box runs no bitcoind: skip install, and never
-# enable/resurrect a decommissioned local node whose datadir/conf still exists.
-if rail_active bitcoin && btc_node_local; then install_verified_bitcoind; fi
-if rail_active bitcoin && ! btc_node_local; then
-  echo "    skip local bitcoind (BITCOIN_RPC_URL points off-box — the rail runs against the node box)"
-elif [ -x /usr/local/bin/bitcoind ] && [ -f /var/lib/bitcoind/bitcoin.conf ]; then
-  systemctl enable bitcoind
-  systemctl restart bitcoind        # restart so a unit/conf change takes effect
-elif rail_active bitcoin; then
-  todo "BTC rail: create the pruned datadir + bitcoin.conf + watch-only wallet, then: systemctl enable --now bitcoind"
-else
-  todo "BTC rail (optional): add 'bitcoin' to PAY_RAILS in $PAYMENTS_ENV_FILE + re-run setup.sh to install bitcoind"
 fi
 
 step "Enabling timers (health check, four-hour backup)"

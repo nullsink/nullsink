@@ -81,7 +81,6 @@ cmd="$1"; shift
 for arg do unit="$arg"; done
 case "$cmd" in
   is-active)
-    if [ "$unit" = bitcoind ] && [ "$FAKE_BITCOIND_ACTIVE" != 1 ]; then exit 1; fi
     [ ! -e "$FAKE_SYSTEMD_STATE/$unit.stopped" ]
     ;;
   stop)
@@ -303,20 +302,6 @@ test("service-isolation migration fails closed on an unclassified legacy setting
   expect(output).not.toContain("provider-secret");
   expect(existsSync(join(w.etc, "nullsink-proxy.env"))).toBe(false);
   expect(existsSync(join(w.etc, "nullsink-service-isolation.prepared"))).toBe(false);
-});
-
-test("service-isolation migration refuses a legacy same-box bitcoind", () => {
-  const w = workspace();
-  writeFileSync(join(w.etc, "nullsink.env"), "ANTHROPIC_API_KEY=provider-secret\n");
-  const result = Bun.spawnSync(["bash", MIGRATION, "--prepare"], {
-    env: { ...migrationEnv(w), FAKE_BITCOIND_ACTIVE: "1" },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const output = result.stdout.toString() + result.stderr.toString();
-  expect(result.exitCode).not.toBe(0);
-  expect(output).toContain("active same-box bitcoind still uses the legacy operator uid");
-  expect(existsSync(join(w.etc, "nullsink-proxy.env"))).toBe(false);
 });
 
 test("Bitcoin label export is payments-owned data and remains best-effort", () => {

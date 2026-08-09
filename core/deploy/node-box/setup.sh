@@ -2,19 +2,20 @@
 # Bootstrap a nullsink NODE BOX: a dedicated host that runs ONLY the pruned watch-only bitcoind for the
 # Bitcoin buy rail, reached by the app box over WireGuard. NO app binary, NO ledger DBs, NO Monero, NO
 # alerting stack — the app box stays the single pager and probes this node's RPC over WireGuard.
-# Run as root on a fresh Ubuntu box: `bash setup-nodes.sh`. Idempotent — safe to re-run.
+# Run as root on a fresh Ubuntu box from the standalone node-box release bundle: `bash setup.sh`.
 #
 # This script installs the common host prerequisites only. Chain bootstrap, wallet migration/recovery,
 # authentication, and cutover are incident-specific operations: review the live topology and generate a
 # fresh, bounded procedure when needed instead of relying on a permanently maintained migration runbook.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 SVC_USER="nullsink"
 
-# Shared verified-install primitives (fetch_verified / require_x86_64 / install_verified_bitcoind + the
-# pinned Bitcoin version) live in lib.sh — one source of truth with the app-box setup.sh, no pin drift.
-# shellcheck source=deploy/lib.sh
+# Node-only verified-install primitives and the pinned Bitcoin version live beside this script. The app
+# release deliberately contains neither the daemon nor its installer.
+# shellcheck source=deploy/node-box/lib.sh
 source "$(dirname "$0")/lib.sh"
 
 if [ -t 1 ]; then _c=$'\e[1;36m'; _y=$'\e[1;33m'; _z=$'\e[0m'; else _c=''; _y=''; _z=''; fi
@@ -46,8 +47,7 @@ step "Installing bitcoind (pinned, verified)"
 install_verified_bitcoind
 
 step "Installing the bitcoind systemd unit"
-# ONLY bitcoind.service — deliberately NOT lib.sh's install_units, which globs EVERY deploy/*.service (incl.
-# the app's nullsink-proxy.service, backup.timer, …). This box runs no app; installing those here would be drift.
+# This standalone bundle contains only the node unit; it cannot install any app service.
 install -m644 "$(dirname "$0")/bitcoind.service" /etc/systemd/system/bitcoind.service
 systemctl daemon-reload
 
@@ -55,7 +55,7 @@ step "Installing the node firewall (nftables)"
 # Allows SSH + WireGuard inbound; bitcoind RPC (8332 mainnet / 38332 signet) only over wg0; P2P outbound.
 # SSH stays up (established + dport 22 accepted), so applying this won't drop the session you're running
 # setup from.
-install -m644 "$(dirname "$0")/nftables-nodes.conf" /etc/nftables.conf
+install -m644 "$(dirname "$0")/nftables.conf" /etc/nftables.conf
 systemctl enable --now nftables
 nft -f /etc/nftables.conf
 
@@ -110,4 +110,4 @@ fi
 
 step "Done — prerequisites installed"
 note "Before enabling Bitcoin, generate and review a procedure for this box's current chain, wallet, RPC,"
-note "WireGuard, drain, verification, and rollback state. setup-nodes.sh intentionally does not encode it."
+note "WireGuard, drain, verification, and rollback state. setup.sh intentionally does not encode it."

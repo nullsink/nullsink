@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const LIB = fileURLToPath(new URL("../deploy/lib.sh", import.meta.url));
+const NODE_LIB = fileURLToPath(new URL("../deploy/node-box/lib.sh", import.meta.url));
 const SETUP = fileURLToPath(new URL("../deploy/setup.sh", import.meta.url));
 const UPGRADER = fileURLToPath(new URL("../deploy/upgrade-component.sh", import.meta.url));
+const NODE_UPGRADER = fileURLToPath(new URL("../deploy/node-box/upgrade.sh", import.meta.url));
 
 const VERSION_HARNESS = String.raw`
 set -euo pipefail
@@ -34,15 +36,15 @@ case "$MODE" in
 esac
 `;
 
-for (const mode of [
-  "bitcoin_target",
-  "bitcoin_prefix_collision",
-  "monero_target",
-  "monero_prefix_collision",
-]) {
+for (const [mode, library] of [
+  ["bitcoin_target", NODE_LIB],
+  ["bitcoin_prefix_collision", NODE_LIB],
+  ["monero_target", LIB],
+  ["monero_prefix_collision", LIB],
+] as const) {
   test(`component pin matcher: ${mode}`, () => {
     const result = Bun.spawnSync({
-      cmd: ["bash", "-c", VERSION_HARNESS, "harness", LIB, mode],
+      cmd: ["bash", "-c", VERSION_HARNESS, "harness", library, mode],
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -50,13 +52,30 @@ for (const mode of [
   });
 }
 
-test("bootstrap and day-two upgrades read one shared set of component pins", () => {
+test("component pins are scoped to their host-role bundles", () => {
   const lib = readFileSync(LIB, "utf8");
+  const nodeLib = readFileSync(NODE_LIB, "utf8");
   const setup = readFileSync(SETUP, "utf8");
-  for (const name of ["BITCOIN_VERSION", "MONERO_VERSION", "TINFOIL_PROXY_VERSION"]) {
+  for (const name of ["MONERO_VERSION", "TINFOIL_PROXY_VERSION"]) {
     expect(lib).toMatch(new RegExp(`^${name}=`, "m"));
     expect(setup).not.toMatch(new RegExp(`^${name}=`, "m"));
   }
+  expect(lib).not.toContain("BITCOIN_VERSION=");
+  expect(nodeLib).toMatch(/^BITCOIN_VERSION=/m);
+  expect(nodeLib).not.toContain("MONERO_VERSION=");
+});
+
+test("Bitcoin upgrades exist only in the dedicated node bundle", () => {
+  const app = readFileSync(UPGRADER, "utf8");
+  const node = readFileSync(NODE_UPGRADER, "utf8");
+  expect(app).not.toMatch(/\bbitcoind\b|bitcoin-cli|BITCOIN_VERSION/);
+  expect(node).toContain('UNIT="bitcoind"');
+  expect(node).toContain("systemctl cat nullsink-proxy.service");
+  expect(node).toContain("stage_verified_bitcoind");
+  expect(node).toContain("rollback_armed=1");
+  expect(node.indexOf('systemctl stop "$UNIT"')).toBeLessThan(
+    node.indexOf('install -m755 "$staged/$name"'),
+  );
 });
 
 test("activation is staged before downtime and remains rollback-armed through its health gate", () => {

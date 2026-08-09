@@ -33,13 +33,8 @@ verify_sums() {  # $1=dir containing SHA256SUMS + the fetched asset(s)
   }
 }
 
-# --- Pinned external toolchain + verified-install primitives. Bitcoin is shared by setup.sh (legacy local
-# node bootstrap), setup-nodes.sh (dedicated node box), and upgrade-component.sh. Monero wallet + Tinfoil are
-# app-box-only, but live here too so bootstrap and narrow day-two upgrades share ONE checksum gate. ---
-# Bitcoin Core: pinned version + the SHA-256 of the x86_64-linux tarball, taken from the maintainer-signed
-# SHA256SUMS (gpg-verified at authoring; key 152812300785C96444D3334D17565732E08E5E41).
-BITCOIN_VERSION="31.1"
-BITCOIN_SHA256_X64="b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e"
+# --- App-box-only pinned external toolchain + verified-install primitives. Bitcoin Core lives in the
+# standalone node-box bundle and is deliberately absent from this app deployment library. ---
 # Monero CLI bundle: pinned version + the SHA-256 of the linux-x64 bundle, taken from the
 # binaryFate-signed hashes.txt (gpg-verified at authoring; key 81AC591FE9C4B65C5806AFC3F0AF4D462A0BDF92).
 MONERO_VERSION="0.18.5.1"
@@ -65,20 +60,11 @@ require_x86_64() {  # $1=label — these pins are x86_64-only; fail loud rather 
   fi
 }
 
-bitcoin_binary_matches_pin() {  # $1=bitcoind path; Core 31.1 identifies itself as v31.1.0
-  local first
-  first="$("$1" --version 2>/dev/null | sed -n '1p')" || return 1
-  [[ "$first" == *" version v${BITCOIN_VERSION} "* ||
-     "$first" == *" version v${BITCOIN_VERSION}.0 "* ]]
-}
 monero_wallet_binary_matches_pin() {  # $1=monero-wallet-rpc path
   local first
   first="$("$1" --version 2>/dev/null | sed -n '1p')" || return 1
   [[ "$first" == *"(v${MONERO_VERSION}-release)"* ||
      "$first" == *" v${MONERO_VERSION} "* ]]
-}
-bitcoin_is_pinned() {
-  bitcoin_binary_matches_pin /usr/local/bin/bitcoind
 }
 monero_wallet_is_pinned() {
   monero_wallet_binary_matches_pin /usr/local/bin/monero-wallet-rpc
@@ -88,21 +74,6 @@ tinfoil_proxy_is_pinned() {
     echo "$TINFOIL_PROXY_SHA256_X64  /usr/local/bin/tinfoil-proxy" | sha256sum -c --status -
 }
 
-stage_verified_bitcoind() {  # $1=dest — verified bitcoind + bitcoin-cli, without touching the live binaries
-  require_x86_64 "Bitcoin Core"
-  local dest="$1" tmp
-  mkdir -p "$dest" || return 1
-  tmp="$(mktemp -d)" || return 1
-  fetch_verified "https://bitcoincore.org/bin/bitcoin-core-${BITCOIN_VERSION}/bitcoin-${BITCOIN_VERSION}-x86_64-linux-gnu.tar.gz" \
-    "$BITCOIN_SHA256_X64" "$tmp/bitcoin.tar.gz" || { rm -rf "$tmp"; return 1; }
-  tar -xzf "$tmp/bitcoin.tar.gz" -C "$tmp" --strip-components=1 ||
-    { rm -rf "$tmp"; return 1; }   # -> $tmp/bin/{bitcoind,bitcoin-cli}
-  install -m755 "$tmp/bin/bitcoind" "$dest/bitcoind" ||
-    { rm -rf "$tmp"; return 1; }
-  install -m755 "$tmp/bin/bitcoin-cli" "$dest/bitcoin-cli" ||
-    { rm -rf "$tmp"; return 1; }
-  rm -rf "$tmp"
-}
 stage_verified_monero_wallet() {  # $1=dest — verified wallet RPC + CLI, without touching the live binaries
   require_x86_64 "Monero CLI"
   local dest="$1" tmp
@@ -135,16 +106,6 @@ stage_verified_tinfoil_proxy() {  # $1=dest — verified proxy, without touching
   rm -rf "$tmp"
 }
 
-install_verified_bitcoind() {  # bitcoind + bitcoin-cli (the unit's ExecStop calls the cli)
-  if bitcoin_is_pinned; then return 0; fi
-  local tmp
-  tmp="$(mktemp -d)" || return 1
-  stage_verified_bitcoind "$tmp" || { rm -rf "$tmp"; return 1; }
-  install -m755 "$tmp/bitcoind" "$tmp/bitcoin-cli" /usr/local/bin/ ||
-    { rm -rf "$tmp"; return 1; }
-  rm -rf "$tmp"
-  echo "    $(/usr/local/bin/bitcoind --version | head -1) installed"
-}
 install_verified_monero_wallet() {  # wallet watcher + CLI (the latter creates the view-only wallet once)
   if monero_wallet_is_pinned; then return 0; fi
   local tmp
@@ -172,8 +133,14 @@ install_verified_tinfoil_proxy() {  # local attestation sidecar
 PROXY_UNIT="nullsink-proxy"
 PAYMENTS_UNIT="nullsink-payments"
 
-install_units() {  # refresh ALL units + timers from the repo so on-box config can't drift, then reload
-  cp "$APP_DIR"/deploy/*.service "$APP_DIR"/deploy/*.timer /etc/systemd/system/
+install_units() {  # refresh the explicit app-box unit allowlist; other host roles cannot leak into this box
+  local unit
+  for unit in \
+    nullsink-proxy.service nullsink-payments.service \
+    monero-wallet-rpc.service tinfoil-proxy.service nullsink-bitcoin-label-export.service \
+    backup.service backup.timer status-check.service status-check.timer status-alert@.service; do
+    install -m644 "$APP_DIR/deploy/$unit" "/etc/systemd/system/$unit"
+  done
   systemctl daemon-reload
 }
 
