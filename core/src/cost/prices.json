@@ -391,6 +391,14 @@
     "cache_write": 0,
     "cache_write_1h": 0
   },
+  "kimi-k3": {
+    "provider": "tinfoil",
+    "input": 2,
+    "output": 6,
+    "cache_read": 2,
+    "cache_write": 0,
+    "cache_write_1h": 0
+  },
   "llama3-3-70b": {
     "provider": "tinfoil",
     "input": 1.75,
