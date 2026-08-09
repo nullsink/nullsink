@@ -38,9 +38,18 @@ sync_caddy() {  # refresh the Caddy edge config from the repo; validate first, r
     echo "!! /etc/caddy/Caddyfile failed validation after refresh — left in place but NOT reloaded; fix it" >&2
   fi
 }
-# Everything the box derives from the repo (units + timers + edge).
-apply_repo_config() { install_units; enable_app_units; enable_timers; sync_caddy; }
+# Everything the box derives from the repo except timers. The timers stay suspended until the refreshed
+# services pass their health gate, so neither root one-shot can execute across a mixed old/new layout.
+apply_repo_config() { install_units; enable_app_units; sync_caddy; }
 record() { printf '%s  %s%s\n' "$1" "$(date -u +%FT%TZ)" "${2:-}" > "$APP_DIR/REVISION"; }
+
+# shellcheck disable=SC2329 # invoked indirectly by `trap ... EXIT` during a suspended deploy
+restore_timers_on_exit() {
+  local status=$?
+  trap - EXIT
+  restore_control_timers || true
+  exit "$status"
+}
 
 # Rail daemons (bitcoind, monero-wallet-rpc) are deliberately NOT bounced by a redeploy — restarting a node
 # mid-sync is disruptive. But silently refreshing a daemon's unit FILE while it keeps running the old one is a
@@ -66,16 +75,16 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   prev_pay="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
   prev_web="$(readlink "$WEB_BASE/current-web" 2>/dev/null || true)"                       # roll the UI back in lockstep
   echo ">>> Deploying $REF  (proxy was ${prev_proxy:-none}, payments was ${prev_pay:-none}, UI was ${prev_web:-none})"
-  install_binary "$REF"                  # fetch+verify+activate both current-{proxy,payments} symlinks
-  install_deploy_tree "$REF" "$APP_DIR"  # refresh deploy/ (units + scripts + Caddyfile) from the release
   if [ ! -f /etc/nullsink-service-isolation.prepared ]; then
-    echo "!! service isolation is not prepared; units and services were NOT changed" >&2
+    echo "!! service isolation is not prepared; no release artifact, unit, or service was changed" >&2
     echo "!! Review and run: $APP_DIR/deploy/migrate-service-isolation.sh --prepare" >&2
     echo "!! Then rerun this exact deploy command. The old services remain live on the legacy layout." >&2
-    [ -z "$prev_proxy" ] || ln -sfn "$prev_proxy" /usr/local/lib/nullsink/current-proxy
-    [ -z "$prev_pay" ] || ln -sfn "$prev_pay" /usr/local/lib/nullsink/current-payments
     exit 1
   fi
+  suspend_control_timers                  # drain root one-shots before any release activation begins
+  trap restore_timers_on_exit EXIT
+  install_binary "$REF"                  # fetch+verify+activate both current-{proxy,payments} symlinks
+  install_deploy_tree "$REF" "$APP_DIR"  # atomically refresh deploy/ (units + scripts + Caddyfile)
   if [ -x /usr/local/bin/nsk ]; then install_nsk "$REF"; fi
   # UI is non-fatal: /healthz tests the BINARIES, which serve fine with a stale UI, so a UI fetch hiccup must not
   # abort (and half-apply) a binary deploy. Activate it; the health gate below still judges the binaries.
@@ -88,11 +97,13 @@ deploy_binary() {  # binary mode (REF is a version tag): fetch+verify+swap both 
   new_proxy="$(readlink /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"
   new_pay="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
   warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
-  apply_repo_config                      # refresh units + timers + edge from the now-current deploy/
+  apply_repo_config                      # refresh units + edge from the now-current deploy/; timers remain stopped
   restart_isolation_sidecars             # one-time uid transition only; finalized boxes retain the no-bounce policy
   restart_app                            # proxy, then payments
 
   if health_ok_app; then
+    enable_timers                        # only the healthy, fully aligned release may resume the root one-shots
+    trap - EXIT
     record "$REF" "  (proxy $new_proxy, payments $new_pay, UI $new_web)"
     echo ">>> OK — $PROXY_UNIT + $PAYMENTS_UNIT healthy on $REF"
     exit 0
