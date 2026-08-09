@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.13.0](https://github.com/nullsink/nullsink/compare/v1.12.0...v1.13.0) (2026-08-09)
+
+
+### Features
+
+* **deploy:** isolate service privileges ([#155](https://github.com/nullsink/nullsink/issues/155)) ([e782dc7](https://github.com/nullsink/nullsink/commit/e782dc7d77e8dda3d1b436c3e784f86f799670f2))
+
+
+### Bug Fixes
+
+* **deploy:** close staging isolation gaps ([#157](https://github.com/nullsink/nullsink/issues/157)) ([27a8654](https://github.com/nullsink/nullsink/commit/27a865486df4fc3c2b398496ef410671a0c9b6a8))
+* **pricing:** handle model retirements in price sync ([#156](https://github.com/nullsink/nullsink/issues/156)) ([9b4eb08](https://github.com/nullsink/nullsink/commit/9b4eb080fde7e2bbf5d38deec60fea474b3a081c))
+* **pricing:** sync prices from models.dev ([#158](https://github.com/nullsink/nullsink/issues/158)) ([052af03](https://github.com/nullsink/nullsink/commit/052af03fbb6e0f8560b404cd16f417b9a45ac430))
+
+
+### Refactoring
+
+* **deploy:** make billing storage paths explicit ([#154](https://github.com/nullsink/nullsink/issues/154)) ([e56711d](https://github.com/nullsink/nullsink/commit/e56711d8cc38bc6dd1e2804846f941e46775a775))
+
+
+### Documentation
+
+* mark Step 3 partial shipped ([#152](https://github.com/nullsink/nullsink/issues/152)) ([8535bfb](https://github.com/nullsink/nullsink/commit/8535bfb44aab200af86103b9004f156810c83954))
+
 ## [1.12.0](https://github.com/nullsink/nullsink/compare/v1.11.5...v1.12.0) (2026-08-04)
 
 
