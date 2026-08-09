@@ -24,7 +24,7 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | File | Role |
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
-| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Atomically swaps both binary symlinks in lockstep, refreshes units + edge from this tree, reconciles the timers, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
+| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Drains the root backup/status one-shots before replacing their scripts, atomically swaps both binary symlinks in lockstep, refreshes units + edge, resumes timers only after health, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
 | `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
@@ -94,6 +94,10 @@ crossing release, verify the new `deploy-<tag>.tar.gz` off-box, copy it to the a
 directory, and run `deploy.sh <tag>` from there — **not** the old `/opt/nullsink/deploy/deploy.sh`. It installs the
 verified deploy tree, then exits before changing units because the prepared marker is absent. Subsequent commands
 use the newly installed `/opt/nullsink/deploy/` tree normally.
+
+After that boundary-crossing release, the installed deploy script checks the prepared marker before downloading
+or activating any release artifact. Routine redeploys also stop and drain `status-check` and `backup` before the
+live deploy tree changes, so an old unit can never execute a new script during the transition.
 
 Review and run `migrate-service-isolation.sh --prepare` during a financial quiet window, then immediately
 rerun `/opt/nullsink/deploy/deploy.sh <tag>`. Preparation stops the old app and timers, checks that there are

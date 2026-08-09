@@ -9,6 +9,10 @@ import { fileURLToPath } from "node:url";
 
 const deploy = (name: string) => fileURLToPath(new URL(`../deploy/${name}`, import.meta.url));
 const src = (name: string) => fileURLToPath(new URL(`../src/${name}`, import.meta.url));
+const releaseWorkflow = readFileSync(
+  fileURLToPath(new URL("../../.github/workflows/release.yml", import.meta.url)),
+  "utf8",
+);
 
 const caddy = readFileSync(deploy("Caddyfile"), "utf8");
 const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
@@ -213,21 +217,71 @@ test("control-plane storage paths are isolated while retaining an explicit legac
   }
 });
 
-test("the first isolated deploy refuses before unit activation until explicit preparation", () => {
+test("the first isolated deploy refuses before any release mutation until explicit preparation", () => {
+  const binary = deployScript.indexOf('install_binary "$REF"');
+  const suspend = deployScript.indexOf("suspend_control_timers");
   const tree = deployScript.indexOf('install_deploy_tree "$REF" "$APP_DIR"');
   const marker = deployScript.indexOf("if [ ! -f /etc/nullsink-service-isolation.prepared ]");
   const apply = deployScript.indexOf("apply_repo_config                      #");
   const restart = deployScript.indexOf("restart_app", apply);
+  const timers = deployScript.indexOf("enable_timers", restart);
+  expect(marker).toBeGreaterThan(-1);
+  expect(suspend).toBeGreaterThan(marker);
+  expect(binary).toBeGreaterThan(suspend);
   expect(tree).toBeGreaterThan(-1);
-  expect(marker).toBeGreaterThan(tree);
-  expect(apply).toBeGreaterThan(marker);
+  expect(tree).toBeGreaterThan(binary);
+  expect(apply).toBeGreaterThan(tree);
   expect(restart).toBeGreaterThan(apply);
-  expect(deployScript.slice(marker, apply)).toContain("units and services were NOT changed");
-  expect(deployScript.slice(marker, apply)).not.toContain("prepare_service_isolation");
+  expect(timers).toBeGreaterThan(restart);
+  expect(deployScript.slice(marker, suspend)).toContain(
+    "no release artifact, unit, or service was changed",
+  );
+  expect(deployScript.slice(marker, suspend)).not.toContain("prepare_service_isolation");
+  expect(deployScript.indexOf("trap restore_timers_on_exit EXIT")).toBeLessThan(tree);
+  expect(deployScript.slice(apply, restart)).not.toContain("enable_timers");
   expect(setup).toContain("Existing billing state requires an explicit, quiet-window migration");
   expect(readFileSync(deploy("README.md"), "utf8")).toContain(
     "not** the old `/opt/nullsink/deploy/deploy.sh`",
   );
+});
+
+test("release archives and root extraction cannot inherit the CI runner identity", () => {
+  expect(
+    releaseWorkflow.match(/tar --owner=0 --group=0 --numeric-owner -czf/g)?.length,
+  ).toBe(2);
+  expect(deployLib.match(/tar --no-same-owner -x/g)?.length).toBe(2);
+  expect(deployLib).toContain('chown -R root:root "$staging/deploy"');
+  expect(deployLib).toContain('chown -R root:root "$staging"');
+
+  const installTree = deployLib.slice(
+    deployLib.indexOf("install_deploy_tree()"),
+    deployLib.indexOf("install_client_ui()"),
+  );
+  expect(installTree.indexOf('tar --no-same-owner')).toBeGreaterThan(-1);
+  expect(installTree.indexOf('chown -R root:root')).toBeGreaterThan(
+    installTree.indexOf('tar --no-same-owner'),
+  );
+  expect(installTree.indexOf('mv "$staging/deploy" "$dest/deploy"')).toBeGreaterThan(
+    installTree.indexOf('chown -R root:root'),
+  );
+});
+
+test("deploy drains root one-shots around the live tree and restores only prior active timers on failure", () => {
+  const suspend = deployLib.slice(
+    deployLib.indexOf("suspend_control_timers()"),
+    deployLib.indexOf("restore_control_timers()"),
+  );
+  const restore = deployLib.slice(
+    deployLib.indexOf("restore_control_timers()"),
+    deployLib.indexOf("enable_timers()"),
+  );
+  expect(suspend).toContain("systemctl is-active --quiet");
+  expect(suspend.indexOf("systemctl stop status-check.timer backup.timer")).toBeLessThan(
+    suspend.indexOf("systemctl stop status-check.service backup.service"),
+  );
+  expect(restore).toContain('systemctl start "${CONTROL_TIMERS_WERE_ACTIVE[@]}"');
+  expect(deployScript).toContain("trap restore_timers_on_exit EXIT");
+  expect(deployScript).toContain("trap - EXIT");
 });
 
 test("backup publication and routine reporting follow the Step 2 egress contract", () => {

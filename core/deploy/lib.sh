@@ -184,10 +184,36 @@ restart_app() {  # proxy first: it binds the credit socket payments connects to 
   systemctl restart "$PAYMENTS_UNIT"
 }
 
+CONTROL_TIMERS_SUSPENDED=0
+CONTROL_TIMERS_WERE_ACTIVE=()
+suspend_control_timers() {
+  # status-check.service and backup.service execute scripts through the live deploy/ path. Stop both timers,
+  # then drain either one-shot before that tree is replaced; otherwise an old unit can race into a new script.
+  local unit
+  CONTROL_TIMERS_WERE_ACTIVE=()
+  for unit in status-check.timer backup.timer; do
+    systemctl is-active --quiet "$unit" 2>/dev/null && CONTROL_TIMERS_WERE_ACTIVE+=("$unit")
+  done
+  CONTROL_TIMERS_SUSPENDED=1
+  systemctl stop status-check.timer backup.timer || { restore_control_timers || true; return 1; }
+  systemctl stop status-check.service backup.service || { restore_control_timers || true; return 1; }
+}
+
+restore_control_timers() {
+  [ "$CONTROL_TIMERS_SUSPENDED" -eq 1 ] || return 0
+  if [ "${#CONTROL_TIMERS_WERE_ACTIVE[@]}" -gt 0 ]; then
+    systemctl start "${CONTROL_TIMERS_WERE_ACTIVE[@]}"
+  fi
+  CONTROL_TIMERS_SUSPENDED=0
+  CONTROL_TIMERS_WERE_ACTIVE=()
+}
+
 enable_timers() {  # reconcile the box's timers from the repo — shared by setup.sh + deploy.sh, idempotent.
   # The always-on timers run on every box (safe with their creds unset — they just log / no-op). Run after
   # install_units (the unit files must exist).
   systemctl enable --now status-check.timer backup.timer
+  CONTROL_TIMERS_SUSPENDED=0
+  CONTROL_TIMERS_WERE_ACTIVE=()
 }
 
 install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app binaries for a release tag
@@ -244,19 +270,41 @@ EOF
 
 install_deploy_tree() {  # $1=tag $2=dest — fetch+verify+extract deploy-<tag>.tar.gz so $2/deploy/ exists
   # Source-free box: the systemd units ExecStart $APP_DIR/deploy/*.sh, so the box needs deploy/ (NOT src/ or
-  # cli/). Ship it as a release tarball instead of git-cloning the whole source repo.
-  local tag="$1" dest="$2" tmp
-  tmp="$(mktemp -d)"
+  # cli/). Extract away from the live path, discard archive ownership, then replace the complete directory;
+  # a corrupt/partial archive can never splice the scripts that root timers execute.
+  local tag="$1" dest="$2" tmp staging previous had_previous=0
+  tmp="$(mktemp -d)" || return 1
   fetch_asset "$tag" "deploy-${tag}.tar.gz" "$tmp"
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
   test -f "$tmp/deploy-${tag}.tar.gz"
   verify_sums "$tmp" || return 1
-  mkdir -p "$dest"
-  tar -xzf "$tmp/deploy-${tag}.tar.gz" -C "$dest"   # release.yml `tar -czf … -C core deploy` -> $dest/deploy/*
-  # Tar extraction does not remove omitted files. Retain this bounded upgrade cleanup until every box has
-  # crossed the release that removes the obsolete recovery runbook.
-  rm -f -- "$dest/deploy/node-box-runbook.md"
-  rm -rf "$tmp"
+  mkdir -p "$dest" || { rm -rf "$tmp"; return 1; }
+  staging="$dest/.deploy-${tag}.new"
+  previous="$dest/.deploy.previous"
+  rm -rf -- "$staging" "$previous" || { rm -rf "$tmp"; return 1; }
+  mkdir -p "$staging" || { rm -rf "$tmp"; return 1; }
+  tar --no-same-owner -xzf "$tmp/deploy-${tag}.tar.gz" -C "$staging" || {
+    rm -rf "$tmp" "$staging"; return 1;
+  }
+  for required in deploy.sh lib.sh status-check.sh backup.sh; do
+    test -f "$staging/deploy/$required" || {
+      echo "    !! deploy tree $tag is missing deploy/$required — refusing to activate" >&2
+      rm -rf "$tmp" "$staging"
+      return 1
+    }
+  done
+  chown -R root:root "$staging/deploy" || { rm -rf "$tmp" "$staging"; return 1; }
+  chmod -R go-w "$staging/deploy" || { rm -rf "$tmp" "$staging"; return 1; }
+  if [ -e "$dest/deploy" ] || [ -L "$dest/deploy" ]; then
+    mv "$dest/deploy" "$previous" || { rm -rf "$tmp" "$staging"; return 1; }
+    had_previous=1
+  fi
+  if ! mv "$staging/deploy" "$dest/deploy"; then
+    [ "$had_previous" -eq 0 ] || mv "$previous" "$dest/deploy" || true
+    rm -rf "$tmp" "$staging"
+    return 1
+  fi
+  rm -rf "$tmp" "$staging" "$previous"
   echo "    deploy tree $tag extracted to $dest/deploy"
 }
 
@@ -281,8 +329,9 @@ install_client_ui() {  # $1=tag $2=webbase — fetch+verify+extract the client U
   local staging="$webbase/web-$tag.new"
   rm -rf "${staging:?}"
   mkdir -p "$staging"
-  tar -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1 || return 1   # dist/* -> web-$tag.new/*
+  tar --no-same-owner -xzf "$tmp/nullsink-ui-${tag}.tar.gz" -C "$staging" --strip-components=1 || return 1   # dist/* -> web-$tag.new/*
   test -f "$staging/index.html" || { echo "    !! UI tarball for $tag has no index.html — refusing to swap" >&2; return 1; }
+  chown -R root:root "$staging" || return 1
   chmod -R a+rX "$staging"                     # Caddy runs as its own user — ensure it can read files + traverse dirs
   rm -rf "${webbase:?}/web-$tag"               # drop the old copy only now — the new one is staged + validated
   mv "$staging" "$webbase/web-$tag" || return 1   # swap into place
