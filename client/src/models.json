@@ -61,7 +61,6 @@
       "models": [
         "glm-5-2",
         "kimi-k3",
-        "kimi-k2-6",
         "gpt-oss-120b",
         "llama3-3-70b",
         "gemma4-31b",
