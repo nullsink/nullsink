@@ -282,6 +282,7 @@ test("the first isolated deploy refuses before any release mutation until explic
   expect(deployScript.slice(marker, suspend)).not.toContain("prepare_service_isolation");
   expect(deployScript.indexOf("CUTOVER_ROLLBACK_ARMED=1")).toBeLessThan(binary);
   expect(deployScript.indexOf("trap restore_deploy_on_exit EXIT")).toBeLessThan(binary);
+  expect(deployScript.indexOf('"$CUTOVER_MIGRATION" --validate')).toBeLessThan(binary);
   expect(deployScript).toContain("rollback_initial_cutover");
   expect(deployScript).toContain("refusing an unsafe automatic rollback");
   expect(deployScript.slice(apply, restart)).not.toContain("enable_timers");
@@ -290,6 +291,23 @@ test("the first isolated deploy refuses before any release mutation until explic
   expect(readFileSync(deploy("README.md"), "utf8")).toContain(
     "not** the old `/opt/nullsink/deploy/deploy.sh`",
   );
+});
+
+test("Caddy changes are staged and validated before the live file is replaced", () => {
+  const syncCaddy = deployScript.slice(
+    deployScript.indexOf("sync_caddy()"),
+    deployScript.indexOf("apply_repo_config()"),
+  );
+  const stage = syncCaddy.indexOf('candidate="$(mktemp /etc/caddy/.Caddyfile.nullsink.XXXXXX)"');
+  const validate = syncCaddy.indexOf('caddy validate --adapter caddyfile --config "$candidate"');
+  const replace = syncCaddy.indexOf('mv -f -- "$candidate" /etc/caddy/Caddyfile');
+
+  expect(stage).toBeGreaterThan(-1);
+  expect(validate).toBeGreaterThan(stage);
+  expect(replace).toBeGreaterThan(validate);
+  expect(syncCaddy).toContain("live configuration was not changed");
+  expect(syncCaddy).toContain("return 1");
+  expect(syncCaddy).not.toContain('cp "$APP_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile');
 });
 
 test("release archives and root extraction cannot inherit the CI runner identity", () => {

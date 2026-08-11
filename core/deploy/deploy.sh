@@ -24,21 +24,30 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"    # seconds to wait for EACH service's /
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
-sync_caddy() {  # refresh the Caddy edge config from the repo; validate first, reload only if valid
-  cp "$APP_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
+sync_caddy() {  # validate a staged edge config before atomically replacing the live file
   # The Caddyfile is a {$NULLSINK_DOMAIN} template. The running caddy.service already has that env (from the
   # caddy.service.d drop-in setup.sh wrote), but this ad-hoc `caddy validate` is a separate process that does
   # NOT — so pass the domain in, or validation sees an empty site address and fails. reload (not restart) is
   # correct on a redeploy: the domain is unchanged, and reload re-resolves {$VAR} from the running env.
-  local domain
+  local domain candidate
   domain="$(grep -E '^NULLSINK_DOMAIN=' "$MONITOR_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
-  if NULLSINK_DOMAIN="$domain" caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
-    # The one-time ledger cutover deliberately keeps Caddy stopped until all three new units pass health.
-    # Install and validate its config now, but only reload an already-active edge.
-    systemctl is-active --quiet caddy 2>/dev/null && systemctl reload caddy || true
-  else
-    echo "!! /etc/caddy/Caddyfile failed validation after refresh — left in place but NOT reloaded; fix it" >&2
+  candidate="$(mktemp /etc/caddy/.Caddyfile.nullsink.XXXXXX)"
+  if ! install -o root -g root -m 0644 "$APP_DIR/deploy/Caddyfile" "$candidate"; then
+    rm -f -- "$candidate"
+    return 1
   fi
+  if ! NULLSINK_DOMAIN="$domain" caddy validate --adapter caddyfile --config "$candidate" >/dev/null 2>&1; then
+    rm -f -- "$candidate"
+    echo "!! candidate Caddyfile failed validation — live configuration was not changed" >&2
+    return 1
+  fi
+  if ! mv -f -- "$candidate" /etc/caddy/Caddyfile; then
+    rm -f -- "$candidate"
+    return 1
+  fi
+  # The one-time ledger cutover deliberately keeps Caddy stopped until all three new units pass health.
+  # Install its validated config now, but only reload an already-active edge.
+  if systemctl is-active --quiet caddy 2>/dev/null; then systemctl reload caddy; fi
 }
 # Everything the box derives from the repo except timers. The timers stay suspended until the refreshed
 # services pass their health gate, so neither root one-shot can execute across a mixed old/new layout.
@@ -130,6 +139,7 @@ deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, h
     CUTOVER_PREV_NSK="$prev_nsk"
     CUTOVER_MIGRATION="$(dirname "$0")/migrate-ledger-service.sh"
     [ -x "$CUTOVER_MIGRATION" ] || { echo "!! verified ledger migration script is missing" >&2; exit 1; }
+    "$CUTOVER_MIGRATION" --validate
   fi
   trap restore_deploy_on_exit EXIT
   suspend_control_timers                  # drain root one-shots before any release activation begins

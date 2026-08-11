@@ -116,6 +116,8 @@ esac
   writeFileSync(join(systemd, "nullsink-payments.service"), "old payments unit\n");
   writeFileSync(join(systemd, "backup.service"), "old backup unit\n");
   writeFileSync(join(systemd, "status-check.service"), "old status unit\n");
+  executable(join(binDir, "nullsink-proxy-v1.13.0"), "#!/bin/sh\nexit 0\n");
+  executable(join(binDir, "nullsink-payments-v1.13.0"), "#!/bin/sh\nexit 0\n");
   symlinkSync("nullsink-proxy-v1.13.0", join(binDir, "current-proxy"));
   symlinkSync("nullsink-payments-v1.13.0", join(binDir, "current-payments"));
 
@@ -155,7 +157,9 @@ test("prepare copies the exact ledger only after draining admission, and rollbac
   const prepared = run("--prepare", w.env);
   const output = prepared.stdout.toString() + prepared.stderr.toString();
   expect(prepared.exitCode, output).toBe(0);
-  expect(output).toContain("stopped-state gate holds=0 open_orders=0 unacked=0 partial_scrub=0");
+  expect(output).toContain(
+    "stopped-state gate holds=0 open_orders=0 unacked=0 legacy_ack_payloads=0 partial_scrub=0",
+  );
   expect(output).toContain("balances.db copied (integrity and logical fingerprint preserved)");
 
   const migrated = new Database(join(w.state, "nullsink-ledger", "balances.db"), { readonly: true });
@@ -163,6 +167,9 @@ test("prepare copies the exact ledger only after draining admission, and rollbac
   migrated.close();
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(true);
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.activated"))).toBe(false);
+  expect(readFileSync(join(w.etc, "nullsink-ledger-extraction.prepared"), "utf8")).toMatch(
+    /state=existing\nsource_fingerprint=[0-9a-f]{64}\n/,
+  );
 
   const log = readFileSync(w.systemctlLog, "utf8");
   expect(log.indexOf("stop caddy")).toBeLessThan(log.indexOf("stop nullsink-payments nullsink-proxy"));
@@ -201,6 +208,9 @@ test("a fresh box prepares the empty ledger identity without stopping any servic
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(true);
   expect(existsSync(join(w.state, "nullsink-ledger"))).toBe(true);
   expect(existsSync(w.systemctlLog)).toBe(false);
+  expect(readFileSync(join(w.etc, "nullsink-ledger-extraction.prepared"), "utf8")).toContain(
+    "state=fresh\nsource_fingerprint=none",
+  );
 
   const repeated = run("--prepare", w.env);
   expect(repeated.exitCode, repeated.stderr.toString()).toBe(0);
@@ -247,6 +257,16 @@ test("activation requires both sockets; finalization removes only the frozen pre
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(true);
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.activated"))).toBe(true);
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.finalized"))).toBe(true);
+
+  const repeatedPrepare = run("--prepare", w.env);
+  expect(repeatedPrepare.exitCode, repeatedPrepare.stderr.toString()).toBe(0);
+  expect(repeatedPrepare.stdout.toString()).toContain("already activated");
+  const repeatedActivate = run("--activate", w.env);
+  expect(repeatedActivate.exitCode, repeatedActivate.stderr.toString()).toBe(0);
+  expect(repeatedActivate.stdout.toString()).toContain("already activated");
+  const validated = run("--validate", w.env);
+  expect(validated.exitCode, validated.stderr.toString()).toBe(0);
+  expect(validated.stdout.toString()).toContain("active state is complete");
 });
 
 test("a stopped-session hold is preserved for atomic recovery by the first ledger session", () => {
@@ -257,6 +277,73 @@ test("a stopped-session hold is preserved for atomic recovery by the first ledge
   const migrated = new Database(join(w.state, "nullsink-ledger", "balances.db"), { readonly: true });
   expect(migrated.query("SELECT COUNT(*) AS n FROM holds").get()).toEqual({ n: 1 });
   migrated.close();
+});
+
+test("prepare refuses rollback-unsafe payment state and restores the old topology", () => {
+  const scenarios = [
+    {
+      name: "open payment order",
+      mutate: (db: Database) => db.run("INSERT INTO pending_orders VALUES ('open')"),
+      error: "open payment orders must settle or expire",
+    },
+    {
+      name: "undelivered credit",
+      mutate: (db: Database) =>
+        db.run("INSERT INTO credit_outbox VALUES ('unacked', 'token', 7, 1, NULL)"),
+      error: "undelivered credits must drain",
+    },
+    {
+      name: "legacy acknowledged payload",
+      mutate: (db: Database) =>
+        db.run("INSERT INTO credit_outbox VALUES ('legacy', 'token', 7, 1, 2)"),
+      error: "legacy acknowledged credit payloads must be scrubbed",
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const w = workspace();
+    const pending = new Database(join(w.pendingState, "pending.db"));
+    scenario.mutate(pending);
+    pending.close();
+
+    const result = run("--prepare", w.env);
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode, scenario.name).toBe(1);
+    expect(output).toContain(scenario.error);
+    expect(output).toContain("unchanged old topology was restored");
+    expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(false);
+    expect(existsSync(join(w.state, "nullsink-ledger", "balances.db"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "nullsink-proxy.stopped"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "nullsink-payments.stopped"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "caddy.stopped"))).toBe(false);
+  }
+});
+
+test("prepared validation fails closed when migrated or rollback state is incomplete", () => {
+  const missingLedger = workspace();
+  expect(run("--prepare", missingLedger.env).exitCode).toBe(0);
+  rmSync(join(missingLedger.state, "nullsink-ledger", "balances.db"));
+  const ledgerResult = run("--validate", missingLedger.env);
+  expect(ledgerResult.exitCode).toBe(1);
+  expect(ledgerResult.stderr.toString()).toContain("migrated balances.db is absent");
+
+  const missingRollback = workspace();
+  expect(run("--prepare", missingRollback.env).exitCode).toBe(0);
+  rmSync(join(missingRollback.state, "nullsink-ledger-migration", "nullsink-proxy.service"));
+  const rollbackResult = run("--validate", missingRollback.env);
+  expect(rollbackResult.exitCode).toBe(1);
+  expect(rollbackResult.stderr.toString()).toContain(
+    "rollback contract is incomplete: nullsink-proxy.service",
+  );
+
+  const changedSource = workspace();
+  expect(run("--prepare", changedSource.env).exitCode).toBe(0);
+  const balances = new Database(join(changedSource.oldState, "balances.db"));
+  balances.run("UPDATE tokens SET balance = balance + 1");
+  balances.close();
+  const sourceResult = run("--validate", changedSource.env);
+  expect(sourceResult.exitCode).toBe(1);
+  expect(sourceResult.stderr.toString()).toContain("frozen source ledger fingerprint changed");
 });
 
 test("a failed financial gate publishes no marker and automatically restores the old topology", () => {

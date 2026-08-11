@@ -7,8 +7,8 @@ set -euo pipefail
 
 mode="${1:---prepare}"
 case "$mode" in
-  --prepare|--activate|--rollback|--finalize) ;;
-  *) echo "usage: $0 [--prepare|--activate|--rollback|--finalize]" >&2; exit 2 ;;
+  --prepare|--validate|--activate|--rollback|--finalize) ;;
+  *) echo "usage: $0 [--prepare|--validate|--activate|--rollback|--finalize]" >&2; exit 2 ;;
 esac
 
 ETC_DIR="${NULLSINK_ETC_DIR:-/etc}"
@@ -78,7 +78,7 @@ write_marker() {
 
 marker_value() {
   local key="$1"
-  sed -n "s/^${key}=\([01]\)$/\\1/p" "$PREPARED_MARKER" | tail -n 1
+  awk -F= -v key="$key" '$1 == key { value = substr($0, length($1) + 2) } END { print value }' "$PREPARED_MARKER"
 }
 
 is_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
@@ -98,14 +98,20 @@ table_count() {
 
 financial_gate() {
   local balances="$OLD_STATE/balances.db" pending="$PENDING_STATE/pending.db"
-  local holds open_orders unacked partial
+  local holds open_orders unacked legacy_ack_payloads partial
+  [ -f "$pending" ] || die "pending database is absent; old topology remains stopped"
+  [ "$(sqlite3 -readonly "$pending" 'PRAGMA quick_check;' | head -1)" = ok ] || die "pending database failed quick_check; old topology remains stopped"
   holds="$(table_count "$balances" holds 'SELECT COUNT(*) FROM holds;')"
   open_orders="$(table_count "$pending" pending_orders 'SELECT COUNT(*) FROM pending_orders;')"
   unacked="$(table_count "$pending" credit_outbox 'SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NULL;')"
+  legacy_ack_payloads="$(table_count "$pending" credit_outbox "SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NOT NULL AND hash <> '';")"
   partial="$(table_count "$pending" credit_outbox "SELECT COUNT(*) FROM credit_outbox WHERE (hash = '' AND micros <> 0) OR (hash <> '' AND micros = 0);")"
-  printf 'ledger-extraction: stopped-state gate holds=%s open_orders=%s unacked=%s partial_scrub=%s\n' \
-    "$holds" "$open_orders" "$unacked" "$partial"
+  printf 'ledger-extraction: stopped-state gate holds=%s open_orders=%s unacked=%s legacy_ack_payloads=%s partial_scrub=%s\n' \
+    "$holds" "$open_orders" "$unacked" "$legacy_ack_payloads" "$partial"
   [ "$partial" -eq 0 ] || die "credit outbox has partially scrubbed rows; old topology remains stopped"
+  [ "$open_orders" -eq 0 ] || die "open payment orders must settle or expire before extraction; old topology remains stopped"
+  [ "$unacked" -eq 0 ] || die "undelivered credits must drain before extraction; old topology remains stopped"
+  [ "$legacy_ack_payloads" -eq 0 ] || die "legacy acknowledged credit payloads must be scrubbed before extraction; old topology remains stopped"
   if [ "$holds" -gt 0 ]; then
     echo "ledger-extraction: $holds stopped-session hold(s) will be recovered atomically by proxy startSession"
   fi
@@ -133,12 +139,76 @@ save_rollback_contract() {
   local unit target
   install -d -o root -g "$ROOT_GROUP" -m 0700 "$ROLLBACK_DIR"
   for unit in nullsink-proxy.service nullsink-payments.service backup.service status-check.service; do
-    [ -f "$SYSTEMD_DIR/$unit" ] && install -o root -g "$ROOT_GROUP" -m 0600 "$SYSTEMD_DIR/$unit" "$ROLLBACK_DIR/$unit"
+    [ -f "$SYSTEMD_DIR/$unit" ] || die "rollback source unit is absent: $unit"
+    install -o root -g "$ROOT_GROUP" -m 0600 "$SYSTEMD_DIR/$unit" "$ROLLBACK_DIR/$unit"
   done
   for unit in proxy payments; do
     target="$(readlink "$BIN_DIR/current-$unit" 2>/dev/null || true)"
-    [ -z "$target" ] || printf '%s\n' "$target" > "$ROLLBACK_DIR/current-$unit.target"
+    [[ "$target" =~ ^nullsink-(proxy|payments)-v[0-9A-Za-z.+-]+$ ]] || die "rollback $unit symlink target is absent or unsafe"
+    [ -x "$BIN_DIR/$target" ] || die "rollback $unit binary is absent: $target"
+    printf '%s\n' "$target" > "$ROLLBACK_DIR/current-$unit.target"
   done
+}
+
+validate_marker_contract() {
+  local state source_fp key target
+  [ -f "$PREPARED_MARKER" ] || die "not prepared"
+  [ "$(marker_value prepared)" = 1 ] || die "prepared marker is malformed"
+  for key in caddy_was_active backup_timer_was_active status_timer_was_active; do
+    [[ "$(marker_value "$key")" =~ ^[01]$ ]] || die "prepared marker has invalid $key"
+  done
+  state="$(marker_value state)"
+  source_fp="$(marker_value source_fingerprint)"
+  case "$state" in
+    fresh)
+      [ "$source_fp" = none ] || die "fresh prepared marker has an invalid source fingerprint"
+      [ ! -f "$OLD_STATE/balances.db" ] || die "fresh prepared marker conflicts with an existing source ledger"
+      ;;
+    existing)
+      [[ "$source_fp" =~ ^[0-9a-f]{64}$ ]] || die "existing prepared marker has an invalid source fingerprint"
+      [ -f "$OLD_STATE/balances.db" ] || die "frozen source ledger is absent"
+      [ "$(sqlite3 -readonly "$OLD_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "frozen source ledger failed quick_check"
+      [ "$(db_fingerprint "$OLD_STATE/balances.db")" = "$source_fp" ] || die "frozen source ledger fingerprint changed"
+      [ -f "$ROLLBACK_DIR/balances.dump.sha256" ] || die "rollback ledger fingerprint is absent"
+      [ "$(cat "$ROLLBACK_DIR/balances.dump.sha256")" = "$source_fp" ] || die "rollback ledger fingerprint does not match the marker"
+      for key in nullsink-proxy.service nullsink-payments.service backup.service status-check.service \
+        current-proxy.target current-payments.target; do
+        [ -f "$ROLLBACK_DIR/$key" ] || die "rollback contract is incomplete: $key"
+      done
+      for key in proxy payments; do
+        target="$(cat "$ROLLBACK_DIR/current-$key.target")"
+        [[ "$target" =~ ^nullsink-(proxy|payments)-v[0-9A-Za-z.+-]+$ ]] || die "saved rollback $key target is unsafe"
+        [ -x "$BIN_DIR/$target" ] || die "saved rollback $key binary is absent: $target"
+      done
+      ;;
+    *) die "prepared marker has an invalid state" ;;
+  esac
+}
+
+validate_prepared_snapshot() {
+  local state source_fp
+  validate_marker_contract
+  state="$(marker_value state)"
+  source_fp="$(marker_value source_fingerprint)"
+  if [ "$state" = existing ]; then
+    [ -f "$LEDGER_STATE/balances.db" ] || die "migrated balances.db is absent"
+    [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "migrated balances.db failed quick_check"
+    [ "$(db_fingerprint "$LEDGER_STATE/balances.db")" = "$source_fp" ] || die "migrated balances.db fingerprint does not match the frozen source"
+  elif [ -f "$LEDGER_STATE/balances.db" ]; then
+    [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "fresh balances.db failed quick_check"
+  fi
+}
+
+validate_state() {
+  if [ -f "$ACTIVATED_MARKER" ]; then
+    [ -f "$PREPARED_MARKER" ] || die "activation marker exists without preparation"
+    [ -f "$LEDGER_STATE/balances.db" ] || die "active ledger is absent"
+    [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "active ledger failed quick_check"
+    echo "ledger-extraction: active state is complete"
+    return 0
+  fi
+  validate_prepared_snapshot
+  echo "ledger-extraction: prepared state is complete"
 }
 
 restore_old_ownership() {
@@ -182,14 +252,18 @@ recover_failed_prepare() {
 prepare() {
   ensure_identities
   if [ -f "$PREPARED_MARKER" ]; then
-    [ ! -f "$LEDGER_STATE/balances.db" ] || [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] \
-      || die "prepared ledger is corrupt"
+    if [ -f "$ACTIVATED_MARKER" ]; then
+      validate_state >/dev/null
+      echo "ledger-extraction: already activated"
+      return 0
+    fi
+    validate_prepared_snapshot
     echo "ledger-extraction: already prepared"
     return 0
   fi
 
   if [ ! -f "$OLD_STATE/balances.db" ]; then
-    write_marker "$PREPARED_MARKER" $'prepared=1\ncaddy_was_active=0\nbackup_timer_was_active=0\nstatus_timer_was_active=0'
+    write_marker "$PREPARED_MARKER" $'prepared=1\nstate=fresh\nsource_fingerprint=none\ncaddy_was_active=0\nbackup_timer_was_active=0\nstatus_timer_was_active=0'
     echo "ledger-extraction: prepared fresh ledger state"
     return 0
   fi
@@ -218,6 +292,8 @@ prepare() {
   find "$OLD_STATE" -type d -exec chmod 0700 {} +
   find "$OLD_STATE" -type f -exec chmod 0600 {} +
   write_marker "$PREPARED_MARKER" "prepared=1
+state=existing
+source_fingerprint=$(cat "$ROLLBACK_DIR/balances.dump.sha256")
 caddy_was_active=$PREPARE_CADDY_ACTIVE
 backup_timer_was_active=$PREPARE_BACKUP_ACTIVE
 status_timer_was_active=$PREPARE_STATUS_ACTIVE"
@@ -229,6 +305,9 @@ status_timer_was_active=$PREPARE_STATUS_ACTIVE"
 activate() {
   [ -f "$PREPARED_MARKER" ] || die "not prepared"
   [ ! -f "$ACTIVATED_MARKER" ] || { echo "ledger-extraction: already activated"; return 0; }
+  validate_marker_contract
+  [ -f "$LEDGER_STATE/balances.db" ] || die "live ledger is absent"
+  [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "live ledger failed quick_check"
   [ "$(systemctl show "$LEDGER_UNIT" -p User --value 2>/dev/null)" = "$LEDGER_USER" ] || die "$LEDGER_UNIT has the wrong principal"
   for unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; do is_active "$unit" || die "$unit is not active"; done
   [ -S "$METERING_SOCK" ] || die "metering socket is absent"
@@ -244,6 +323,7 @@ activate() {
 rollback() {
   [ -f "$PREPARED_MARKER" ] || die "not prepared"
   [ ! -f "$ACTIVATED_MARKER" ] || die "traffic was activated; pre-extraction rollback is forbidden"
+  validate_marker_contract
   systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT" "$LEDGER_UNIT" 2>/dev/null || true
   restore_recorded_symlink proxy
   restore_recorded_symlink payments
@@ -275,6 +355,7 @@ finalize() {
 
 case "$mode" in
   --prepare) prepare ;;
+  --validate) validate_state ;;
   --activate) activate ;;
   --rollback) rollback ;;
   --finalize) finalize ;;
