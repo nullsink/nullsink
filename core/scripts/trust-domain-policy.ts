@@ -78,11 +78,16 @@ export const INTENTIONAL_PAYMENTS_ONLY_RUNTIME = new Set([
 ]);
 
 // Source modules intentionally absent from both service binaries. The first two are erased type contracts;
-// the others serve local tools or the browser client. Exactness prevents stale exemptions.
+// the staged ledger client/server/wire are exercised in PR-2 transport tests but do not enter a production
+// closure until the atomic activation PR; the others serve local tools or the browser client. Exactness
+// prevents stale exemptions.
 export const INTENTIONAL_NON_SERVICE_MODULES = new Set([
   "providers/types.ts",
   "rails/types.ts",
+  "ledger/client.ts",
   "ledger/financials.ts",
+  "ledger/server.ts",
+  "ledger/wire.ts",
   "token-format.ts",
 ]);
 
