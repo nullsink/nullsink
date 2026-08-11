@@ -9,6 +9,7 @@
 // It must never import payments trust domain code (no rails, no order store, no settle, no /buy). Enforced by
 // test/trust-domain-isolation.test.ts in the source graph and by scripts/assert-trust-domains.ts in Bun metadata + binary.
 import { openDb, DB_PATH } from "./ledger/db";
+import { localMeteringLedger } from "./ledger/port";
 import { createProxyHandler } from "./handler";
 import { deny } from "./http";
 import { serveCreditSocket } from "./credit-server";
@@ -108,12 +109,13 @@ if (!anthropicDeps && !openaiDeps && !tinfoilDeps) {
 }
 
 // The one on-disk store this service owns. The payments service opens pending.db; neither touches the other's.
-const balances = openDb(DB_PATH);
+const balanceStore = openDb(DB_PATH);
+const balances = localMeteringLedger(balanceStore);
 
 // Live streaming settlements. handler.ts registers each stream's settle() here for its lifetime and removes it
 // the moment billing finalizes. The shutdown handler drains this so a request still streaming at restart is
 // billed its metered partial (rest refunded) rather than left with the full hold debited.
-const inflight = new Set<(reason?: "drain") => void>();
+const inflight = new Set<(reason?: "drain") => Promise<void>>();
 
 const handler = createProxyHandler({
   anthropic: anthropicDeps,
@@ -132,7 +134,7 @@ const handler = createProxyHandler({
 // Crash recovery: refund any holds journaled by a request whose process died (SIGKILL / OOM / power loss)
 // between the up-front debit and its settle. On a fresh boot there are no live requests, so every surviving
 // holds row is stranded and refunded in full BEFORE we serve. Aggregate-only log, no identity.
-const recovered = balances.recoverHolds();
+const recovered = balanceStore.recoverHolds();
 if (recovered.count > 0)
   log.warn("boot", `recovered ${recovered.count} stranded hold(s), refunded ${recovered.micros} µ$ (ungraceful prior shutdown)`);
 
@@ -156,7 +158,7 @@ const server = Bun.serve({
 // The credit crossing. Bound AFTER the balance store exists (it applies credits) and after recoverHolds, so the
 // first credit can never race boot recovery. Payments may already be retrying against a missing socket — that is
 // ambiguous to it, never a failure: its outbox is durable and it retries next tick.
-const creditSocket = serveCreditSocket({ path: CREDIT_SOCK, balances });
+const creditSocket = serveCreditSocket({ path: CREDIT_SOCK, balances: balanceStore });
 
 const providerSummary = [anthropicDeps && `anthropic ${anthropicDeps.baseUrl}`, openaiDeps && `openai ${openaiDeps.baseUrl}`, tinfoilDeps && `tinfoil ${tinfoilDeps.baseUrl}`].filter(Boolean).join(" + ");
 log.info("boot", `nullsink-proxy ${BUILD_VERSION} → ${providerSummary} listening on ${HOST}:${server.port} (credit socket ${CREDIT_SOCK})`);

@@ -13,7 +13,7 @@
 // stream — billing its metered partial, refunding the rest — so a restart charges for output already
 // delivered. Buffered stragglers stay full-refunded on the next boot (correct: nothing was delivered).
 export type DrainOpts = {
-  inflight: Set<(reason?: "drain") => void>; // live stream settle() callbacks; each settle() removes itself from the set
+  inflight: Set<(reason?: "drain") => Promise<void>>; // live settlement promises; removed only after durable completion
   handlersReturned: Promise<unknown>; // server.stop(): resolves once request handlers return (buffered done)
   graceMs: number; // wait at most this long for natural completion before force-settling
   now: () => number; // injected clock (Date.now in prod)
@@ -37,20 +37,18 @@ export async function drainInflight(opts: DrainOpts): Promise<{ forceSettled: nu
   while ((!handlersDone || opts.inflight.size > 0) && opts.now() < deadline) {
     await opts.sleep(pollMs);
   }
-  // Snapshot first: settle() mutates `inflight` as it runs (each removes itself). Each settle() is wrapped
-  // so a single throw can't strand its siblings OR abort this function — an uncaught throw here would skip
+  // Snapshot first: settle() mutates `inflight` as it completes. Start every settlement before awaiting so
+  // one slow ledger call cannot delay its siblings. A single rejection cannot strand the others or abort
+  // this function — an uncaught rejection here would skip
   // the caller's hard close + process.exit, letting systemd SIGKILL the survivors into a boot-recovery FULL
   // refund (the exact failure this drain exists to prevent). settle() is at-most-once + idempotent, so a
   // straggler that already settled naturally is a safe no-op.
   const stragglers = [...opts.inflight];
+  const results = await Promise.allSettled(stragglers.map((settle) => settle("drain")));
   let forceSettled = 0;
-  for (const settle of stragglers) {
-    try {
-      settle("drain");
-      forceSettled += 1;
-    } catch (err) {
-      opts.onSettleError?.(err);
-    }
+  for (const result of results) {
+    if (result.status === "fulfilled") forceSettled += 1;
+    else opts.onSettleError?.(result.reason);
   }
   return { forceSettled };
 }

@@ -6,6 +6,7 @@ import fc from "fast-check";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { hashToken, openDb } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import * as metrics from "../src/metrics";
 
@@ -29,7 +30,7 @@ const gpt5Cost = (input: number, output: number) => Math.floor(input * 1.25 + ou
 
 function makeHandler(
   upstreamFetch: typeof fetch,
-  inflight: Set<(reason?: "drain") => void>,
+  inflight: Set<(reason?: "drain") => Promise<void>>,
   captureDeadline: (fire: () => void) => void,
 ) {
   const balances = openDb(":memory:");
@@ -43,7 +44,7 @@ function makeHandler(
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,
-    balances,
+    balances: localMeteringLedger(balances),
     orders: openOrderStore(":memory:"),
     upstreamFetch,
     inflight,
@@ -80,7 +81,7 @@ test("property · first terminal event wins across real handler cancel/drain/dea
     async (evidence) => {
       for (const order of terminalOrders) {
         metrics.reset(0);
-        const inflight = new Set<(reason?: "drain") => void>();
+        const inflight = new Set<(reason?: "drain") => Promise<void>>();
         let fireDeadline: (() => void) | undefined;
         const upstreamFetch = (async () => new Response(new ReadableStream<Uint8Array>({
           start(controller) { (controller as any)._sent = false; },
@@ -110,7 +111,7 @@ test("property · first terminal event wins across real handler cancel/drain/dea
 
         for (const terminal of order) {
           if (terminal === "cancel") await reader.cancel("property cancel").catch(() => {});
-          if (terminal === "drain") for (const settle of [...inflight]) settle("drain");
+          if (terminal === "drain") await Promise.all([...inflight].map((settle) => settle("drain")));
           if (terminal === "deadline") fireDeadline!();
         }
         await new Promise((resolve) => setTimeout(resolve, 0));

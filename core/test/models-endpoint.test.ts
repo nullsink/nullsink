@@ -6,6 +6,7 @@ import { test, expect } from "bun:test";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { pricedModels, isOffCardModel } from "../src/cost";
 import { openDb } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";
 
@@ -16,7 +17,7 @@ function makeHandler(cfg: Pick<HandlerDeps, "anthropic" | "openai" | "tinfoil">)
     ...cfg,
     upstreamTimeoutMs: 1000,
     margin: 1.15, buyMinUsd: 5, buyMaxUsd: 2000, orderTtlMs: 4 * 60 * 60 * 1000, maxOpenOrders: 1000,
-    maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances: openDb(":memory:"), orders: openOrderStore(":memory:"),
+    maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances: localMeteringLedger(openDb(":memory:")), orders: openOrderStore(":memory:"),
     upstreamFetch: (async () => { throw new Error("/v1/models must not forward upstream"); }) as unknown as typeof fetch,
     rails: new Map<string, RailView>([["monero", { name: "monero", createAddress: async () => ({ address: "8a", orderIndex: 0 }), rateUsd: async () => 150, scale: 1e12, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` }]]),
     defaultRail: "monero",

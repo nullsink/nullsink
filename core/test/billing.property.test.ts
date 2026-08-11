@@ -8,6 +8,7 @@ import fc from "fast-check";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { openDb, type BalanceStore } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import { hashToken } from "../src/ledger/db";
 import { priceUsage } from "../src/cost";
@@ -58,7 +59,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> & RailK
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,
-    balances,
+    balances: localMeteringLedger(balances),
     orders,
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([["monero", monero]]),
@@ -654,7 +655,7 @@ test("upstream unreachable / timeout → native envelope, retryable, refunded, n
 //     before force-close). These pin the handler's half of that contract: a live stream registers its
 //     settle() and removes it on finalize, and draining the registry bills the metered partial exactly once.
 test("streaming: the inflight registry holds a live stream and clears it on clean close", async () => {
-  const inflight = new Set<() => void>();
+  const inflight = new Set<() => Promise<void>>();
   const model = "claude-opus-4-8";
   const events = [
     { type: "message_start", message: { model, usage: { input_tokens: 1234, output_tokens: 1 } } },
@@ -672,7 +673,7 @@ test("streaming: the inflight registry holds a live stream and clears it on clea
 
 test("streaming: draining the inflight registry cancels upstream and bills the metered partial, exactly once", async () => {
   metrics.reset(0);
-  const inflight = new Set<(reason?: "drain") => void>();
+  const inflight = new Set<(reason?: "drain") => Promise<void>>();
   const model = "claude-opus-4-8";
   const events = [
     { type: "message_start", message: { model, usage: { input_tokens: 1000, output_tokens: 1 } } },
@@ -691,8 +692,8 @@ test("streaming: draining the inflight registry cancels upstream and bills the m
   await reader.read(); // first delta → output=300 metered
   // Simulate index.ts's SIGTERM drain: settle every still-open stream, then it's gone from the set.
   expect(inflight.size).toBe(1);
-  for (const settle of [...inflight]) settle("drain");
-  await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
+  await Promise.all([...inflight].map((settle) => settle("drain")));
+  await new Promise((r) => setTimeout(r, 0)); // let upstream cancellation finish
   expect(inflight.size).toBe(0);
   expect(cancelled).toBe(true); // shutdown must stop upstream work; otherwise server.stop(true) waits for its timeout
   // The body must still abort, but with no error reason: Bun prints a supplied Error as an application stack

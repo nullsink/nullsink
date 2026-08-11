@@ -71,6 +71,9 @@ export function openDb(path: string) {
   const insertHoldStmt = db.query(
     "INSERT INTO holds (hold_id, hash, micros) VALUES (?, ?, ?)",
   );
+  const getHoldStmt = db.query<{ hash: string; micros: number }, [string]>(
+    "SELECT hash, micros FROM holds WHERE hold_id = ?",
+  );
   const deleteHoldStmt = db.query("DELETE FROM holds WHERE hold_id = ?");
   const listHoldsStmt = db.query<{ hash: string; micros: number }, []>(
     "SELECT hash, micros FROM holds",
@@ -115,15 +118,20 @@ export function openDb(path: string) {
     return apply();
   }
 
-  // Close a hold idempotently: delete its journal row and, IF the row existed, refund `refundMicros` to
-  // `hash` — both in one transaction. Returns true iff this call closed the hold. The delete IS the
-  // idempotency guard: a repeat (the shutdown drain racing the natural settle, or any double-call) finds no
-  // row and is a no-op, so a hold is refunded AT MOST once. The caller computes the refund (hold − actual
-  // cost, clamped to [0, hold]; see handler.ts billActual).
-  function settleHold(holdId: string, hash: string, refundMicros: number): boolean {
+  // Close a hold idempotently. The caller supplies only the actual charge; the ledger loads the authoritative
+  // token + reserved amount, validates the charge, computes the refund, and deletes the row in ONE transaction.
+  // This is both safer today and the narrow Step-5 wire contract: a proxy can never name a different token or
+  // ask the ledger to refund more than it reserved. A repeat finds no row and is a no-op, so a hold is settled
+  // AT MOST once even when natural completion races shutdown drain.
+  function settleHold(holdId: string, chargedMicros: number): boolean {
     const apply = db.transaction(() => {
-      if (deleteHoldStmt.run(holdId).changes === 0) return false; // already settled / never opened
-      if (refundMicros > 0) creditStmt.run(hash, refundMicros);
+      const hold = getHoldStmt.get(holdId);
+      if (!hold) return false; // already settled / never opened
+      if (!Number.isSafeInteger(chargedMicros) || chargedMicros < 0 || chargedMicros > hold.micros)
+        throw new RangeError(`invalid hold charge: ${chargedMicros}`);
+      if (deleteHoldStmt.run(holdId).changes !== 1) throw new Error(`hold disappeared during settlement: ${holdId}`);
+      const refundMicros = hold.micros - chargedMicros;
+      if (refundMicros > 0) creditStmt.run(hold.hash, refundMicros);
       return true;
     });
     return apply();

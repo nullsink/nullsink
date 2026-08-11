@@ -52,7 +52,7 @@ export function makeBalance(d: ProxyEndpointDeps) {
         metrics.recordBalance("unknown");
         return deny(401, "invalid_token");
       }
-      const micros = getBalance(hashToken(token));
+      const micros = await getBalance(hashToken(token));
       if (micros === null) {
         metrics.recordBalance("unknown");
         return deny(401, "invalid_token");
