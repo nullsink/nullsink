@@ -31,7 +31,7 @@ export type SessionSettleHoldResult =
   | "unknown_hold"
   | "invalid_charge";
 
-// Build a balance store bound to one SQLite path. The proxy composition root calls openDb(DB_PATH); tests
+// Build a balance store bound to one SQLite path. The ledger composition root calls openDb(DB_PATH); tests
 // call openDb(":memory:") for an isolated store per case (prepared statements close over `db`, so each
 // store is fully self-contained). Importing this module opens NOTHING — openDb() owns activation.
 export function openDb(path: string) {
@@ -379,6 +379,6 @@ export function openDb(path: string) {
 
 export type BalanceStore = ReturnType<typeof openDb>;
 
-// Default on-disk path. The proxy composition root passes this to openDb(); no store is opened at import
+// Default on-disk path. The ledger composition root passes this to openDb(); no store is opened at import
 // time. Callers construct and inject their own store instead.
-export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink-proxy/balances.db";
+export const DB_PATH = process.env.DB_PATH ?? "/var/lib/nullsink-ledger/balances.db";

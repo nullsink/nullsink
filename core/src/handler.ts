@@ -167,8 +167,8 @@ export type ProxyHandlerDeps = {
   };
   upstreamTimeoutMs: number;
   maxMessagesBodyBytes: number;
-  // Promise-only boundary for every metering read/write. Production currently supplies the local SQLite
-  // adapter; Step 5 swaps in the socket client without changing request settlement semantics.
+  // Promise-only boundary for every metering read/write. Production supplies the socket client; tests can
+  // supply the local adapter without changing request settlement semantics.
   balances: MeteringLedgerPort;
   // Output cap applied (and injected into the forwarded body) when a request OMITS one. 0/undefined =
   // require an explicit cap (max_tokens_required). Set it (DEFAULT_MAX_OUTPUT_TOKENS) so stock OpenAI clients

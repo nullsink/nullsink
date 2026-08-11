@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+# One-time cutover from a proxy-owned balances.db to the dedicated ledger service. Preparation stops public
+# admission, drains the old proxy, snapshots the ledger, and leaves the old topology recoverable. Activation
+# happens only after all three new units are healthy. Finalization removes the frozen pre-cutover copy after an
+# encrypted backup and offline restore drill have proved the new topology.
+set -euo pipefail
+
+mode="${1:---prepare}"
+case "$mode" in
+  --prepare|--activate|--rollback|--finalize) ;;
+  *) echo "usage: $0 [--prepare|--activate|--rollback|--finalize]" >&2; exit 2 ;;
+esac
+
+ETC_DIR="${NULLSINK_ETC_DIR:-/etc}"
+STATE_ROOT="${NULLSINK_STATE_ROOT:-/var/lib}"
+SYSTEMD_DIR="${NULLSINK_SYSTEMD_DIR:-/etc/systemd/system}"
+BIN_DIR="${NULLSINK_BIN_DIR:-/usr/local/lib/nullsink}"
+ROOT_GROUP="${NULLSINK_ROOT_GROUP:-root}"
+
+OPERATOR_USER="${NULLSINK_OPERATOR_USER:-nullsink}"
+PROXY_USER="${NULLSINK_PROXY_USER:-nullsink-proxy}"
+BACKUP_USER="${NULLSINK_BACKUP_USER:-nullsink-backup}"
+LEDGER_USER="${NULLSINK_LEDGER_USER:-nullsink-ledger}"
+PROXY_READ_GROUP="${NULLSINK_PROXY_READ_GROUP:-nullsink-proxy-read}"
+LEDGER_READ_GROUP="${NULLSINK_LEDGER_READ_GROUP:-nullsink-ledger-read}"
+LEDGER_PROXY_GROUP="${NULLSINK_LEDGER_PROXY_GROUP:-nullsink-ledger-proxy}"
+
+OLD_STATE="${NULLSINK_OLD_LEDGER_STATE:-$STATE_ROOT/nullsink-proxy}"
+LEDGER_STATE="${NULLSINK_LEDGER_STATE:-$STATE_ROOT/nullsink-ledger}"
+PENDING_STATE="${NULLSINK_PENDING_STATE:-$STATE_ROOT/nullsink-payments}"
+ROLLBACK_DIR="${NULLSINK_LEDGER_ROLLBACK_DIR:-$STATE_ROOT/nullsink-ledger-migration}"
+PREPARED_MARKER="${NULLSINK_LEDGER_PREPARED_MARKER:-$ETC_DIR/nullsink-ledger-extraction.prepared}"
+ACTIVATED_MARKER="${NULLSINK_LEDGER_ACTIVATED_MARKER:-$ETC_DIR/nullsink-ledger-extraction.activated}"
+FINALIZED_MARKER="${NULLSINK_LEDGER_FINALIZED_MARKER:-$ETC_DIR/nullsink-ledger-extraction.finalized}"
+
+LEDGER_UNIT="${LEDGER_UNIT:-nullsink-ledger}"
+PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
+PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
+METERING_SOCK="${NULLSINK_LEDGER_SOCK:-/run/nullsink-ledger/proxy.sock}"
+CREDIT_SOCK="${NULLSINK_CREDIT_SOCK:-/run/nullsink-credit/credit.sock}"
+
+die() { echo "ledger-extraction: $*" >&2; exit 1; }
+simple_abs() { [[ "$1" != / && "$1" =~ ^/[A-Za-z0-9._/-]+$ ]]; }
+for path in "$ETC_DIR" "$STATE_ROOT" "$SYSTEMD_DIR" "$BIN_DIR" "$OLD_STATE" "$LEDGER_STATE" \
+  "$PENDING_STATE" "$ROLLBACK_DIR" "$PREPARED_MARKER" "$ACTIVATED_MARKER" "$FINALIZED_MARKER"; do
+  simple_abs "$path" || die "path must be simple, absolute, and non-root: $path"
+done
+for path in "$METERING_SOCK" "$CREDIT_SOCK"; do
+  simple_abs "$path" || die "socket path must be simple, absolute, and non-root: $path"
+done
+[ "$(id -u)" -eq 0 ] || die "run as root"
+command -v sqlite3 >/dev/null || die "sqlite3 is required"
+
+ensure_group() { getent group "$1" >/dev/null 2>&1 || groupadd --system "$1"; }
+ensure_user() {
+  local user="$1" group="$2"
+  if ! id "$user" >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --gid "$group" "$user"
+  fi
+  usermod -g "$group" "$user"
+}
+
+ensure_identities() {
+  ensure_group "$LEDGER_READ_GROUP"
+  ensure_group "$LEDGER_PROXY_GROUP"
+  ensure_user "$LEDGER_USER" "$LEDGER_READ_GROUP"
+  usermod -a -G "$LEDGER_PROXY_GROUP" "$PROXY_USER"
+  usermod -a -G "$LEDGER_READ_GROUP" "$OPERATOR_USER"
+  usermod -a -G "$LEDGER_READ_GROUP" "$BACKUP_USER"
+  install -d -o "$LEDGER_USER" -g "$LEDGER_READ_GROUP" -m 0750 "$LEDGER_STATE"
+}
+
+write_marker() {
+  local path="$1" content="$2"
+  install -o root -g "$ROOT_GROUP" -m 0600 /dev/null "$path"
+  printf '%s\n' "$content" > "$path"
+}
+
+marker_value() {
+  local key="$1"
+  sed -n "s/^${key}=\([01]\)$/\\1/p" "$PREPARED_MARKER" | tail -n 1
+}
+
+is_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+start_if_recorded() {
+  local key="$1" unit="$2"
+  if [ "$(marker_value "$key")" = 1 ]; then systemctl start "$unit"; fi
+}
+
+table_count() {
+  local db="$1" table="$2" query="$3"
+  if [ -f "$db" ] && [ "$(sqlite3 -readonly "$db" "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='$table';")" = 1 ]; then
+    sqlite3 -readonly "$db" "$query"
+  else
+    echo 0
+  fi
+}
+
+financial_gate() {
+  local balances="$OLD_STATE/balances.db" pending="$PENDING_STATE/pending.db"
+  local holds open_orders unacked partial
+  holds="$(table_count "$balances" holds 'SELECT COUNT(*) FROM holds;')"
+  open_orders="$(table_count "$pending" pending_orders 'SELECT COUNT(*) FROM pending_orders;')"
+  unacked="$(table_count "$pending" credit_outbox 'SELECT COUNT(*) FROM credit_outbox WHERE acked_at IS NULL;')"
+  partial="$(table_count "$pending" credit_outbox "SELECT COUNT(*) FROM credit_outbox WHERE (hash = '' AND micros <> 0) OR (hash <> '' AND micros = 0);")"
+  printf 'ledger-extraction: stopped-state gate holds=%s open_orders=%s unacked=%s partial_scrub=%s\n' \
+    "$holds" "$open_orders" "$unacked" "$partial"
+  [ "$partial" -eq 0 ] || die "credit outbox has partially scrubbed rows; old topology remains stopped"
+  if [ "$holds" -gt 0 ]; then
+    echo "ledger-extraction: $holds stopped-session hold(s) will be recovered atomically by proxy startSession"
+  fi
+}
+
+db_fingerprint() { sqlite3 -readonly "$1" '.dump' | sha256sum | cut -d' ' -f1; }
+snapshot_ledger() {
+  local source="$OLD_STATE/balances.db" target="$LEDGER_STATE/balances.db" stage source_fp
+  [ -f "$source" ] || return 0
+  stage="$LEDGER_STATE/.balances.db.migrating"
+  rm -f -- "$stage" "$stage-wal" "$stage-shm"
+  sqlite3 -readonly -cmd '.timeout 10000' "$source" ".backup '$stage'"
+  [ "$(sqlite3 -readonly "$stage" 'PRAGMA quick_check;' | head -1)" = ok ] || die "staged balances.db failed quick_check"
+  source_fp="$(db_fingerprint "$source")"
+  [ "$(db_fingerprint "$stage")" = "$source_fp" ] || die "staged balances.db fingerprint mismatch"
+  install -o "$LEDGER_USER" -g "$LEDGER_READ_GROUP" -m 0640 "$stage" "$target.new"
+  mv -f -- "$target.new" "$target"
+  rm -f -- "$stage" "$stage-wal" "$stage-shm"
+  [ "$(db_fingerprint "$target")" = "$source_fp" ] || die "activated balances.db fingerprint mismatch"
+  printf '%s\n' "$source_fp" > "$ROLLBACK_DIR/balances.dump.sha256"
+  echo "ledger-extraction: balances.db copied (integrity and logical fingerprint preserved)"
+}
+
+save_rollback_contract() {
+  local unit target
+  install -d -o root -g "$ROOT_GROUP" -m 0700 "$ROLLBACK_DIR"
+  for unit in nullsink-proxy.service nullsink-payments.service backup.service status-check.service; do
+    [ -f "$SYSTEMD_DIR/$unit" ] && install -o root -g "$ROOT_GROUP" -m 0600 "$SYSTEMD_DIR/$unit" "$ROLLBACK_DIR/$unit"
+  done
+  for unit in proxy payments; do
+    target="$(readlink "$BIN_DIR/current-$unit" 2>/dev/null || true)"
+    [ -z "$target" ] || printf '%s\n' "$target" > "$ROLLBACK_DIR/current-$unit.target"
+  done
+}
+
+restore_old_ownership() {
+  [ -d "$OLD_STATE" ] || return 0
+  chown "$PROXY_USER:$PROXY_READ_GROUP" "$OLD_STATE"
+  chmod 0750 "$OLD_STATE"
+  find "$OLD_STATE" -maxdepth 1 -type f -exec chown "$PROXY_USER:$PROXY_READ_GROUP" {} +
+  find "$OLD_STATE" -maxdepth 1 -type f -exec chmod 0640 {} +
+}
+
+restore_recorded_symlink() {
+  local service="$1" file target
+  file="$ROLLBACK_DIR/current-$service.target"
+  [ -f "$file" ] || return 0
+  target="$(cat "$file")"
+  [[ "$target" =~ ^nullsink-(proxy|payments)-v[0-9A-Za-z.+-]+$ ]] || die "unsafe saved $service symlink target"
+  ln -sfn "$target" "$BIN_DIR/current-$service"
+}
+
+PREPARE_RECOVERY_ARMED=0
+PREPARE_CADDY_ACTIVE=0
+PREPARE_BACKUP_ACTIVE=0
+PREPARE_STATUS_ACTIVE=0
+recover_failed_prepare() {
+  local status=$?
+  trap - EXIT
+  if [ "$status" -ne 0 ] && [ "$PREPARE_RECOVERY_ARMED" -eq 1 ]; then
+    rm -f -- "$PREPARED_MARKER"
+    restore_old_ownership || true
+    rm -f -- "$LEDGER_STATE/balances.db" "$LEDGER_STATE/balances.db-wal" "$LEDGER_STATE/balances.db-shm"
+    systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT" || true
+    [ "$PREPARE_CADDY_ACTIVE" -eq 0 ] || systemctl start caddy || true
+    [ "$PREPARE_BACKUP_ACTIVE" -eq 0 ] || systemctl start backup.timer || true
+    [ "$PREPARE_STATUS_ACTIVE" -eq 0 ] || systemctl start status-check.timer || true
+    rm -rf -- "$ROLLBACK_DIR"
+    echo "ledger-extraction: preparation failed; the unchanged old topology was restored" >&2
+  fi
+  exit "$status"
+}
+
+prepare() {
+  ensure_identities
+  if [ -f "$PREPARED_MARKER" ]; then
+    [ ! -f "$LEDGER_STATE/balances.db" ] || [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] \
+      || die "prepared ledger is corrupt"
+    echo "ledger-extraction: already prepared"
+    return 0
+  fi
+
+  if [ ! -f "$OLD_STATE/balances.db" ]; then
+    write_marker "$PREPARED_MARKER" $'prepared=1\ncaddy_was_active=0\nbackup_timer_was_active=0\nstatus_timer_was_active=0'
+    echo "ledger-extraction: prepared fresh ledger state"
+    return 0
+  fi
+
+  is_active "$PROXY_UNIT" || die "$PROXY_UNIT must be active before extraction"
+  is_active "$PAYMENTS_UNIT" || die "$PAYMENTS_UNIT must be active before extraction"
+  is_active caddy && PREPARE_CADDY_ACTIVE=1
+  is_active backup.timer && PREPARE_BACKUP_ACTIVE=1
+  is_active status-check.timer && PREPARE_STATUS_ACTIVE=1
+  save_rollback_contract
+  PREPARE_RECOVERY_ARMED=1
+  trap recover_failed_prepare EXIT
+
+  # Stop public admission first. The proxy then receives SIGTERM and completes its bounded drain while it still
+  # owns balances.db. Payments stops before the credit receiver disappears; unacked rows remain durable.
+  [ "$PREPARE_CADDY_ACTIVE" -eq 0 ] || systemctl stop caddy
+  systemctl stop backup.timer status-check.timer 2>/dev/null || true
+  systemctl stop backup.service status-check.service 2>/dev/null || true
+  systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT"
+  is_active "$PROXY_UNIT" && die "$PROXY_UNIT did not stop"
+  is_active "$PAYMENTS_UNIT" && die "$PAYMENTS_UNIT did not stop"
+
+  financial_gate
+  snapshot_ledger
+  chown -R "root:$ROOT_GROUP" "$OLD_STATE"
+  find "$OLD_STATE" -type d -exec chmod 0700 {} +
+  find "$OLD_STATE" -type f -exec chmod 0600 {} +
+  write_marker "$PREPARED_MARKER" "prepared=1
+caddy_was_active=$PREPARE_CADDY_ACTIVE
+backup_timer_was_active=$PREPARE_BACKUP_ACTIVE
+status_timer_was_active=$PREPARE_STATUS_ACTIVE"
+  PREPARE_RECOVERY_ARMED=0
+  trap - EXIT
+  echo "ledger-extraction: prepared; old topology is frozen and public admission remains stopped"
+}
+
+activate() {
+  [ -f "$PREPARED_MARKER" ] || die "not prepared"
+  [ ! -f "$ACTIVATED_MARKER" ] || { echo "ledger-extraction: already activated"; return 0; }
+  [ "$(systemctl show "$LEDGER_UNIT" -p User --value 2>/dev/null)" = "$LEDGER_USER" ] || die "$LEDGER_UNIT has the wrong principal"
+  for unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; do is_active "$unit" || die "$unit is not active"; done
+  [ -S "$METERING_SOCK" ] || die "metering socket is absent"
+  [ -S "$CREDIT_SOCK" ] || die "credit socket is absent"
+  # Crossing this marker forbids automatic rollback: Caddy may admit traffic as soon as its start job succeeds.
+  # Write it first, then fail loudly if the recorded edge cannot start; the new internal topology remains
+  # financially safe and the operator gets an explicit availability failure instead of a hidden outage.
+  write_marker "$ACTIVATED_MARKER" activated=1
+  start_if_recorded caddy_was_active caddy
+  echo "ledger-extraction: activated; public admission restored"
+}
+
+rollback() {
+  [ -f "$PREPARED_MARKER" ] || die "not prepared"
+  [ ! -f "$ACTIVATED_MARKER" ] || die "traffic was activated; pre-extraction rollback is forbidden"
+  systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT" "$LEDGER_UNIT" 2>/dev/null || true
+  restore_recorded_symlink proxy
+  restore_recorded_symlink payments
+  for unit in nullsink-proxy.service nullsink-payments.service backup.service status-check.service; do
+    [ -f "$ROLLBACK_DIR/$unit" ] && install -o root -g "$ROOT_GROUP" -m 0644 "$ROLLBACK_DIR/$unit" "$SYSTEMD_DIR/$unit"
+  done
+  rm -f -- "$SYSTEMD_DIR/nullsink-ledger.service"
+  rm -f -- "$BIN_DIR/current-ledger"
+  rm -rf -- "$LEDGER_STATE"
+  systemctl daemon-reload
+  restore_old_ownership
+  systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
+  start_if_recorded caddy_was_active caddy
+  start_if_recorded backup_timer_was_active backup.timer
+  start_if_recorded status_timer_was_active status-check.timer
+  rm -f -- "$PREPARED_MARKER"
+  echo "ledger-extraction: rolled back before traffic; old two-service topology restored"
+}
+
+finalize() {
+  [ -f "$ACTIVATED_MARKER" ] || die "not activated"
+  for unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; do is_active "$unit" || die "$unit is not active"; done
+  [ -f "$LEDGER_STATE/balances.db" ] || die "live ledger is absent"
+  [ "$(sqlite3 -readonly "$LEDGER_STATE/balances.db" 'PRAGMA quick_check;' | head -1)" = ok ] || die "live ledger failed quick_check"
+  rm -rf -- "$OLD_STATE" "$ROLLBACK_DIR"
+  write_marker "$FINALIZED_MARKER" finalized=1
+  echo "ledger-extraction: finalized; frozen proxy-owned ledger and rollback bundle removed"
+}
+
+case "$mode" in
+  --prepare) prepare ;;
+  --activate) activate ;;
+  --rollback) rollback ;;
+  --finalize) finalize ;;
+esac

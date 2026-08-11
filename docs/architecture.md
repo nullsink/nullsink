@@ -11,32 +11,32 @@ implementation gates live in [architecture-roadmap.md](architecture-roadmap.md).
 privacy and money-safety guarantees see [trust-model.md](trust-model.md); for the billing
 math see [billing-model.md](billing-model.md).
 
-## The shape: two processes over a pure core
+## The shape: three processes over a pure core
 
-nullsink runs as two processes on one box, split by responsibility and runtime capability rather
+nullsink runs as three processes on one box, split by responsibility and runtime capability rather
 than by scale. Each is a composition root — the only place that binds a port, starts timers,
 opens a database, and installs signal handlers. Here, **trust domain** means an application-level
 code and data-flow boundary enforced by separate entrypoints, dependency closures, and binaries.
-The services currently share an OS user and environment file, so this is not a separate-UID or
-OS-sandbox boundary.
+Separate OS users, root-owned role environments, state roots, and socket groups enforce the runtime boundary.
 
 - **`src/proxy.ts`** (the *proxy trust domain*) serves the metered `/v1` paths and `GET /balance`,
-  and owns `balances.db`. It installs the SIGTERM/SIGINT handler that drains in-flight requests
-  before exit, force-settling live streams by billing the metered partial and refunding the rest,
-  and at boot it refunds holds an ungraceful crash left stranded. Those are the two recovery
-  paths: the graceful drain on shutdown, and boot-time hold recovery for the crash that skipped it.
+  holds provider keys and in-flight requests, and opens no database. Before it binds HTTP it creates a fresh
+  session with the ledger; that transaction atomically recovers holds from a prior crashed proxy. On graceful
+  stop it drains requests and settles live streams while the ledger remains available.
+- **`src/ledger-service.ts`** (the *ledger trust domain*) exclusively owns `balances.db`, holds, session
+  recovery, and applied-credit idempotency. It publishes separate metering and credit Unix sockets.
 - **`src/payments.ts`** (the *payments trust domain*) serves `/buy`, `/order-status`, `/rails`, runs the
   settlement poller, and owns `pending.db` and the watch-only rail wallets.
 
 A request carrying a prompt is never handled by the process that holds the payment ↔ token link.
-The two meet at exactly one place: a unix socket over which payments delivers credits to the
-proxy, in one direction, with one verb. Neither router imports the other's code.
+The proxy receives only balance/hold/settle authority; payments receives only credit authority. Separate
+pathname/socket groups enforce that neither caller can use the other's verbs or read `balances.db`.
 `test/trust-domain-isolation.test.ts` derives exhaustive runtime closures from the TypeScript AST;
 `scripts/assert-trust-domains.ts` cross-checks them against Bun's bundled-input metadata and distinctive
 symbols in the compiled executables. The proxy binary is the unit the sealed tier attests, so it
 must stay payments-free structurally, not by hoping a bundler tree-shakes.
 
-Everything both roots wire up — the handlers, settlement, pricing, the providers and endpoints —
+Everything the roots wire up — handlers, settlement, pricing, providers, and endpoints —
 is pure factories and functions: import-safe and testable in isolation. Nothing opens a database
 or binds a port at import time; the roots pass those in.
 
@@ -45,22 +45,18 @@ or binds a port at import time; the roots pass those in.
 ```
 client
   │
-  ├─ /v1/... /balance ──► nullsink-proxy    :8080 ──┬─ GET  /healthz
-  │                                                 ├─ GET  /balance     ┐ endpoints/proxy.ts
-  │                                                 ├─ GET  /v1/models   ┘ (not metered)
-  │                                                 └─ POST /v1/...  → exact-path provider(s) → handleMetered
-  │                                                        │
-  │                                                        ▼  balances.db
-  │                                            ┌──────────────────────┐
-  │                                            │  credit socket       │  payments → proxy, one direction
-  │                                            └──────────▲───────────┘
-  │                                                       │
-  └─ /buy /order-status /rails ──► nullsink-payments :8081 ──┬─ GET  /healthz
-                                                             ├─ POST /buy          ┐ endpoints/payments.ts
-                                                             ├─ POST /order-status │ (not metered)
-                                                             └─ GET  /rails        ┘
-                                                                    │
-                                                                    ▼  pending.db + the rails
+  ├─ /v1/... /balance ──► nullsink-proxy :8080 ──► providers
+  │                              │
+  │                              └─ balance · hold · settle
+  │                                      │ metering.sock
+  │                                      ▼
+  │                              nullsink-ledger ──► balances.db
+  │                                      ▲
+  │                                      │ credit.sock (credit only)
+  │                                      │
+  └─ /buy /order-status /rails ──► nullsink-payments :8081
+                                         │
+                                         └─ pending.db + watch-only rails
 ```
 
 Caddy fronts both, routing each public path to exactly one of them. Each router fails closed:
@@ -92,9 +88,9 @@ but never holds spend authority — custody stays cold. Active rails come from `
 (comma list, first is the default). Monero is the reference implementation; Bitcoin is the
 second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin HD index).
 
-## The ledger: two databases, one per process
+## The ledger: two databases, one per stateful service
 
-- **`balances.db`** (proxy) — `tokens` (hash → balance, in micro-dollars), `applied_orders` (an
+- **`balances.db`** (ledger) — `tokens` (hash → balance, in micro-dollars), `applied_orders` (an
   idempotency ledger so a deposit credits exactly once), and `holds` (a crash-recovery journal:
   a row exists while a hold is outstanding, and survivors are refunded at boot).
 - **`pending.db`** (payments) — in-flight orders, `revenue` (an append-only sales book), and
@@ -104,7 +100,7 @@ second. Each keys an order to an integer index (a Monero subaddress, a Bitcoin H
   idempotency key and timestamps as a tombstone. Coin amounts, locked rates, and transaction-derived
   keys stay on the payment side of the wall.
 
-Neither service opens the other's database. The temporary read-only `nsk financials` view opens both on
+Neither caller opens the ledger database, and ledger never opens the payment database. The temporary read-only `nsk financials` view opens both on
 the box; `nsk balances` opens only the ledger. They cannot mutate state and remain an explicit operator
 exception until service-owned read interfaces replace them. New and repeat funding uses `/buy`.
 
@@ -118,11 +114,11 @@ different rails can't interleave on the shared database — keep it that way.
 Settlement and crediting now live in different processes, so the hand-off is a **transactional
 outbox** rather than a function call. `settle()` writes a `credit_outbox` row in the same
 `pending.db` transaction that closes the order: if the row exists, the sale happened. A sender
-drains unacked rows over the unix socket, and only marks a row acked once the proxy confirms the
+drains unacked rows over the unix socket, and only marks a row acked once the ledger confirms the
 credit is durable.
 
 That gives at-least-once delivery. The receiver makes it exactly-once: `creditOnce` commits the
-balance credit and its `applied_orders` marker in a single `balances.db` transaction, keyed by the
+balance credit and its `applied_orders` marker in a single ledger-owned `balances.db` transaction, keyed by the
 rail's idempotency key, so a redelivery is a no-op that still reports a definite outcome. A crash
 anywhere — before the ack, mid-socket, during the credit — leaves a durable row that is simply
 retried. Delivery stops at the first ambiguous row rather than skipping past it, so credits cannot
@@ -143,8 +139,8 @@ Authentication is the filesystem. The socket is a pathname socket bound owner-on
 checks write permission on the socket file at `connect(2)` — an unspoofable, kernel-enforced gate
 that an abstract-namespace socket (no file, no permissions) would not have.
 
-The one failure this creates is silent: a wedged socket means a customer has **paid** and holds no
-credit, while both processes answer `/healthz` and every unit reads `active`. So payments emits a
+The one failure this creates is silent: a wedged credit socket means a customer has **paid** and holds no
+credit, while both HTTP probes pass and all three units read `active`. So payments emits a
 `CREDIT OUTBOX STALLED` error once the oldest undelivered credit ages past
 `OUTBOX_AGE_ALERT_MS`, and `deploy/status-check.sh` pages on it.
 The hourly aggregate metrics also report credits enqueued and acknowledged, deduplicated
@@ -165,7 +161,7 @@ POST /buy {hash, credit_usd, rail?}                              [payments]
 poller tick → rail.incomingTransfers() → settle()               [payments]
   → one transaction: drop the order, book the sale, enqueue the credit
   → drain the outbox over the credit socket
-       → creditOnce(hash) → definite ack                        [proxy]
+       → creditOnce(hash) → definite ack                        [ledger]
        → scrub hash + amount; retain idempotency tombstone      [payments]
 ```
 
@@ -173,11 +169,11 @@ poller tick → rail.incomingTransfers() → settle()               [payments]
 
 ```
 POST /v1/... with token
-  → gate: token present? model ours? premium rejected? balance covers it?
-  → size a hold (an upper bound on the cost) and debit it atomically
+  → gate: token present? model ours? premium rejected?
+  → ledger socket: balance covers it? open replay-safe hold
   → forward upstream with our injected key
   → meter actual usage (buffered response, or a streaming scanner)
-  → settle the hold: charge actual, refund the rest
+  → ledger socket: settle the hold, charge actual, refund the rest
 ```
 
 The client confirms a buy via `POST /order-status` and checks a balance via `GET /balance`.

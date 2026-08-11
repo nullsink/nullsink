@@ -166,11 +166,11 @@ Requires [Bun](https://bun.sh) 1.3.14 (the version CI builds and tests with).
 ```sh
 bun install        # one hoisted node_modules + one root bun.lock for both packages
 
-bun run dev        # run the client (vite); core watchers are per-process: cd core && bun run dev:proxy / dev:payments
+bun run dev        # run the client (vite); core watchers: cd core && bun run dev:{ledger,proxy,payments}
 bun run typecheck  # tsc across both packages
 bun run test       # bun test across both packages
 bun run lint       # shellcheck deploy scripts + validate/fmt the Caddyfile (needs shellcheck + caddy)
-bun run build      # core service binaries (proxy + payments) + client static bundle
+bun run build      # core service binaries (ledger + proxy + payments) + client static bundle
 bun run build:nsk  # read-only nsk operator binary
 bun run financial-report -- report-YYYYMMDDTHHMMSSZ.json
 ```
@@ -190,18 +190,19 @@ Boxes run only verified release artifacts — no source, no Bun on the box. A gi
 (`vX.Y.Z`) triggers `.github/workflows/release.yml`, which builds the self-contained linux-x64
 artifacts and publishes them as a GitHub Release:
 
-- **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
+- **`nullsink-ledger-linux-x64`** — the ledger trust domain: balances, holds, sessions, and applied credits.
+- **`nullsink-proxy-linux-x64`** — the stateless proxy trust domain: metered `/v1` forwarding and `/balance`.
 - **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
 - **`nsk-linux-x64`** — optional read-only live balances and financials.
 - **`deploy-<tag>.tar.gz`** — the app deploy tree (app-only systemd units, Caddyfile, deploy + backup scripts); it physically excludes the node-box bundle.
 - **`nullsink-node-box-<tag>.tar.gz`** — standalone Bitcoin Core node day-two tooling; never installed on the app box.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the six artifacts; the box verifies with `sha256sum -c` before installing.
+- **`SHA256SUMS`** — checksums over the seven artifacts; the box verifies with `sha256sum -c` before installing.
 
 On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
-atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
-systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
-rolling the symlinks back to the previous release if either service is unhealthy.
+atomically swaps all three binary symlinks in lockstep plus the UI symlink, refreshes the
+systemd units and Caddy config, restarts them as one ordered transaction, and health-gates ledger readiness
+plus both HTTP `/healthz` endpoints—rolling all symlinks back together if the release is unhealthy.
 It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
 First-time app bootstrap remains `core/deploy/setup.sh` until the planned Ansible replacement is proven.
 The node bundle has day-two upgrade and credential-rotation tools; declarative fresh-node provisioning is

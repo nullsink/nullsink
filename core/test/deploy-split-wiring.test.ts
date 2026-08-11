@@ -1,6 +1,6 @@
-// The proxy/payments split is enforced in code, but the production boundary also depends on three
+// The three-way app split is enforced in code, but the production boundary also depends on
 // deploy artifacts that TypeScript cannot typecheck: Caddyfile, systemd units, and setup.sh's seeded
-// environment. A mismatched port or CREDIT_SOCK still lets both binaries start, then leaves public paths
+// environment. A mismatched port or socket still lets the processes start, then leaves public paths
 // 502ing or paid credits stuck in pending.db. Keep this deliberately static: it checks the committed
 // production contract without needing Caddy or systemd installed in the test runner.
 import { test, expect } from "bun:test";
@@ -15,6 +15,7 @@ const releaseWorkflow = readFileSync(
 );
 
 const caddy = readFileSync(deploy("Caddyfile"), "utf8");
+const ledgerUnit = readFileSync(deploy("nullsink-ledger.service"), "utf8");
 const proxyUnit = readFileSync(deploy("nullsink-proxy.service"), "utf8");
 const paymentsUnit = readFileSync(deploy("nullsink-payments.service"), "utf8");
 const walletUnit = readFileSync(deploy("monero-wallet-rpc.service"), "utf8");
@@ -23,6 +24,7 @@ const setup = readFileSync(deploy("setup.sh"), "utf8");
 const deployScript = readFileSync(deploy("deploy.sh"), "utf8");
 const deployLib = readFileSync(deploy("lib.sh"), "utf8");
 const migration = readFileSync(deploy("migrate-service-isolation.sh"), "utf8");
+const ledgerMigration = readFileSync(deploy("migrate-ledger-service.sh"), "utf8");
 const labelExport = readFileSync(deploy("backup-bitcoin-labels.sh"), "utf8");
 const alert = readFileSync(deploy("alert.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
@@ -34,6 +36,7 @@ const restore = readFileSync(deploy("restore.sh"), "utf8");
 const statusCheck = readFileSync(deploy("status-check.sh"), "utf8");
 const statusUnit = readFileSync(deploy("status-check.service"), "utf8");
 const proxy = readFileSync(src("proxy.ts"), "utf8");
+const ledger = readFileSync(src("ledger-service.ts"), "utf8");
 const payments = readFileSync(src("payments.ts"), "utf8");
 
 function upstreamFor(path: string): string | null {
@@ -51,7 +54,7 @@ function namedMatcher(name: string): string {
   return end === -1 ? "" : caddy.slice(start, end + "\n\t\t}".length);
 }
 
-test("the two roots, setup defaults, Caddy routes, and service units agree on the split ports", () => {
+test("the HTTP roots, Caddy routes, and service units agree on the split ports", () => {
   expect(proxy).toContain('numEnv("PORT", 8080');
   expect(payments).toContain('numEnv("PAYMENTS_PORT", 8081');
   expect(migration).toContain("PORT=8080");
@@ -64,32 +67,62 @@ test("the two roots, setup defaults, Caddy routes, and service units agree on th
   for (const path of ["/buy", "/order-status", "/rails"]) expect(upstreamFor(path)).toBe("8081");
 });
 
-test("both systemd units and both roots use the one credit-group-authenticated socket", () => {
-  const socket = "/run/nullsink-credit/credit.sock";
-  expect(proxy).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
-  expect(payments).toContain(`process.env.CREDIT_SOCK ?? "${socket}"`);
-  expect(proxyUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
-  expect(paymentsUnit).toContain(`Environment=CREDIT_SOCK=${socket}`);
-  expect(proxyUnit).toContain("RuntimeDirectory=nullsink-credit");
-  expect(proxyUnit).not.toContain("ExecStartPre=+/bin/chgrp nullsink-credit");
-  expect(proxyUnit).toContain(
-    "chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock",
-  );
-  expect(proxyUnit).toContain("chmod 0660 /run/nullsink-credit/credit.sock");
-  expect(paymentsUnit).toContain("SupplementaryGroups=nullsink-credit");
+test("the proxy proves a fresh ledger session before opening its HTTP listener", () => {
+  const startSession = proxy.indexOf("await balances.startSession()");
+  const listen = proxy.indexOf("const server = Bun.serve");
+
+  expect(startSession).toBeGreaterThan(-1);
+  expect(listen).toBeGreaterThan(startSession);
+  expect(proxy).not.toContain("openDb(");
+  expect(proxy).not.toContain("serveCreditSocket");
+  expect(ledger).toContain("serveLedgerSocket({ path: LEDGER_SOCK, balances })");
+  expect(ledger).toContain("serveCreditSocket({ path: CREDIT_SOCK, balances })");
 });
 
-test("payments starts only after the proxy credit socket is ready", () => {
-  expect(proxyUnit).toContain("ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-credit/credit.sock ]");
-  expect(proxyUnit).toContain("TimeoutStartSec=60");
-  expect(paymentsUnit).toContain("After=nullsink-proxy.service");
+test("the ledger publishes two ACL-separated capabilities and callers receive only their socket", () => {
+  const meteringSocket = "/run/nullsink-ledger/proxy.sock";
+  const creditSocket = "/run/nullsink-credit/credit.sock";
+  expect(ledger).toContain(`process.env.LEDGER_SOCK ?? "${meteringSocket}"`);
+  expect(ledger).toContain(`process.env.CREDIT_SOCK ?? "${creditSocket}"`);
+  expect(proxy).toContain(`process.env.LEDGER_SOCK ?? "${meteringSocket}"`);
+  expect(proxy).not.toContain("CREDIT_SOCK");
+  expect(payments).toContain(`process.env.CREDIT_SOCK ?? "${creditSocket}"`);
+  expect(payments).not.toContain("LEDGER_SOCK");
+  expect(ledgerUnit).toContain(`Environment=LEDGER_SOCK=${meteringSocket}`);
+  expect(ledgerUnit).toContain(`Environment=CREDIT_SOCK=${creditSocket}`);
+  expect(ledgerUnit).toContain("RuntimeDirectory=nullsink-ledger nullsink-credit");
+  expect(ledgerUnit).toContain("chgrp nullsink-ledger-proxy /run/nullsink-ledger /run/nullsink-ledger/proxy.sock");
+  expect(ledgerUnit).toContain("chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock");
+  expect(ledgerUnit).toContain("chmod 0660 /run/nullsink-ledger/proxy.sock /run/nullsink-credit/credit.sock");
+  expect(proxyUnit).toContain("SupplementaryGroups=nullsink-ledger-proxy");
+  expect(proxyUnit).not.toContain("nullsink-credit");
+  expect(paymentsUnit).toContain("SupplementaryGroups=nullsink-credit");
+  expect(paymentsUnit).not.toContain("nullsink-ledger-proxy");
+});
+
+test("systemd starts the ledger before either caller and stops it after the proxy drain", () => {
+  expect(ledgerUnit).toContain("Before=nullsink-proxy.service nullsink-payments.service");
+  expect(ledgerUnit).toContain("ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-ledger/proxy.sock ] && [ -S /run/nullsink-credit/credit.sock ]");
+  expect(ledgerUnit).toContain("TimeoutStartSec=60");
+  expect(proxyUnit).toContain("Requires=nullsink-ledger.service");
+  expect(proxyUnit).toContain("After=network-online.target nullsink-ledger.service");
+  expect(paymentsUnit).toContain("After=nullsink-ledger.service");
+  expect(paymentsUnit).not.toContain("Requires=nullsink-ledger.service");
+  expect(deployLib).toContain('systemctl restart "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"');
 });
 
 test("the deployed principal, environment, state, and read-group matrix is least-privilege", () => {
   expect(proxyUnit).toContain("User=nullsink-proxy\nGroup=nullsink-proxy-read");
-  expect(proxyUnit).toContain("StateDirectory=nullsink-proxy");
+  expect(proxyUnit).not.toContain("StateDirectory=");
+  expect(proxyUnit).not.toContain("DB_PATH=");
   expect(proxyUnit).not.toContain("nullsink-payments-read");
   expect(proxyUnit).not.toContain("/etc/nullsink-payments.env");
+
+  expect(ledgerUnit).toContain("User=nullsink-ledger\nGroup=nullsink-ledger-read");
+  expect(ledgerUnit).toContain("StateDirectory=nullsink-ledger");
+  expect(ledgerUnit).toContain("Environment=DB_PATH=/var/lib/nullsink-ledger/balances.db");
+  expect(ledgerUnit).not.toContain("EnvironmentFile=");
+  expect(ledgerUnit).toContain("RestrictAddressFamilies=AF_UNIX");
 
   expect(paymentsUnit).toContain("User=nullsink-payments\nGroup=nullsink-payments-read");
   expect(paymentsUnit).toContain("StateDirectory=nullsink-payments");
@@ -97,7 +130,7 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(paymentsUnit).not.toContain("/etc/nullsink-proxy.env");
 
   expect(backupUnit).toContain("User=nullsink-backup\nGroup=nullsink-backup");
-  expect(backupUnit).toContain("SupplementaryGroups=nullsink-proxy-read nullsink-payments-read");
+  expect(backupUnit).toContain("SupplementaryGroups=nullsink-ledger-read nullsink-payments-read");
   expect(backupUnit).toContain("EnvironmentFile=-/etc/nullsink-backup.env");
   expect(backupUnit).not.toContain("/etc/nullsink-payments.env");
   expect(labelUnit).toContain("User=nullsink-payments\nGroup=nullsink-payments-read");
@@ -114,7 +147,15 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(migration).toContain('chown "root:$ROOT_GROUP" "$role_env"');
   expect(migration).toContain('chmod 0600 "$role_env"');
   expect(migration).not.toContain("nullsink-wallet");
+  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_PROXY_GROUP" "$PROXY_USER"');
+  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_READ_GROUP" "$OPERATOR_USER"');
+  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_READ_GROUP" "$BACKUP_USER"');
+  expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_READ_GROUP" "\$(?:PROXY|PAYMENTS)_USER"/);
+  expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_PROXY_GROUP" "\$(?:PAYMENTS|BACKUP)_USER"/);
   expect(deployLib).toContain("activate_isolation_sidecars");
+  expect(deployLib).toContain("/etc/nullsink-ledger-extraction.activated");
+  expect(deployLib).toContain("balances=/var/lib/nullsink-proxy/balances.db");
+  expect(deployLib).toContain("balances=/var/lib/nullsink-ledger/balances.db");
   expect(deployLib).toContain("chown root:root /etc/monero-wallet-rpc.env");
   const restartSidecars = deployLib.slice(
     deployLib.indexOf("restart_isolation_sidecars()"),
@@ -206,11 +247,11 @@ test("control-plane storage paths are isolated while retaining an explicit legac
     expect(script).toContain('DB_DIR="${DB_DIR:-}"');
     expect(script).toContain('BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"');
     expect(script).toContain('PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"');
-    expect(script).toContain('/var/lib/nullsink-proxy/balances.db');
+    expect(script).toContain('/var/lib/nullsink-ledger/balances.db');
     expect(script).toContain('/var/lib/nullsink-payments/pending.db');
   }
   for (const unit of [backupUnit, statusUnit]) {
-    expect(unit).toContain("Environment=BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db");
+    expect(unit).toContain("Environment=BALANCES_DB_PATH=/var/lib/nullsink-ledger/balances.db");
     expect(unit).toContain("Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db");
     expect(unit).toContain("Environment=BACKUP_DIR=/var/lib/nullsink-backup");
   }
@@ -221,10 +262,13 @@ test("the first isolated deploy refuses before any release mutation until explic
   const suspend = deployScript.indexOf("suspend_control_timers");
   const tree = deployScript.indexOf('install_deploy_tree "$REF" "$APP_DIR"');
   const marker = deployScript.indexOf("if [ ! -f /etc/nullsink-service-isolation.prepared ]");
+  const ledgerMarker = deployScript.indexOf("if [ ! -f /etc/nullsink-ledger-extraction.prepared ]");
   const apply = deployScript.indexOf("apply_repo_config                      #");
   const restart = deployScript.indexOf("restart_app", apply);
   const timers = deployScript.indexOf("enable_timers", restart);
   expect(marker).toBeGreaterThan(-1);
+  expect(ledgerMarker).toBeGreaterThan(marker);
+  expect(suspend).toBeGreaterThan(ledgerMarker);
   expect(suspend).toBeGreaterThan(marker);
   expect(binary).toBeGreaterThan(suspend);
   expect(tree).toBeGreaterThan(-1);
@@ -236,9 +280,13 @@ test("the first isolated deploy refuses before any release mutation until explic
     "no release artifact, unit, or service was changed",
   );
   expect(deployScript.slice(marker, suspend)).not.toContain("prepare_service_isolation");
-  expect(deployScript.indexOf("trap restore_timers_on_exit EXIT")).toBeLessThan(tree);
+  expect(deployScript.indexOf("CUTOVER_ROLLBACK_ARMED=1")).toBeLessThan(binary);
+  expect(deployScript.indexOf("trap restore_deploy_on_exit EXIT")).toBeLessThan(binary);
+  expect(deployScript).toContain("rollback_initial_cutover");
+  expect(deployScript).toContain("refusing an unsafe automatic rollback");
   expect(deployScript.slice(apply, restart)).not.toContain("enable_timers");
   expect(setup).toContain("Existing billing state requires an explicit, quiet-window migration");
+  expect(setup).toContain("Existing balances require an explicit, quiet-window ledger extraction");
   expect(readFileSync(deploy("README.md"), "utf8")).toContain(
     "not** the old `/opt/nullsink/deploy/deploy.sh`",
   );
@@ -265,6 +313,28 @@ test("release archives and root extraction cannot inherit the CI runner identity
   );
 });
 
+test("the release publishes and attests all three service binaries", () => {
+  const checksum = releaseWorkflow.match(/- name: checksum[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? "";
+  const attestation = releaseWorkflow.match(/- name: attest build provenance[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? "";
+  const upload = releaseWorkflow.match(/gh release upload "\$TAG"[\s\S]*?--clobber/)?.[0] ?? "";
+
+  for (const binary of [
+    "nullsink-ledger-linux-x64",
+    "nullsink-proxy-linux-x64",
+    "nullsink-payments-linux-x64",
+  ]) {
+    expect(checksum).toContain(binary);
+    expect(attestation).toContain(binary);
+    expect(upload).toContain(binary);
+  }
+  expect(releaseWorkflow).toContain(
+    'mv core/nullsink-proxy-linux-x64 core/nullsink-ledger-linux-x64 core/nullsink-payments-linux-x64 core/nsk-linux-x64 .',
+  );
+  expect(releaseWorkflow).toContain(
+    "ledger + proxy + payments services",
+  );
+});
+
 test("deploy drains root one-shots around the live tree and restores only prior active timers on failure", () => {
   const suspend = deployLib.slice(
     deployLib.indexOf("suspend_control_timers()"),
@@ -279,7 +349,7 @@ test("deploy drains root one-shots around the live tree and restores only prior 
     suspend.indexOf("systemctl stop status-check.service backup.service"),
   );
   expect(restore).toContain('systemctl start "${CONTROL_TIMERS_WERE_ACTIVE[@]}"');
-  expect(deployScript).toContain("trap restore_timers_on_exit EXIT");
+  expect(deployScript).toContain("trap restore_deploy_on_exit EXIT");
   expect(deployScript).toContain("trap - EXIT");
 });
 

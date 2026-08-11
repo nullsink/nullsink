@@ -1,15 +1,16 @@
-// Attestability guard. The proxy binary is the unit we attest, so it must never bundle payments trust-domain code;
-// symmetrically, payments must not carry the proxy/balance trust domain. These tests root the graph at the actual
-// composition roots and parse every runtime import with TypeScript's AST. Build-time verification separately
-// checks Bun's metafiles and compiled-binary symbols (scripts/assert-trust-domains.ts).
+// Attestability guard for the three real composition roots. Each binary has an exhaustive reviewed closure;
+// pairwise sharing is explicit, so the stateless proxy cannot silently regain ledger or payments code.
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { relative, resolve } from "node:path";
 import { runtimeModuleGraph } from "../scripts/trust-domain-graph";
 import {
+  INTENTIONAL_LEDGER_ONLY_RUNTIME,
   INTENTIONAL_PAYMENTS_ONLY_RUNTIME,
+  INTENTIONAL_PAYMENTS_LEDGER_RUNTIME,
   INTENTIONAL_PROXY_ONLY_RUNTIME,
+  INTENTIONAL_PROXY_LEDGER_RUNTIME,
   INTENTIONAL_SHARED_RUNTIME,
   inspectTrustDomains,
   sorted,
@@ -97,6 +98,7 @@ test("the composition-root graphs resolve every local runtime import and stay in
   expect(trustDomains.opaque).toEqual([]);
   expect(sorted(trustDomains.outsideSource)).toEqual([]);
   expect(trustDomains.proxy.has("proxy.ts")).toBe(true);
+  expect(trustDomains.ledger.has("ledger-service.ts")).toBe(true);
   expect(trustDomains.payments.has("payments.ts")).toBe(true);
 });
 
@@ -108,13 +110,22 @@ test("every exclusive module remains in its reviewed trust domain", () => {
   expect(sorted(trustDomains.unexpectedPaymentsOnly)).toEqual([]);
   expect(sorted(trustDomains.stalePaymentsOnlyAllowances)).toEqual([]);
   expect(sorted(trustDomains.paymentsOnly)).toEqual(sorted(INTENTIONAL_PAYMENTS_ONLY_RUNTIME));
+  expect(sorted(trustDomains.unexpectedLedgerOnly)).toEqual([]);
+  expect(sorted(trustDomains.staleLedgerOnlyAllowances)).toEqual([]);
+  expect(sorted(trustDomains.ledgerOnly)).toEqual(sorted(INTENTIONAL_LEDGER_ONLY_RUNTIME));
 });
 
-test("only the exhaustively reviewed infrastructure set is shared by both services", () => {
+test("every pairwise service intersection is exhaustively reviewed", () => {
   const trustDomains = inspectTrustDomains();
   expect(sorted(trustDomains.unexpectedShared)).toEqual([]);
   expect(sorted(trustDomains.staleSharedAllowances)).toEqual([]);
   expect(sorted(trustDomains.shared)).toEqual(sorted(INTENTIONAL_SHARED_RUNTIME));
+  expect(sorted(trustDomains.unexpectedProxyLedgerShared)).toEqual([]);
+  expect(sorted(trustDomains.staleProxyLedgerSharedAllowances)).toEqual([]);
+  expect(sorted(trustDomains.proxyLedgerShared)).toEqual(sorted(INTENTIONAL_PROXY_LEDGER_RUNTIME));
+  expect(sorted(trustDomains.unexpectedPaymentsLedgerShared)).toEqual([]);
+  expect(sorted(trustDomains.stalePaymentsLedgerSharedAllowances)).toEqual([]);
+  expect(sorted(trustDomains.paymentsLedgerShared)).toEqual(sorted(INTENTIONAL_PAYMENTS_LEDGER_RUNTIME));
 });
 
 test("every src module is service-owned or explicitly non-service", () => {

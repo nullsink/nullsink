@@ -1,27 +1,27 @@
-// The one test that boots BOTH composition roots as REAL processes and drives a credit across the socket
-// end-to-end. proxy.ts and payments.ts are the split's wiring — ports, the credit-socket path, which store
-// feeds the credit server vs the sender — and nothing else covers them: no test imports them (they are pure
-// side-effect roots), and mutation testing skips them for that reason. A swapped port, a mismatched
+// The one test that boots all THREE composition roots as REAL processes and drives a credit across both
+// capabilities end-to-end. The roots are side-effectful wiring, no unit test imports them, and mutation
+// testing skips them for that reason. A swapped port, a mismatched
 // CREDIT_SOCK default, or a store wired to the wrong side would pass every unit test, trust-domain-isolation, and
 // assert-trust-domains, and only surface at runtime. This catches exactly that class.
 //
-// Flow: seed one credit into pending.db's outbox, boot payments (owns pending.db, runs the sender) and proxy
-// (owns balances.db, binds the socket + serves /balance), and assert the credit crosses and is readable via
-// the metered read path — exactly once. The rails never run: the credit is injected straight into the outbox,
+// Flow: seed one credit into pending.db's outbox; boot ledger (owns balances.db + both sockets), payments
+// (owns pending.db + sends credit), and stateless proxy (/balance over the metering socket); then assert the
+// credit crosses and is readable exactly once. The rails never run: the credit is injected into the outbox,
 // so a dummy MONERO_WALLET_RPC (whose poll harmlessly fails) is all payments needs to boot.
 import { test, expect, afterEach } from "bun:test";
 import { openOrderStore } from "../src/ledger/orders";
 import { hashToken } from "../src/ledger/hash";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import type { Subprocess } from "bun";
 
 const PROXY = fileURLToPath(new URL("../src/proxy.ts", import.meta.url));
+const LEDGER = fileURLToPath(new URL("../src/ledger-service.ts", import.meta.url));
 const PAYMENTS = fileURLToPath(new URL("../src/payments.ts", import.meta.url));
 
-// Two DISTINCT free localhost ports. Each :0 bind is held open until BOTH are captured, then both released, so
+// Two DISTINCT free localhost ports. Each :0 bind is held open until both are captured, then both released, so
 // the two can never resolve to the same number (a plain "bind/read/release" twice can hand back one port twice,
-// and proxy + payments would then collide on bind). Small TOCTOU window remains — standard practice, and far
+// and the two HTTP services would then collide on bind). Small TOCTOU window remains — standard practice, and far
 // safer than hardcoded ports that would collide when bun runs test files in parallel.
 function freePortPair(): [number, number] {
   const a = Bun.serve({ port: 0, fetch: () => new Response("") });
@@ -54,14 +54,15 @@ const spawn = (path: string, env: Record<string, string>) => {
   return p;
 };
 
-test("a seeded credit crosses the socket from payments to proxy and reads back through /balance exactly once", async () => {
-  dir = `/tmp/nullsink-2proc-${process.pid}`; // short path — a unix socket path has a ~104-char ceiling
+test("a seeded credit crosses payments → ledger and reads back ledger → proxy exactly once", async () => {
+  dir = `/tmp/nullsink-3proc-${process.pid}`; // short path — a unix socket path has a ~104-char ceiling
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   const balancesDb = `${dir}/balances.db`;
   const pendingDb = `${dir}/pending.db`;
-  const sock = `${dir}/credit.sock`;
-  const token = "smoke-token-two-process";
+  const creditSock = `${dir}/credit.sock`;
+  const ledgerSock = `${dir}/ledger.sock`;
+  const token = "smoke-token-three-process";
 
   // Seed one $5 credit into the outbox (5_000_000 micro-USD), then release the handle so the payments process
   // opens the DB cleanly. openOrderStore creates the schema, so this also initialises pending.db.
@@ -71,14 +72,23 @@ test("a seeded credit crosses the socket from payments to proxy and reads back t
 
   const [proxyPort, paymentsPort] = freePortPair();
 
-  // proxy: owns balances.db, binds the credit socket, serves /balance. Needs ≥1 provider to boot (dummy key —
-  // it is never called; the test only hits /balance).
-  spawn(PROXY, { PORT: String(proxyPort), HOST: "127.0.0.1", ANTHROPIC_API_KEY: "dummy", DB_PATH: balancesDb, CREDIT_SOCK: sock });
+  // Ledger starts first and publishes both capabilities. This mirrors systemd's Before= readiness contract;
+  // the proxy's startSession is deliberately fail-closed and must not race an absent socket in this harness.
+  spawn(LEDGER, { DB_PATH: balancesDb, LEDGER_SOCK: ledgerSock, CREDIT_SOCK: creditSock });
+  for (let i = 0; i < 50; i++) {
+    if (existsSync(ledgerSock) && existsSync(creditSock)
+      && statSync(ledgerSock).isSocket() && statSync(creditSock).isSocket()) break;
+    await Bun.sleep(100);
+  }
+  expect(existsSync(ledgerSock) && existsSync(creditSock)).toBe(true);
+
+  // Proxy has no DB and no credit capability. It needs one dummy provider only to boot; the test calls /balance.
+  spawn(PROXY, { PORT: String(proxyPort), HOST: "127.0.0.1", ANTHROPIC_API_KEY: "dummy", LEDGER_SOCK: ledgerSock });
   // payments: owns pending.db, runs the sender. Dummy monero rail (its poll fails, harmlessly); a fast poll so
   // the drain runs promptly. The sender delivers the outbox row over the socket on the first tick.
   spawn(PAYMENTS, {
     PAYMENTS_PORT: String(paymentsPort), HOST: "127.0.0.1", PAY_RAILS: "monero",
-    MONERO_WALLET_RPC: "http://127.0.0.1:1/json_rpc", PENDING_DB_PATH: pendingDb, CREDIT_SOCK: sock, POLL_INTERVAL_MS: "1000",
+    MONERO_WALLET_RPC: "http://127.0.0.1:1/json_rpc", PENDING_DB_PATH: pendingDb, CREDIT_SOCK: creditSock, POLL_INTERVAL_MS: "1000",
   });
 
   // Poll /balance on the proxy until the credit has crossed (or time out). Connection-refused early just retries.

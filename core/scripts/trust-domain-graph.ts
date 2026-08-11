@@ -1,4 +1,4 @@
-// Runtime-module graph extraction for the two service composition roots. This deliberately uses the
+// Runtime-module graph extraction for the three service composition roots. This deliberately uses the
 // TypeScript parser instead of source-text regexes: import syntax has several equivalent forms, and a
 // privacy boundary must not depend on quote style or miss a re-export/dynamic import/require().
 //

@@ -55,8 +55,8 @@ export function openOrderStore(path: string) {
   // that reverse lookup. Cheap on a table bounded by MAX_OPEN_ORDERS.
   db.run(`CREATE INDEX IF NOT EXISTS idx_pending_hash ON pending_orders (hash)`);
 
-  // --- The payment→proxy trust domain credit crossing + the sales book — both PAYMENTS TRUST DOMAIN state, so they
-  //     live here in pending.db and never in the proxy trust domain's balances.db. ---
+  // --- The payment→ledger credit crossing + the sales book are PAYMENTS TRUST DOMAIN state, so they live
+  //     here in pending.db and never in the ledger trust domain's balances.db. ---
 
   // credit_outbox: the durable, exactly-once credit hand-off. settle() writes a row here in the SAME
   // transaction that closes the order; the sender (credit-sender.ts) drains unacked rows into the balance

@@ -13,10 +13,10 @@ OnFailure=status-alert@%n.service
 Type=oneshot
 User=nullsink-backup
 Group=nullsink-backup
-SupplementaryGroups=nullsink-proxy-read nullsink-payments-read
+SupplementaryGroups=nullsink-ledger-read nullsink-payments-read
 WorkingDirectory=/opt/nullsink
 EnvironmentFile=-/etc/nullsink-backup.env
-Environment=BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db
+Environment=BALANCES_DB_PATH=/var/lib/nullsink-ledger/balances.db
 Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db
 Environment=BACKUP_DIR=/var/lib/nullsink-backup
 Environment=BITCOIN_LABELS_PATH=/var/lib/nullsink-payments/bitcoin-wallet-labels.json

@@ -10,15 +10,17 @@ node_modules
 *.db-shm
 *.bak.db
 
-# The credit socket a locally-run `dev:proxy` binds (CREDIT_SOCK; /run/nullsink/credit.sock in prod).
+# Unix sockets bound by local service runs.
 *.sock
 
 # Compiled binary build artifacts (package.json `build`/`build:nsk` / the release workflow produce them).
-# The build produces two service binaries from one core; the old single-binary name is kept so a stale
+# The build produces three service binaries from one core; the old single-binary name is kept so a stale
 # artifact from an older layout is still ignored.
 /nullsink-linux-x64
+/nullsink-ledger-linux-x64
 /nullsink-proxy-linux-x64
 /nullsink-payments-linux-x64
+/nullsink-ledger.metafile.json
 /nullsink-proxy.metafile.json
 /nullsink-payments.metafile.json
 /nsk-linux-x64

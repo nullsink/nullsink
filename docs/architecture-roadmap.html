@@ -107,7 +107,7 @@
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
       <title id="roadmap-title">nullsink current architecture and target app-box boundary</title>
-      <desc id="roadmap-desc">Caddy routes to separate proxy and payments processes. Step 4 is live in production: distinct operating-system identities, root-owned environment files, state roots, database read groups, and a credit-socket group enforce the service boundary. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector when it is online. Version 1.12.0 removed operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap step five, a third ledger service owns balances and the proxy becomes stateless.</desc>
+      <desc id="roadmap-desc">Caddy routes to separate proxy and payments processes in production v1.13. Step 4 is live: distinct operating-system identities, root-owned environment files, state roots, database read groups, and a credit-socket group enforce the service boundary. The production proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector when it is online. Version 1.12.0 removed operator mutation and recovery commands while temporarily retaining two read-only live views. Step 5 is implemented and awaiting release QA: a third ledger service owns balances through two ACL-separated sockets and the proxy becomes stateless.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -240,7 +240,7 @@
 
       <!-- AFTER STEPS 1-5 -->
       <rect class="panel" x="28" y="1225" width="1344" height="585" rx="18"/>
-      <text class="section-kicker" x="60" y="1268">AFTER ROADMAP STEPS 1–5</text>
+      <text class="section-kicker" x="60" y="1268">STEP 5 IMPLEMENTED · RELEASE QA PENDING</text>
       <text class="section-title" x="60" y="1299">three OS-enforced services · stateless metering proxy</text>
 
       <rect class="node" x="70" y="1380" width="220" height="96" rx="10"/>
@@ -257,7 +257,7 @@
       <text class="copy" x="385" y="1410">/v1 · provider keys</text>
       <text class="copy" x="385" y="1434">in-flight requests only</text>
       <rect class="badge-acid" x="385" y="1454" width="250" height="36" rx="7"/>
-      <text class="db-text" x="510" y="1477" text-anchor="middle">stateless after Step 5</text>
+      <text class="db-text" x="510" y="1477" text-anchor="middle">no database · session-gated</text>
       <rect class="badge-seal" x="385" y="1518" width="250" height="32" rx="7" stroke-dasharray="6 5"/>
       <text class="label-seal" x="510" y="1539" text-anchor="middle">later: nullsink proxy TEE</text>
 
@@ -302,7 +302,7 @@
   <div class="legend" aria-label="Diagram legend">
     <strong>status</strong>
     <span class="legend-item"><span class="swatch shipped"></span>shipped milestone</span>
-    <span class="legend-item"><span class="swatch planned"></span>next boundary</span>
+    <span class="legend-item"><span class="swatch planned"></span>implemented · QA pending</span>
     <span class="legend-item"><span class="swatch tee"></span>verified external TEE</span>
     <span class="legend-item"><span class="swatch exception"></span>known boundary exception</span>
     <strong>links</strong>
@@ -311,7 +311,7 @@
     <span class="legend-item">dotted · Tor</span>
     <span class="legend-item" style="color: var(--acid)">acid · credit crossing</span>
   </div>
-  <div class="foot">Step 4 is shipped and production-proven. Step 5 extracts the ledger and makes the metering proxy stateless; a nullsink TEE and public-network changes remain later work.</div>
+  <div class="foot">Step 4 is production-proven. Step 5 is implemented and awaiting staging/release/production proof; a nullsink TEE and public-network changes remain later work.</div>
 </main>
 </body>
 </html>

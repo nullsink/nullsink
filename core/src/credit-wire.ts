@@ -1,4 +1,4 @@
-// The ONE crossing between the two trust domains: payments → proxy, `credit {hash, micros, idempotency_key}`.
+// The payments capability: payments → ledger, `credit {hash, micros, idempotency_key}`.
 // This module is the shared wire contract only — no store, no I/O — so each trust domain can import it without
 // dragging the other's code into its binary.
 //
@@ -6,7 +6,7 @@
 // socket FILE's permissions: on Linux, connect(2) requires WRITE permission on the socket path — a
 // kernel-enforced, unspoofable uid gate. (Bun exposes neither peer credentials nor the socket fd, so
 // SO_PEERCRED is unreachable; the filesystem gate is the same trust root, enforced at connect time instead of
-// read after accept.) The proxy owns the socket's mode; see credit-server.ts for the bind-time rules.
+// read after accept.) The ledger owns the socket's mode; see credit-server.ts for the bind-time rules.
 
 // Bump on ANY change to the request/response shape. The server refuses a mismatch (fail closed + loud) so a
 // partial rollback that pairs new payments with an old proxy wedges the durable outbox instead of crediting
@@ -21,7 +21,7 @@ export type CreditRequest = { hash: string; micros: number; idempotency_key: str
 // by an earlier delivery), so the sender acks on either.
 export type CreditOutcome = "applied" | "already_applied";
 
-// What the sender learns. `ok:false` is AMBIGUOUS — the credit may or may not have landed (e.g. the proxy
+// What the sender learns. `ok:false` is AMBIGUOUS — the credit may or may not have landed (e.g. the ledger
 // committed and the response was lost) — so the outbox row stays unacked and is retried; the receiver's
 // applied_orders guard makes the redelivery a no-op. NEVER ack on anything but ok:true.
 export type DeliveryResult = { ok: true; outcome: CreditOutcome } | { ok: false; reason: string };

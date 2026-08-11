@@ -6,7 +6,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: current system and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-08-11, after production v1.13.0 and merge of #161
+## Status — 2026-08-11, after production v1.13.0
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
@@ -17,8 +17,8 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
 | Operator database access | **Reduced in v1.12.0** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
 | Separate OS principals | **Shipped and production-proven** in v1.13.0 | Distinct users, root-owned env files, state roots, read groups, and credit-socket group. Production passed the permission matrix, encrypted post-migration backup, and offline restore drill. |
-| Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
-| Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
+| Ledger service | **Implementation ready; QA pending** | A dedicated third binary owns `balances.db` and two ACL-separated Unix sockets. Staging, release, and production recovery proof remain. |
+| Stateless metering proxy | **Implementation ready; QA pending** | Proxy opens no database, completes a transactional session-start barrier before binding HTTP, and drains while ledger remains available. |
 | nullsink proxy TEE | **Later feasibility work** | Distinct from the live Tinfoil verifier, which attests only Tinfoil's remote enclave. |
 | Public onion / geographic relay | **Later network work** | Not part of the five app-box steps below. |
 
@@ -120,7 +120,7 @@ restore dry run. The obsolete shared layout was then finalized and removed.
 Gate: deployment tests prove the file and socket permission matrix, not only the TypeScript import
 matrix.
 
-### 5. Extract the ledger service
+### 5. Extract the ledger service — implementation ready; not production-proven
 
 Create a third process that exclusively owns `balances.db`, hold recovery, and `applied_orders`.
 Give the proxy a narrow balance/hold/settle socket and give payments a distinct credit-only socket.
@@ -129,6 +129,18 @@ runtime material.
 
 Gate: no-overdraft and hold-recovery tests run through the socket-backed store; a ledger outage
 fails inference before upstream forwarding; payments keeps paid credits queued until recovery.
+
+The implementation stays deliberately narrow: one ledger process, two versioned pathname sockets, one fresh
+proxy session per process, and no broker, lease, or generic RPC framework. Mutations retry the identical
+session/hold/payload after an ambiguous response. A new proxy cannot bind HTTP until `startSession` returns a
+definite success; that transaction fences retired sessions and refunds a stopped/crashed predecessor's holds.
+Systemd starts ledger before both callers and stops it after proxy's bounded drain.
+
+The one-time cutover stops Caddy first, copies the old proxy-owned ledger with integrity and logical-fingerprint
+checks, and keeps a frozen pre-traffic rollback copy. Any failure before activation restores the old topology;
+activation requires all three units plus both sockets; finalization waits for an encrypted backup and offline
+restore proof. The remaining operator follow-up is replacing the temporary read-group `nsk` exception with
+service-owned read interfaces, then retiring live database readers.
 
 After Step 5 the app box has the target three units: stateless metering proxy, ledger service, and
 payments service. Putting the proxy in a TEE and changing the public network edge remain later,

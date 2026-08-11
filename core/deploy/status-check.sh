@@ -4,17 +4,18 @@
 #
 # Run every 10 min by status-check.timer; a non-zero exit trips status-check.service's OnFailure= and pages
 # Telegram (deploy/alert.sh). Checks, in order of "is the service actually working for customers?":
-#   1. The ENABLED app-box units are active (nullsink-proxy, nullsink-payments, caddy, monero-wallet-rpc,
-#      tor) + each app service serves its own /healthz. A unit that is NOT enabled is SKIPPED — so an
+#   1. The ENABLED app-box units are active (ledger, proxy, payments, Caddy, and enabled rail sidecars), the
+#      two ledger sockets retain their exact ACLs, and each HTTP service serves its own /healthz. A unit that
+#      is NOT enabled is SKIPPED — so an
 #      Anthropic-only box with no buy rail, or a pre-public box with caddy not yet started, doesn't page every
 #      tick; an enabled-but-down unit alerts.
 #   2. Host: disk/inode headroom for the billing DBs, that the SQLite WAL sidecars are still owned by the
 #      service user (a root CLI/backup write leaves root-owned sidecars that silently break billing writes),
 #      a per-DB integrity pragma (catches silent corruption that breaks billing), and backup freshness.
-#   3. Recent app journals, one per trust domain. Proxy: upstream BILLING errors (our prepaid account ran dry ->
+#   3. Recent app journals, one per network-facing trust domain. Proxy: upstream BILLING errors (our prepaid account ran dry ->
 #      everyone 503s) and billing anomalies. Payments: rate-source failures (/buy down), a blind settlement
 #      poller, and a STALLED CREDIT OUTBOX — paid credits that are not reaching the balance ledger, the one
-#      failure the two /healthz probes structurally cannot see. Greps the operator's own journal; emits only a
+#      failure the readiness/socket checks structurally cannot see. Greps the operator's own journal; emits only a
 #      flag, never content.
 #   4. The buy rail (whichever watcher is enabled): Monero — view-only wallet vs. the remote node over Tor;
 #      Bitcoin — the pruned node is synced (blocks≈headers, not in IBD) and the watch-only wallet is loaded.
@@ -32,18 +33,21 @@ RPC_TIMEOUT="${RPC_TIMEOUT:-15}"
 DB_DIR="${DB_DIR:-}"                      # optional legacy shared-directory fallback
 BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"
 PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"
-BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-proxy/balances.db}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-ledger/balances.db}"
 PENDING_DB_PATH="${PENDING_DB_PATH:-/var/lib/nullsink-payments/pending.db}"
 SVC_USER="${SVC_USER:-}"                 # optional legacy shared-owner fallback
 BALANCES_DB_USER="${BALANCES_DB_USER:-$SVC_USER}"
 PENDING_DB_USER="${PENDING_DB_USER:-$SVC_USER}"
-BALANCES_DB_USER="${BALANCES_DB_USER:-nullsink-proxy}"
+BALANCES_DB_USER="${BALANCES_DB_USER:-nullsink-ledger}"
 PENDING_DB_USER="${PENDING_DB_USER:-nullsink-payments}"
 DISK_WARN_PCT="${DISK_WARN_PCT:-85}"
-# Two app units, two loopback ports, two /healthz. Kept literal (this script is run standalone by systemd
-# and never sources deploy/lib.sh).
+# Three app units, two Unix sockets, two loopback ports, and two /healthz probes. Kept literal because this
+# script is run standalone by systemd and never sources deploy/lib.sh.
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
+LEDGER_UNIT="${LEDGER_UNIT:-nullsink-ledger}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
+METERING_SOCK="${LEDGER_SOCK:-/run/nullsink-ledger/proxy.sock}"
+CREDIT_SOCK="${CREDIT_SOCK:-/run/nullsink-credit/credit.sock}"
 PROXY_HEALTHZ="${PROXY_HEALTHZ_URL:-http://127.0.0.1:8080/healthz}"
 PAYMENTS_HEALTHZ="${PAYMENTS_HEALTHZ_URL:-http://127.0.0.1:8081/healthz}"
 LOG_WINDOW="${LOG_WINDOW:-15 min ago}"         # journal lookback for the error greps (a bit over the 10m tick)
@@ -62,13 +66,36 @@ warn() { echo "WARN $*"; fail=1; }
 jnum() { grep -o "\"$2\" *: *[0-9]\+" <<<"$1" | head -1 | grep -o '[0-9]\+'; }
 
 # --- 1. units (skip a unit that isn't enabled — an intentionally-absent component, not a failure) ---
-for unit in "$PROXY_UNIT" "$PAYMENTS_UNIT" caddy monero-wallet-rpc tor tinfoil-proxy; do
+for unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT" caddy monero-wallet-rpc tor tinfoil-proxy; do
   systemctl is-enabled --quiet "$unit" 2>/dev/null || { echo "skip unit $unit (not enabled)"; continue; }
   if [ "$(systemctl is-active "$unit" 2>/dev/null)" = active ]; then ok "unit $unit active"
   else warn "unit $unit NOT active"; fi
 done
 
-# --- 1b. each service actually SERVES (only if it's running): /healthz is unauthenticated + never forwarded,
+# --- 1a. capability boundary + ledger readiness. Directory execute permits reaching the socket; the socket's
+# group write bit permits connect(2). Any wider mode or wrong group either breaks service or broadens money
+# authority, so compare the complete contract rather than merely checking that a pathname exists. ---
+check_socket_acl() {
+  local path="$1" expected_group="$2" label="$3" actual
+  if [ ! -S "$path" ]; then warn "$label socket absent: $path"; return; fi
+  actual="$(stat -c '%U:%G:%a' "$path" 2>/dev/null)"
+  if [ "$actual" = "nullsink-ledger:$expected_group:660" ]; then ok "$label socket ACL $actual"
+  else warn "$label socket ACL is '${actual:-unreadable}' (expected nullsink-ledger:$expected_group:660)"; fi
+}
+check_socket_dir_acl() {
+  local path="$1" expected_group="$2" label="$3" actual
+  actual="$(stat -c '%U:%G:%a' "$path" 2>/dev/null)"
+  if [ "$actual" = "nullsink-ledger:$expected_group:710" ]; then ok "$label directory ACL $actual"
+  else warn "$label directory ACL is '${actual:-absent}' (expected nullsink-ledger:$expected_group:710)"; fi
+}
+if systemctl is-active --quiet "$LEDGER_UNIT" 2>/dev/null; then
+  check_socket_dir_acl "$(dirname "$METERING_SOCK")" nullsink-ledger-proxy metering
+  check_socket_acl "$METERING_SOCK" nullsink-ledger-proxy metering
+  check_socket_dir_acl "$(dirname "$CREDIT_SOCK")" nullsink-credit credit
+  check_socket_acl "$CREDIT_SOCK" nullsink-credit credit
+fi
+
+# --- 1b. each HTTP service actually SERVES (only if it's running): /healthz is unauthenticated + never forwarded,
 #     so it reveals nothing; catches a process that is "active" but hung. Both trust domains are checked: the proxy
 #     can serve prompts while payments is wedged (nobody can buy), and vice versa. ---
 for probe in "$PROXY_UNIT|$PROXY_HEALTHZ" "$PAYMENTS_UNIT|$PAYMENTS_HEALTHZ"; do
@@ -80,10 +107,10 @@ done
 
 # --- 1c. per-service memory headroom + restart flap: an EARLY warning, BEFORE the cgroup OOM killer (MemoryMax
 #     in each unit) reaps it. §1/§1b only fire once it's already down/hung; this pages while there's still room
-#     to react (shed load, raise MemoryMax). The two units have deliberately ASYMMETRIC caps (the proxy streams,
-#     payments doesn't), so check each against its own. Setting MemoryMax implicitly enables MemoryAccounting,
+#     to react (shed load, raise MemoryMax). The three units have deliberately asymmetric caps (the proxy streams,
+#     ledger and payments do not), so check each against its own. Setting MemoryMax implicitly enables MemoryAccounting,
 #     so MemoryCurrent is populated; skip cleanly if it isn't (older systemd) or the unit is unbounded. ---
-for unit in "$PROXY_UNIT" "$PAYMENTS_UNIT"; do
+for unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; do
   systemctl is-active --quiet "$unit" 2>/dev/null || continue
   mem_cur="$(systemctl show "$unit" -p MemoryCurrent --value 2>/dev/null)"
   mem_max="$(systemctl show "$unit" -p MemoryMax --value 2>/dev/null)"
@@ -213,12 +240,12 @@ if systemctl is-active --quiet "$PAYMENTS_UNIT" 2>/dev/null; then
     warn "POLL BLIND in the last ${LOG_WINDOW% ago} — a rail's deposit detection is DOWN (the APP can't reach its node/wallet); a confirmed deposit will NOT credit until it recovers. See the 'POLL BLIND' journal lines."
   else ok "poller healthy (no POLL BLIND, ${LOG_WINDOW% ago})"; fi
   # The credit crossing. A confirmed deposit is settled into pending.db's durable outbox and then delivered to
-  # the balance ledger over the credit socket. If that socket is wedged (proxy down, stale socket, wire-version
+  # the balance ledger over the credit socket. If that socket is wedged (ledger down, stale socket, wire-version
   # skew after a half-applied deploy), the customer has PAID and holds no credit — yet both /healthz probes
   # answer 200 and every unit reads "active". This marker (src/payments.ts, emitted once the oldest unacked row
   # passes OUTBOX_AGE_ALERT_MS) is the only signal for it. Keep the token in sync with that log line.
   if grep -qiE 'CREDIT OUTBOX STALLED' <<<"$jlog"; then
-    warn "CREDIT OUTBOX STALLED in the last ${LOG_WINDOW% ago} — PAID credits are not reaching the balance ledger (credit socket wedged / $PROXY_UNIT down / wire-version skew). Customers have paid and hold nothing. Check: systemctl status $PROXY_UNIT; ls -l /run/nullsink-credit/credit.sock"
+    warn "CREDIT OUTBOX STALLED in the last ${LOG_WINDOW% ago} — PAID credits are not reaching the balance ledger (credit socket wedged / $LEDGER_UNIT down / wire-version skew). Customers have paid and hold nothing. Check: systemctl status $LEDGER_UNIT; ls -l /run/nullsink-credit/credit.sock"
   else ok "credit outbox draining (no CREDIT OUTBOX STALLED, ${LOG_WINDOW% ago})"; fi
 fi
 

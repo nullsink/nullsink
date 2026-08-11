@@ -212,6 +212,6 @@ test("restore applies a matched pair to explicit, separate state directories", (
   restoredPending.close();
 
   expect(readFileSync(systemctlLog, "utf8")).toBe(
-    "stop nullsink-payments nullsink-proxy\nstart nullsink-proxy nullsink-payments\n",
+    "stop nullsink-payments nullsink-proxy nullsink-ledger\nstart nullsink-ledger nullsink-proxy nullsink-payments\n",
   );
 });

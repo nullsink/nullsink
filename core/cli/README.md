@@ -11,8 +11,8 @@ sudo -u nullsink nsk financials [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--for
 
 `balances` lists token hashes and current balances. `financials` combines the payment-side sales journal
 with current aggregate liability. Both open SQLite read-only at the application level and refuse root by
-default so SQLite cannot leave root-owned sidecars. They are a temporary boundary exception until
-service-owned read interfaces replace them during ledger extraction.
+default so SQLite cannot leave root-owned sidecars. They remain a temporary read-group exception; a focused
+follow-up will replace them with service-owned reads and retire live database access.
 
 Table output abbreviates token hashes. CSV and JSON contain full stable hashes; keep those exports on the
 app box. `nsk` cannot issue credit, top up a token, inspect open orders, or perform recovery.
