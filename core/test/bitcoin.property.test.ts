@@ -86,12 +86,12 @@ test("rpc surfaces HTTP and JSON-RPC errors as BitcoinError", async () => {
   await expect(makeBitcoin({ ...CFG, fetchImpl: router({}) }).createAddress()).rejects.toBeInstanceOf(BitcoinError);
 });
 
-test("the app refuses missing or loopback Bitcoin RPC endpoints", async () => {
+test("the app requires an explicit HTTP(S) Bitcoin RPC endpoint", async () => {
   const fetchImpl = router({ getnewaddress: () => "unused" });
-  for (const rpcUrl of ["", "http://localhost:8332/wallet/nullsink", "http://127.0.0.2:8332/wallet/nullsink", "http://[::1]:8332/wallet/nullsink", "ftp://node.test/wallet/nullsink"]) {
+  for (const rpcUrl of ["", "node.test/wallet/nullsink", "ftp://node.test/wallet/nullsink"]) {
     await expect(
       makeBitcoin({ ...CFG, rpcUrl, fetchImpl }).createAddress(),
-    ).rejects.toThrow(/dedicated node/);
+    ).rejects.toThrow(/explicit HTTP\(S\)/);
   }
 });
 

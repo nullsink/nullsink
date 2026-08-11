@@ -294,9 +294,6 @@ fi
 case ",${_btc_rails// /}," in *,bitcoin,*)
   _btc_url="${BITCOIN_RPC_URL:-}"
   case "$_btc_url" in
-    http://127.*|https://127.*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*|"")
-      warn "BITCOIN_RPC_URL must name the dedicated non-loopback node box — BTC probe not performed"
-      ;;
     http://*|https://*)
       {
     curl_user_config() {
@@ -357,7 +354,7 @@ case ",${_btc_rails// /}," in *,bitcoin,*)
     fi
       }
       ;;
-    *) warn "BITCOIN_RPC_URL is not a valid HTTP(S) dedicated-node endpoint — BTC probe not performed" ;;
+    *) warn "BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint — BTC probe not performed" ;;
   esac
   ;;
 *)

@@ -24,8 +24,8 @@ test("app deployment has no local Bitcoin Core runtime surface", () => {
   }
   expect(appLib).not.toContain("BITCOIN_VERSION=");
   expect(appLib).not.toContain("stage_verified_bitcoind");
-  expect(appSetup).toContain("bitcoin_rpc_is_remote");
-  expect(appSetup).toContain("this host never installs or runs bitcoind");
+  expect(appSetup).toContain("bitcoin_rpc_is_configured");
+  expect(appSetup).toContain("explicit HTTP(S) wallet endpoint");
   expect(appDeploy).toContain("Bitcoin Core lives on the node box");
 });
 
@@ -57,7 +57,6 @@ test("release artifacts physically separate app and node host roles", () => {
   for (const name of [
     "node-box/README.md",
     "node-box/lib.sh",
-    "node-box/setup.sh",
     "node-box/upgrade.sh",
     "node-box/regen-rpcauth.sh",
     "node-box/bitcoind.service",
@@ -65,6 +64,7 @@ test("release artifacts physically separate app and node host roles", () => {
   ]) {
     expect(existsSync(deploy(name)), name).toBe(true);
   }
+  expect(existsSync(deploy("node-box/setup.sh"))).toBe(false);
 });
 
 test("app health monitors the remote Bitcoin rail without managing a local unit", () => {
@@ -72,5 +72,21 @@ test("app health monitors the remote Bitcoin rail without managing a local unit"
   const unitLoop = status.slice(status.indexOf("for unit in"), status.indexOf("# --- 1b."));
   expect(unitLoop).not.toContain("bitcoind");
   expect(status).toContain("getblockchaininfo");
-  expect(status).toContain("BITCOIN_RPC_URL must name the dedicated non-loopback node box");
+  expect(status).toContain("BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint");
+});
+
+test("node rpcauth rotation rolls back unless the restarted node becomes healthy", () => {
+  const rotate = read("node-box/regen-rpcauth.sh");
+  expect(rotate.indexOf('cp -a -- "$CONF" "$previous_conf"')).toBeLessThan(
+    rotate.indexOf("rollback_armed=1"),
+  );
+  expect(rotate).toContain('cp -a -- "$previous_conf" "$CONF"');
+  expect(rotate).toContain("systemctl is-active --quiet bitcoind");
+  expect(rotate.indexOf("getblockchaininfo")).toBeLessThan(
+    rotate.indexOf("printf 'BITCOIN_RPC_PASSWORD=%s\\n'"),
+  );
+  expect(rotate.lastIndexOf("rollback_armed=0")).toBeGreaterThan(
+    rotate.indexOf("printf 'BITCOIN_RPC_PASSWORD=%s\\n'"),
+  );
+  expect(read("node-box/bitcoind.service")).not.toContain("OnFailure=");
 });

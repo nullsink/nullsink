@@ -194,7 +194,7 @@ artifacts and publishes them as a GitHub Release:
 - **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
 - **`nsk-linux-x64`** — optional read-only live balances and financials.
 - **`deploy-<tag>.tar.gz`** — the app deploy tree (app-only systemd units, Caddyfile, deploy + backup scripts); it physically excludes the node-box bundle.
-- **`nullsink-node-box-<tag>.tar.gz`** — standalone Bitcoin Core node setup and upgrade tooling; never installed on the app box.
+- **`nullsink-node-box-<tag>.tar.gz`** — standalone Bitcoin Core node day-two tooling; never installed on the app box.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
 - **`SHA256SUMS`** — checksums over the six artifacts; the box verifies with `sha256sum -c` before installing.
 
@@ -203,8 +203,9 @@ atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes
 systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
 rolling the symlinks back to the previous release if either service is unhealthy.
 It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
-The app and dedicated Bitcoin node have separate setup/upgrade paths in their respective artifacts.
-First-time app bootstrap is `core/deploy/setup.sh`.
+First-time app bootstrap remains `core/deploy/setup.sh` until the planned Ansible replacement is proven.
+The node bundle has day-two upgrade and credential-rotation tools; declarative fresh-node provisioning is
+tracked in issue #162.
 
 ## License
 

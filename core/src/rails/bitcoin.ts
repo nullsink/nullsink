@@ -33,17 +33,10 @@ export function makeBitcoin(opts: BitcoinOptions) {
     try {
       endpoint = new URL(opts.rpcUrl);
     } catch {
-      throw new BitcoinError("BITCOIN_RPC_URL must name the dedicated node box");
+      throw new BitcoinError("BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint");
     }
-    const host = endpoint.hostname.toLowerCase();
-    if (
-      !["http:", "https:"].includes(endpoint.protocol) ||
-      host === "localhost" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      /^127\./.test(host)
-    ) {
-      throw new BitcoinError("BITCOIN_RPC_URL must be a non-loopback dedicated node-box endpoint");
+    if (!["http:", "https:"].includes(endpoint.protocol)) {
+      throw new BitcoinError("BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint");
     }
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (authHeader) headers.authorization = authHeader;

@@ -58,13 +58,10 @@ tinfoil_active() {  # true if a REAL TINFOIL_API_KEY is set in the proxy env
   k="$(grep -E '^TINFOIL_API_KEY=' "$PROXY_ENV_FILE" | tail -n1 | cut -d= -f2- || true)"
   [ -n "$k" ] && [ "$k" != "tk_..." ] && [ "$k" != "replace-me" ]
 }
-bitcoin_rpc_is_remote() {  # the app supports only an explicit dedicated-node endpoint
+bitcoin_rpc_is_configured() {  # the Bitcoin rail requires an explicit HTTP(S) wallet endpoint
   local url
   url="$(grep -E '^BITCOIN_RPC_URL=' "$PAYMENTS_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
-  [ -n "$url" ] || return 1
   case "$url" in
-    http://127.0.0.1:*|https://127.0.0.1:*|http://localhost:*|https://localhost:*|http://\[::1\]:*|https://\[::1\]:*)
-      return 1 ;;
     http://*|https://*) return 0 ;;
     *) return 1 ;;
   esac
@@ -118,9 +115,8 @@ if [ ! -f /etc/nullsink-service-isolation.prepared ] \
 fi
 prepare_service_isolation
 
-if rail_active bitcoin && ! bitcoin_rpc_is_remote; then
-  echo "    Bitcoin rail requires an explicit non-loopback BITCOIN_RPC_URL for the dedicated node box." >&2
-  echo "    Refusing app setup: this host never installs or runs bitcoind." >&2
+if rail_active bitcoin && ! bitcoin_rpc_is_configured; then
+  echo "    Bitcoin rail requires BITCOIN_RPC_URL to be an explicit HTTP(S) wallet endpoint." >&2
   exit 1
 fi
 

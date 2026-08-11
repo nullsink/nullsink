@@ -1,12 +1,17 @@
 # nullsink Bitcoin node box
 
-This standalone release bundle runs the pruned watch-only Bitcoin Core wallet used by the app over
-WireGuard. It contains no nullsink app service, ledger, billing database, provider key, or alerting stack.
+This standalone release bundle carries day-two assets for the pruned watch-only Bitcoin Core wallet used
+by the app over WireGuard. It contains no nullsink app service, ledger, billing database, provider key, or
+alerting stack.
 
-- `setup.sh` bootstraps a fresh node host without inventing a chain/wallet migration procedure.
 - `upgrade.sh` health-gates a pinned Bitcoin Core upgrade and rolls back its binaries on failure.
-- `regen-rpcauth.sh` rotates node authentication and prints the matching app password once.
-- `bitcoind.service` and `nftables.conf` are installed only by `setup.sh` on this host role.
+- `regen-rpcauth.sh` transactionally rotates node authentication, restores the previous config if the
+  restarted node is unhealthy, and prints the matching app password only after recovery.
+- `bitcoind.service` and `nftables.conf` are node-role inputs for declarative provisioning.
 
-The app box must configure an explicit non-loopback `BITCOIN_RPC_URL` for this node. App releases neither
-ship nor manage bitcoind.
+Fresh-host provisioning is intentionally not implemented as an imperative shell script. It will move to
+the Ansible role tracked in issue #162; until then, this bundle supports existing nodes only. Verify its
+checksum and GitHub build attestation before use.
+
+The app box must configure an explicit HTTP(S) `BITCOIN_RPC_URL` for the node. App releases neither ship
+nor manage bitcoind.

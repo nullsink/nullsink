@@ -25,11 +25,11 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Drains the root backup/status one-shots before replacing their scripts, atomically swaps both binary symlinks in lockstep, refreshes units + edge, resumes timers only after health, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
-| `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
+| `upgrade-component.sh` | Narrow day-two app-box upgrade for `monero-wallet` or `tinfoil`. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
 | `install-nsk.sh` | Installs the optional read-only live balances/financials CLI. |
-| `node-box/` | Source for the separately packaged dedicated Bitcoin node bundle. It is excluded from app release archives. |
+| `node-box/` | Source for the separately packaged dedicated Bitcoin node day-two bundle. It is excluded from app release archives. Fresh provisioning moves to Ansible (issue #162). |
 
 ### Operator & break-glass scripts (run by units or by hand)
 | File | Role |
@@ -73,8 +73,8 @@ sudo /opt/nullsink/deploy/upgrade-component.sh tinfoil
 Each command refuses the wrong box role or an inactive/unconfigured target, verifies the download before
 downtime, requires a healthy rollback baseline both before and after staging, preserves the previous binaries
 under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target service, and rolls back
-automatically if the target does not recover. Concurrent upgrade attempts are rejected. The app and node-box
-`setup.sh` scripts remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
+automatically if the target does not recover. Concurrent upgrade attempts are rejected. App bootstrap remains
+in `setup.sh` until the Ansible replacement is proven; the node bundle deliberately has no bootstrap script.
 
 **The app-box layout is deliberately flat.** `install_units` uses an explicit app-unit allowlist. Keep app
 units/scripts directly under `deploy/`; other host roles belong in isolated bundles. `node-box/` is packaged
