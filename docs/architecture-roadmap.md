@@ -6,23 +6,23 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 ![nullsink architecture: current system and target app-box boundary](architecture-roadmap.png)
 
-## Status — 2026-08-06, after v1.12.0
+## Status — 2026-08-11, after production v1.13.0 and merge of #161
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
-| Dedicated Bitcoin node box | **Shipped** in v1.4.x | Separate `nullsink-node-box-<tag>.tar.gz` release artifact; RPC crosses WireGuard. |
+| Dedicated Bitcoin node box | **Shipped** in v1.4.x; packaging cleanup merged | The remote watch-only node is reached over WireGuard. Main now packages node day-two assets separately and carries no app-box bitcoind management. |
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |
 | Financial and backup egress | **Shipped and recovery-proven** in v1.11.0 | Production publishes encrypted pairs through restricted read-only `rrsync`; the Pi pulls hourly, retains 90 days, and holds no `age` identity. Manual and scheduled pulls plus an offline dry-run restore passed in production. |
 | Operator database access | **Reduced in v1.12.0** | Mutating/recovery commands are retired. Two read-only live views remain temporarily: balances and financials. |
-| Separate OS principals | **Implemented in source; release and production migration pending** | Distinct users, env files, state roots, read groups, credit-socket group, and an explicit two-phase migration. |
+| Separate OS principals | **Shipped and production-proven** in v1.13.0 | Distinct users, root-owned env files, state roots, read groups, and credit-socket group. Production passed the permission matrix, encrypted post-migration backup, and offline restore drill. |
 | Ledger service | **Not started** | The proxy still owns `balances.db`, holds, and `applied_orders`. |
 | Stateless metering proxy | **Blocked on ledger extraction** | This is the app-box target reached after roadmap steps 1–5 below. |
 | nullsink proxy TEE | **Later feasibility work** | Distinct from the live Tinfoil verifier, which attests only Tinfoil's remote enclave. |
 | Public onion / geographic relay | **Later network work** | Not part of the five app-box steps below. |
 
-## Production boundary before Step 4
+## Current production boundary after Step 4
 
 Production is two application processes on one box:
 
@@ -35,15 +35,14 @@ Production is two application processes on one box:
 - Runtime dependency-closure tests keep prompt code out of the payments binary and payment
   code out of the proxy binary.
 
-This is an application-level trust boundary, not yet an OS security boundary. Both units run
-under the same Linux identity and read the same environment file, so either process can still bypass the
-TypeScript boundary through filesystem permissions. Read-only `nsk financials` is the explicit operator
-exception: it opens both databases for live reconciliation but cannot mutate them.
+Linux now enforces the application boundary. The two units run as distinct principals, load separate
+root-owned environment files, and own separate state roots. Neither service can read the other service's
+database or secrets. Payments can reach only the proxy-owned credit socket through `nullsink-credit`.
 
-The Step 4 implementation makes that boundary enforceable by Linux permissions. It preserves the temporary
-operator readers through group-only database access and keeps the matched-pair backup contract through a
-dedicated backup principal. Production remains on the paragraph above until the release is staged, recovery-
-proven, deployed, and finalized.
+Two bounded read-only exceptions remain: the `nullsink` operator principal can run `nsk balances` and
+`nsk financials`, and the dedicated backup principal can create coordinated snapshots. Their supplemental
+groups grant database reads but no writes. Step 5 replaces the proxy-owned balance database with a ledger
+service interface, which also enables retirement of the temporary live `nsk` readers.
 
 Provider routing is deliberately asymmetric. Anthropic and OpenAI are reached directly over
 TLS. Only Tinfoil traffic traverses the local `tinfoil-proxy`, which attests Tinfoil's remote
@@ -104,19 +103,19 @@ Gate for this slice: the released CLI exposes exactly `balances` and `financials
 all funding uses `/buy`. Remaining gate: replace both database readers with service-owned read interfaces
 during OS separation and ledger extraction, then retire `nsk`.
 
-### 4. Enforce OS privilege separation — implemented; deployment pending
+### 4. Enforce OS privilege separation — shipped in v1.13.0
 
 Run proxy and payments under different Linux users, with separate environment files and state
 directories. Grant socket access explicitly with a dedicated group or ACL. A compromised payments
 process must not be able to read provider keys or `balances.db`; a compromised proxy must not be
 able to read wallet credentials or `pending.db`.
 
-The implementation uses `nullsink-proxy`, `nullsink-payments`, and `nullsink-backup` principals; separate
+Production uses `nullsink-proxy`, `nullsink-payments`, and `nullsink-backup` principals; separate
 proxy/payments/backup/monitor env files; separate state roots; read-only groups for the temporary operator
 views and coordinated backup; and a `nullsink-credit` group that grants payments access only to the credit
-socket. The old shared layout is copied during an explicit quiet window and retained root-only for bounded
-rollback. Finalization is deliberately separate from deployment and follows a post-migration encrypted
-backup plus offline restore dry run.
+socket. The migration completed during a financial quiet window, preserved both database fingerprints,
+passed the live permission matrix, and produced an encrypted post-migration artifact that passed an offline
+restore dry run. The obsolete shared layout was then finalized and removed.
 
 Gate: deployment tests prove the file and socket permission matrix, not only the TypeScript import
 matrix.
