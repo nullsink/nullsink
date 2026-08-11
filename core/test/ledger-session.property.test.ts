@@ -45,6 +45,7 @@ test("session state machine conserves balances across replay, conflict, stale ca
     let balance = 1_000;
     let totalCharged = 0;
     let current: string | null = null;
+    const retired = new Set<string>();
     const active = new Map<string, { session: string; micros: number }>();
     const settled = new Map<string, { session: string; charge: number }>();
 
@@ -54,6 +55,8 @@ test("session state machine conserves balances across replay, conflict, stale ca
       if (operation.kind === "begin") {
         if (current === session) {
           expect(ledger.beginSession(session, i).outcome).toBe("current");
+        } else if (retired.has(session)) {
+          expect(ledger.beginSession(session, i)).toEqual({ outcome: "stale_session" });
         } else {
           const recovered = [...active.values()].reduce((sum, hold) => sum + hold.micros, 0);
           const result = ledger.beginSession(session, i);
@@ -65,6 +68,7 @@ test("session state machine conserves balances across replay, conflict, stale ca
           balance += recovered;
           active.clear();
           settled.clear();
+          if (current !== null) retired.add(current);
           current = session;
         }
       } else if (operation.kind === "open") {

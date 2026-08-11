@@ -8,11 +8,13 @@ import { openSqlite } from "./sqlite";
 // this balance store. Re-exported here for tests and the proxy composition root.
 export { hashToken } from "./hash";
 
-export type BeginSessionResult = {
-  outcome: "started" | "current";
-  recoveredHolds: number;
-  recoveredMicros: number;
-};
+export type BeginSessionResult =
+  | {
+    outcome: "started" | "current";
+    recoveredHolds: number;
+    recoveredMicros: number;
+  }
+  | { outcome: "stale_session" };
 export type SessionOpenHoldResult =
   | "opened"
   | "already_open"
@@ -87,6 +89,14 @@ export function openDb(path: string) {
   if (!sessionColumns.has("recovered_micros"))
     db.run("ALTER TABLE ledger_session ADD COLUMN recovered_micros INTEGER NOT NULL DEFAULT 0");
 
+  // A superseded proxy session must never become current again. Without this durable fence, a delayed
+  // startSession retry from an old proxy could reclaim leadership and refund the real current proxy's live
+  // holds. Proxy sessions change only at process startup, so retaining one UUID per retired process is tiny.
+  db.run(`CREATE TABLE IF NOT EXISTS retired_ledger_sessions (
+  session_id TEXT PRIMARY KEY,
+  retired_at INTEGER NOT NULL
+)`);
+
   // Settlement tombstones live only for the current session. They make a lost settle response replay-safe
   // without retaining token hashes: beginSession(new) deletes them after the old proxy can no longer issue
   // valid mutations.
@@ -153,6 +163,12 @@ export function openDb(path: string) {
       "started_at = excluded.started_at, recovered_holds = excluded.recovered_holds, " +
       "recovered_micros = excluded.recovered_micros",
   );
+  const getRetiredSessionStmt = db.query<{ session_id: string }, [string]>(
+    "SELECT session_id FROM retired_ledger_sessions WHERE session_id = ?",
+  );
+  const retireSessionStmt = db.query(
+    "INSERT INTO retired_ledger_sessions (session_id, retired_at) VALUES (?, ?)",
+  );
   const getSettledHoldStmt = db.query<{ session_id: string; charged_micros: number }, [string]>(
     "SELECT session_id, charged_micros FROM settled_holds WHERE hold_id = ?",
   );
@@ -169,9 +185,10 @@ export function openDb(path: string) {
     return getSessionStmt.get()?.session_id ?? null;
   }
 
-  // The startup barrier. Changing sessions, refunding the abandoned holds, clearing prior-session replay
+  // The startup barrier. Fencing the previous session, refunding its abandoned holds, clearing its replay
   // tombstones, and publishing the new current session are one SQLite transaction. The caller may admit
-  // traffic only after this returns a definite result.
+  // traffic only after this returns a definite result. A retired session is permanently stale: this prevents
+  // a delayed ambiguous retry from reclaiming leadership after another proxy has already taken over.
   function beginSession(sessionId: string, atMs: number): BeginSessionResult {
     const apply = db.transaction(() => {
       const current = getSessionStmt.get();
@@ -181,6 +198,7 @@ export function openDb(path: string) {
           recoveredHolds: current.recovered_holds,
           recoveredMicros: current.recovered_micros,
         } as const;
+      if (getRetiredSessionStmt.get(sessionId)) return { outcome: "stale_session" } as const;
       const rows = listHoldsStmt.all();
       let recoveredMicros = 0;
       for (const row of rows) {
@@ -189,6 +207,7 @@ export function openDb(path: string) {
       }
       clearHoldsStmt.run();
       clearSettledHoldsStmt.run();
+      if (current) retireSessionStmt.run(current.session_id, atMs);
       setSessionStmt.run(sessionId, atMs, rows.length, recoveredMicros);
       return { outcome: "started", recoveredHolds: rows.length, recoveredMicros } as const;
     });

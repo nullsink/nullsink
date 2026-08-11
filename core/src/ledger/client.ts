@@ -142,6 +142,7 @@ export function makeLedgerSocketClient(opts: LedgerClientOpts): LedgerSocketClie
         recoveredMicros: result.body.recovered_micros,
       };
     }
+    if (errorCode(result) === "stale_session") return failFatal("ledger rejected stale proxy session");
     return fatalProtocol(LEDGER_START_SESSION_PATH, result);
   }
 

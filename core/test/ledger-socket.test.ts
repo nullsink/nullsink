@@ -166,6 +166,42 @@ test("after both sides restart, a new session atomically refunds the old proxy's
   await expect(oldProxy.getBalance(HASH)).rejects.toBeInstanceOf(FatalLedgerError);
 });
 
+test("a delayed retired-session start retry cannot reclaim leadership", async () => {
+  const f = fixture();
+  f.ledger.credit(HASH, 1_000);
+  let startCalls = 0;
+  let firstStartReached!: () => void;
+  let releaseFirstStart!: () => void;
+  const firstReached = new Promise<void>((resolve) => { firstStartReached = resolve; });
+  const firstRelease = new Promise<void>((resolve) => { releaseFirstStart = resolve; });
+  running = serveLedgerSocket({
+    path: f.socket,
+    balances: f.ledger,
+    hooks: { afterCommit: async (mutation) => {
+      if (mutation === "start_session" && startCalls++ === 0) {
+        firstStartReached();
+        await firstRelease;
+        throw new Error("drop delayed first-session response");
+      }
+    } },
+  });
+  const first = client(f.socket, S1, { retryDelayMs: 0 });
+  const second = client(f.socket, S2);
+
+  const delayedFirstStart = first.startSession();
+  await firstReached;
+  await second.startSession();
+  expect(await second.openHold(HASH, 300, H1)).toBe(true);
+  expect(f.ledger.getBalance(HASH)).toBe(700);
+
+  releaseFirstStart();
+  await expect(delayedFirstStart).rejects.toBeInstanceOf(FatalLedgerError);
+  expect(f.ledger.currentSession()).toBe(S2);
+  expect(f.ledger.getBalance(HASH)).toBe(700);
+  expect(await second.settleHold(H1, 200)).toBe(true);
+  expect(f.ledger.getBalance(HASH)).toBe(800);
+});
+
 test("unknown success bodies are ambiguous and replay the byte-identical mutation", async () => {
   const bodies: string[] = [];
   let attempt = 0;

@@ -60,6 +60,7 @@ export function createLedgerHandler(
       const body = parseStartSessionRequest(decoded);
       if (!body) return jsonError("invalid_request", 400);
       const result = balances.beginSession(body.session_id, now());
+      if (result.outcome === "stale_session") return jsonError("stale_session", 409);
       await hooks.afterCommit?.("start_session");
       return Response.json({
         result: result.outcome,

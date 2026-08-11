@@ -67,6 +67,43 @@ test("beginSession(same) preserves live holds; beginSession(new) refunds them an
   expect(ledger.getSessionBalance(S2, HASH)).toEqual({ stale: false, balance: 900 });
 });
 
+test("a retired session cannot reclaim leadership or refund the current session's hold", () => {
+  const ledger = openDb(":memory:");
+  ledger.credit(HASH, 1_000);
+  expect(ledger.beginSession(S1, 100).outcome).toBe("started");
+  expect(ledger.beginSession(S2, 110).outcome).toBe("started");
+  expect(ledger.openSessionHold(S2, HASH, 300, H1, 120)).toBe("opened");
+
+  expect(ledger.beginSession(S1, 130)).toEqual({ outcome: "stale_session" });
+  expect(ledger.currentSession()).toBe(S2);
+  expect(ledger.getBalance(HASH)).toBe(700);
+  expect(ledger.settleSessionHold(S2, H1, 200, 140)).toBe("settled");
+  expect(ledger.getBalance(HASH)).toBe(800);
+});
+
+test("a retired-session fence survives a ledger restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "nsk-session-fence-"));
+  const path = join(dir, "balances.db");
+  try {
+    const first = openDb(path);
+    first.credit(HASH, 1_000);
+    expect(first.beginSession(S1, 100).outcome).toBe("started");
+    expect(first.beginSession(S2, 110).outcome).toBe("started");
+    expect(first.openSessionHold(S2, HASH, 300, H1, 120)).toBe("opened");
+    first.db.close();
+
+    const restarted = openDb(path);
+    expect(restarted.beginSession(S1, 130)).toEqual({ outcome: "stale_session" });
+    expect(restarted.currentSession()).toBe(S2);
+    expect(restarted.getBalance(HASH)).toBe(700);
+    expect(restarted.settleSessionHold(S2, H1, 200, 140)).toBe("settled");
+    expect(restarted.getBalance(HASH)).toBe(800);
+    restarted.db.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the first session recovers a legacy pre-session hold", () => {
   const ledger = openDb(":memory:");
   ledger.credit(HASH, 500);
