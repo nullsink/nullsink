@@ -185,7 +185,7 @@ function okStream(): (url: string, init: any) => Promise<Response> {
 // FULL UpstreamKind set — so adding a kind without a row fails here, keeping the map complete. `up` either
 // returns the upstream Response (relay/mask path) or throws (the transport catch → timeout/unreachable).
 test("the upstream-outcome map is complete + unique: every non-2xx / transport failure → exactly one bucket", async () => {
-  const errSpy = spyOn(console, "error").mockImplementation(() => {}); // the masked rows each log ERROR
+  const errSpy = spyOn(console, "error").mockImplementation(() => {}); // operator-private + relayed problem rows log ERROR
   const json = (status: number, error: object) => new Response(JSON.stringify({ error }), { status, headers: { "content-type": "application/json" } });
   const cases: Array<{ label: string; up: () => Response; bucket: keyof typeof EMPTY.upstream }> = [
     { label: "genuine 429 → throttle", up: () => new Response("slow down", { status: 429, headers: { "content-type": "text/plain" } }), bucket: "throttle" },
@@ -197,7 +197,7 @@ test("the upstream-outcome map is complete + unique: every non-2xx / transport f
     { label: "401 → auth (our key)", up: () => new Response("nope", { status: 401 }), bucket: "auth" },
     { label: "500 → server", up: () => new Response("boom", { status: 500 }), bucket: "server" },
     { label: "404 not_found_error → notfound", up: () => json(404, { type: "not_found_error", message: "model: x" }), bucket: "notfound" },
-    { label: "409 → other (rare masked status)", up: () => new Response("conflict", { status: 409 }), bucket: "other" },
+    { label: "409 → other (rare relayed status)", up: () => new Response("conflict", { status: 409 }), bucket: "other" },
     { label: "TimeoutError → timeout", up: () => { throw Object.assign(new Error("timed out"), { name: "TimeoutError" }); }, bucket: "timeout" },
     { label: "ECONNREFUSED → unreachable", up: () => { throw new Error("ECONNREFUSED"); }, bucket: "unreachable" },
   ];
@@ -578,7 +578,7 @@ test("formatMetricsLine: model-not-found (upstream:notfound) rides the routine h
   ).toEqual({ level: "info", line: "served=1 req=6 upstream:notfound=5 (last 60m)" });
 });
 
-test("formatMetricsLine: a masked `other` status (rare 405/409/…) is a problem → WARN", () => {
+test("formatMetricsLine: a relayed `other` status (rare 405/409/…) is a problem → WARN", () => {
   expect(
     metrics.formatMetricsLine({ ...EMPTY, served: 4, requests: 5, upstream: { ...EMPTY.upstream, other: 1 } }, 60_000),
   ).toEqual({ level: "warn", line: "upstream:other=1 served=4 req=5 (last 1m)" });

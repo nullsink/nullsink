@@ -38,6 +38,22 @@ function isBillingError(text: string): boolean {
   return /insufficient_quota|billing/i.test(tag) || phrase.test(typeof err.message === "string" ? err.message : "");
 }
 
+// Did the provider reject OUR substituted upstream credential or permission? Status is usually 401/403, but
+// compatibility gateways sometimes misclassify it; honor stable structured type/code identifiers as well so
+// making unrelated statuses transparent cannot expose operator account state.
+function isOperatorAuthError(status: number, text: string): boolean {
+  if (status === 401 || status === 403 || status === 407) return true;
+  let err: any;
+  try {
+    err = JSON.parse(text)?.error;
+  } catch {
+    return false;
+  }
+  if (!err || typeof err !== "object") return false;
+  const tag = `${typeof err.type === "string" ? err.type : ""} ${typeof err.code === "string" ? err.code : ""}`;
+  return /authentication_error|permission_error|invalid_?api_?key|unauthorized|forbidden/i.test(tag);
+}
+
 // Did the upstream reject the MODEL ITSELF (not the request shape)? Handled uniformly across providers +
 // endpoints, whose status codes differ (verified live 2026-06-22): Anthropic /v1/messages → 404
 // `not_found_error`; OpenAI /v1/chat/completions → 404 and /v1/responses → 400, both carrying
@@ -57,12 +73,13 @@ export function isModelNotFound(status: number, text: string): boolean {
   return status === 404; // any other 404 on our fixed metered endpoints is a model-not-found
 }
 
-// Structured detail for the masked-error / model-not-found logs: the provider's stable error `type` (+ `code`
+// Structured detail for operator-private / model-not-found logs: the provider's stable error `type` (+ `code`
 // when present — OpenAI) and a length-capped `message`, read from `error.*` ONLY. Reading just `error.*`
 // structurally DROPS Anthropic's sibling `request_id` (an upstream correlation id we don't want in the
-// journal) and replaces the old indiscriminate 300-char raw-body slice. Safe to log: the masked path is our/
-// provider-side (key, billing, provider-down) or a model 404 — that message names OUR account state or the
-// rejected model id, never a prompt (prompt-echoing 4xx are RELAYED, not masked). Non-JSON → a short bounded
+// journal) and replaces the old indiscriminate 300-char raw-body slice. Safe to log: these paths are our
+// account state (key/billing) or a model 404 — that message names OUR account state or the rejected model id,
+// never a prompt. Other relayed errors do not log their bodies because any status can echo request content.
+// Non-JSON → a short bounded
 // slice (no request_id possible); JSON without `error.*` → "" (don't slice the raw — it may hold request_id).
 export function maskedErrorDetail(text: string): string {
   let parsed: any;
@@ -78,69 +95,58 @@ export function maskedErrorDetail(text: string): string {
   return [head, msg].filter(Boolean).join(": ");
 }
 
-// A non-OK upstream response is either the USER's fault (a request they can fix) or OURS / the provider's.
-// Relay the former verbatim; sanitize the latter into a stable native envelope. Safe transient categories
-// retain their retry semantics, but our key/billing state and every raw upstream body remain private.
+// A non-OK upstream response is relayed verbatim unless it exposes OUR upstream account state. The upstream's
+// status is not a reliable fault classifier: gateways and compatibility layers sometimes report request-
+// validation failures as 5xx, and replacing those bodies with `service_unavailable` leaves the caller unable
+// to fix the request. Keep only our credential/permission/billing failures opaque; everything else retains the
+// provider's exact status, body, and actionable detail.
 // The caller has already refunded the hold; `text` is the already-read upstream body.
 function relayOrSanitizeUpstream(provider: { id: string }, upstream: Response, text: string): Response {
   const s = upstream.status;
-  // Model not found — handled uniformly despite the providers' differing status codes (Anthropic 404; OpenAI
-  // 404 chat / 400 responses). The permissive prefix gate forwards dated snapshots we can't pre-confirm, so a
-  // typo'd or retired model surfaces HERE rather than at the door. Return our own clear `unsupported_model`
-  // (byte-for-byte the gate's own rejection — opaque about the provider) instead of a misleading masked 503
-  // OR the raw provider body. WARN: refunded + client-visible + user/config-fixable; the logged model id is
-  // what an operator adds to the sync scrub list if a bad id recurs. Counted as `upstream:notfound` (routine —
-  // the client's bad model, not ours), so the served↔req gap stays fully itemized.
+  const relay = (retryable: boolean) => {
+    const headers = scrubRespHeaders(upstream);
+    // Keep the existing explicit retry contract for transient statuses even when the upstream omitted it.
+    // This changes no body/status detail and prevents stock SDKs from treating an overload as terminal.
+    headers.set("x-should-retry", retryable ? "true" : "false");
+    return new Response(text, { status: s, statusText: upstream.statusText, headers });
+  };
+
+  const billing = isBillingError(text);
+  const auth = isOperatorAuthError(s, text);
+
+  // We replaced the caller's credentials with ours before forwarding, so an upstream auth/permission error
+  // describes OUR key. Likewise, every 402 and a structured billing/quota failure describes OUR provider
+  // account. Those are the only response bodies we suppress.
+  if (auth || billing || s === 402) {
+    log.error("upstream", `masked ${s} (refunded, operator-private): ${maskedErrorDetail(text)}`);
+    metrics.recordUpstream(auth ? "auth" : "billing");
+    return new Response(apiErrorBody(provider.id, 503, "service_unavailable"), {
+      status: 503,
+      headers: { "content-type": "application/json", "x-should-retry": "false" },
+    });
+  }
+
+  // Model not found — classify it uniformly despite the providers' differing statuses, but preserve the
+  // provider's exact response so the caller sees which model was rejected and why.
   if (isModelNotFound(s, text)) {
     metrics.recordUpstream("notfound");
     log.warn("upstream", `model not found upstream (refunded): ${maskedErrorDetail(text)}`);
-    return denyApi(provider, 400, "unsupported_model");
+    return relay(false);
   }
-  const billing = isBillingError(text);
-  // Relay ONLY clearly user-fixable request errors (bad request / unprocessable / payload too large), and
-  // only when they aren't a billing failure wearing a 400 (Anthropic's low-credit error is a 400). Anything
-  // else is our or the provider's side: our key (401/403), billing (402), routing (404), throttle (429),
-  // provider down (5xx). Relayed bodies are the upstream's OWN native envelope, already correctly shaped.
-  const relayable = ((s === 400 || s === 422) && !billing) || s === 413;
-  if (relayable) {
-    // Count the relayed user error so the served↔req gap is itemized in [metrics], not just inferable.
-    // It's the CLIENT's fixable request error (not ours / not the provider's), so it rides the routine
-    // INFO heartbeat rather than the WARN problem line, and we DON'T log the body per-event (a 4xx body
-    // can echo the user's prompt — the same leak the mask branch below is built to avoid).
-    metrics.recordUpstream("relayed4xx");
-    return new Response(text, {
-      status: s,
-      statusText: upstream.statusText,
-      headers: scrubRespHeaders(upstream),
-    });
+
+  // Everything else is transparent. Keep the existing aggregate taxonomy so operational metrics and the
+  // served↔request reconciliation remain stable while the caller gets the provider's real explanation.
+  const throttled = s === 429;
+  const overloaded = s === 529;
+  if (throttled) metrics.recordUpstream("throttle");
+  else if (s >= 500) metrics.recordUpstream("server");
+  else if (s === 400 || s === 413 || s === 422) metrics.recordUpstream("relayed4xx");
+  else metrics.recordUpstream("other");
+
+  if (!(s === 400 || s === 413 || s === 422)) {
+    log.error("upstream", `relayed ${s} (refunded; exact detail returned to caller)`);
   }
-  // Sanitized: never send the upstream body. Log the real status + safe structured detail server-side.
-  // Preserve safe transient semantics (genuine 429 and Anthropic 529 overload), while operator auth/billing
-  // failures stay opaque behind 503. An out-of-funds 429 is billing, not retryable rate limiting.
-  log.error("upstream", `masked ${s} (refunded, not relayed): ${maskedErrorDetail(text)}`);
-  const throttled = s === 429 && !billing; // a GENUINE vendor rate limit (an out-of-funds 429 is billing → 503)
-  const overloaded = s === 529 && !billing; // safe transient category; body is synthesized, never relayed raw
-  // Classify the masked outcome for the [metrics] trend (aggregate, no identity). Order matters: billing
-  // wins over a 429 (out-of-funds can wear a 429), then a genuine throttle, then our key (auth), then a
-  // provider 5xx. A model 404 is handled above; everything else (a rare 405/409/…) → `other`, so EVERY masked
-  // outcome is bucketed and the served↔req gap reconciles exactly.
-  if (throttled) metrics.recordUpstream("throttle"); // ceiling tripwire: vendor rate limit
-  else if (billing) metrics.recordUpstream("billing"); // out-of-funds — top up the account
-  else if (s === 401 || s === 403) metrics.recordUpstream("auth"); // our key/permission is wrong
-  else if (s >= 500) metrics.recordUpstream("server"); // provider degraded / overloaded
-  else metrics.recordUpstream("other"); // rare masked status (405/409/…) — bucketed, never an unexplained residual
-  const status = overloaded ? 529 : throttled ? 429 : 503;
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  const retryAfter = upstream.headers.get("retry-after");
-  if (retryAfter && /^\d+$/.test(retryAfter)) headers["retry-after"] = retryAfter;
-  // We know the internal category even though the body stays sanitized: transient throttle/server/overload
-  // retries; operator auth, billing, and unknown masked statuses do not. This avoids retry storms on permanent
-  // operator failures without exposing which permanent condition occurred.
-  const retryable = throttled || overloaded || (!billing && s >= 500);
-  headers["x-should-retry"] = retryable ? "true" : "false";
-  const code = overloaded ? "upstream_overloaded" : throttled ? "rate_limited" : "service_unavailable";
-  const errorType = overloaded && provider.id === "anthropic" ? "overloaded_error" : undefined;
-  return new Response(apiErrorBody(provider.id, status, code, undefined, errorType), { status, headers });
+  return relay(throttled || overloaded || s >= 500);
 }
 
 export type ProxyHandlerDeps = {

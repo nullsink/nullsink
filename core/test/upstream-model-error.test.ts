@@ -1,6 +1,6 @@
-// The model-not-found fix: an upstream that rejects the MODEL (Anthropic 404 not_found_error; OpenAI 404
-// chat / 400 responses, code model_not_found) must return our own clear `unsupported_model` 4xx — NOT a
-// masked 503, NOT the raw provider body. Plus the masked-error log scrub drops the upstream request_id.
+// Model-not-found classification spans provider-specific statuses (Anthropic 404; OpenAI 404/400), while
+// the wire response remains transparent so the caller gets the provider's exact actionable explanation.
+// The operational log still drops the upstream request_id.
 // The bodies below are captured VERBATIM from the live providers (real keys, 2026-06-22).
 import { test, expect, spyOn } from "bun:test";
 import { isModelNotFound, maskedErrorDetail, createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
@@ -58,7 +58,7 @@ const msg = (token: string) => new Request("https://proxy.local/v1/messages", {
   body: JSON.stringify({ model: "claude-opus-4-8", max_tokens: 16, messages: [{ role: "user", content: "hi" }] }),
 });
 
-test("handler: an upstream model 404 returns 400 unsupported_model (not a masked 503), fully refunded", async () => {
+test("handler: an upstream model 404 relays verbatim and is fully refunded", async () => {
   const warnSpy = spyOn(console, "error").mockImplementation(() => {}); // log.warn → console.error
   const { handler, balances } = makeHandler(async () => new Response(ANTHROPIC_404, { status: 404, headers: { "content-type": "application/json" } }));
   const hash = hashToken("pr_m");
@@ -66,8 +66,9 @@ test("handler: an upstream model 404 returns 400 unsupported_model (not a masked
   const before = balances.getBalance(hash)!;
   const res = await handler(msg("pr_m"));
 
-  expect(res.status).toBe(400); // NOT 503
-  expect(JSON.parse(await res.text()).error.message).toBe("unsupported_model"); // nullsink's own envelope, same as the gate
+  expect(res.status).toBe(404);
+  expect(await res.text()).toBe(ANTHROPIC_404);
+  expect(res.headers.get("x-should-retry")).toBe("false");
   expect(balances.getBalance(hash)).toBe(before); // refunded — the failed request cost nothing
 
   const line = warnSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
