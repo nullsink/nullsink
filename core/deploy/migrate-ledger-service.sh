@@ -199,6 +199,16 @@ validate_prepared_snapshot() {
   fi
 }
 
+validate_prepared_cutover() {
+  local unit state
+  validate_prepared_snapshot
+  for unit in caddy "$PROXY_UNIT" "$PAYMENTS_UNIT" "$LEDGER_UNIT"; do
+    ! is_active "$unit" || die "prepared cutover requires $unit to remain stopped; roll back and prepare again"
+  done
+  state="$(marker_value state)"
+  if [ "$state" = existing ] || [ -f "$PENDING_STATE/pending.db" ]; then financial_gate; fi
+}
+
 validate_state() {
   if [ -f "$ACTIVATED_MARKER" ]; then
     [ -f "$PREPARED_MARKER" ] || die "activation marker exists without preparation"
@@ -207,7 +217,7 @@ validate_state() {
     echo "ledger-extraction: active state is complete"
     return 0
   fi
-  validate_prepared_snapshot
+  validate_prepared_cutover
   echo "ledger-extraction: prepared state is complete"
 }
 
@@ -257,7 +267,7 @@ prepare() {
       echo "ledger-extraction: already activated"
       return 0
     fi
-    validate_prepared_snapshot
+    validate_prepared_cutover
     echo "ledger-extraction: already prepared"
     return 0
   fi
@@ -325,6 +335,7 @@ rollback() {
   [ ! -f "$ACTIVATED_MARKER" ] || die "traffic was activated; pre-extraction rollback is forbidden"
   validate_marker_contract
   systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT" "$LEDGER_UNIT" 2>/dev/null || true
+  systemctl disable "$LEDGER_UNIT" 2>/dev/null || true
   restore_recorded_symlink proxy
   restore_recorded_symlink payments
   for unit in nullsink-proxy.service nullsink-payments.service backup.service status-check.service; do

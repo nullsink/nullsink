@@ -160,6 +160,11 @@ deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, h
   warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
   apply_repo_config                      # refresh units + edge from the now-current deploy/; timers remain stopped
   restart_isolation_sidecars             # one-time uid transition only; finalized boxes retain the no-bounce policy
+  if [ "$initial_cutover" -eq 1 ]; then
+    # Close the download/configuration window: the prepared DB and stopped financial state must still match the
+    # manifest at the last possible point before any new service can open the ledger or mutate pending.db.
+    "$CUTOVER_MIGRATION" --validate
+  fi
   restart_app                            # one ordered ledger/proxy/payments transaction
 
   if health_ok_app; then

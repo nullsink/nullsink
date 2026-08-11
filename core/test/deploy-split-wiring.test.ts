@@ -282,7 +282,13 @@ test("the first isolated deploy refuses before any release mutation until explic
   expect(deployScript.slice(marker, suspend)).not.toContain("prepare_service_isolation");
   expect(deployScript.indexOf("CUTOVER_ROLLBACK_ARMED=1")).toBeLessThan(binary);
   expect(deployScript.indexOf("trap restore_deploy_on_exit EXIT")).toBeLessThan(binary);
-  expect(deployScript.indexOf('"$CUTOVER_MIGRATION" --validate')).toBeLessThan(binary);
+  const validations = [...deployScript.matchAll(/"\$CUTOVER_MIGRATION" --validate/g)].map(
+    (match) => match.index,
+  );
+  expect(validations).toHaveLength(2);
+  expect(validations[0]).toBeLessThan(binary);
+  expect(validations[1]).toBeGreaterThan(apply);
+  expect(validations[1]).toBeLessThan(restart);
   expect(deployScript).toContain("rollback_initial_cutover");
   expect(deployScript).toContain("refusing an unsafe automatic rollback");
   expect(deployScript.slice(apply, restart)).not.toContain("enable_timers");

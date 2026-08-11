@@ -43,6 +43,7 @@ function workspace(withHold = false) {
   const pendingState = join(state, "nullsink-payments");
   for (const dir of [etc, state, systemd, binDir, fakeBin, systemdState, oldState, pendingState])
     mkdirSync(dir, { recursive: true });
+  writeFileSync(join(systemdState, "nullsink-ledger.stopped"), "");
 
   const user = Bun.spawnSync(["id", "-un"]).stdout.toString().trim();
   const group = Bun.spawnSync(["id", "-gn"]).stdout.toString().trim();
@@ -196,6 +197,7 @@ test("prepare copies the exact ledger only after draining admission, and rollbac
   expect(existsSync(join(w.systemd, "nullsink-ledger.service"))).toBe(false);
   expect(existsSync(join(w.state, "nullsink-ledger"))).toBe(false);
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(false);
+  expect(readFileSync(w.systemctlLog, "utf8")).toContain("disable nullsink-ledger");
 });
 
 test("a fresh box prepares the empty ledger identity without stopping any service", () => {
@@ -212,6 +214,10 @@ test("a fresh box prepares the empty ledger identity without stopping any servic
     "state=fresh\nsource_fingerprint=none",
   );
 
+  Bun.spawnSync(
+    [join(w.root, "fake-bin", "systemctl"), "stop", "caddy", "nullsink-proxy", "nullsink-payments"],
+    { env: w.env },
+  );
   const repeated = run("--prepare", w.env);
   expect(repeated.exitCode, repeated.stderr.toString()).toBe(0);
   expect(repeated.stdout.toString()).toContain("already prepared");
@@ -322,6 +328,7 @@ test("prepare refuses rollback-unsafe payment state and restores the old topolog
 test("prepared validation fails closed when migrated or rollback state is incomplete", () => {
   const missingLedger = workspace();
   expect(run("--prepare", missingLedger.env).exitCode).toBe(0);
+  expect(run("--validate", missingLedger.env).exitCode).toBe(0);
   rmSync(join(missingLedger.state, "nullsink-ledger", "balances.db"));
   const ledgerResult = run("--validate", missingLedger.env);
   expect(ledgerResult.exitCode).toBe(1);
@@ -344,7 +351,30 @@ test("prepared validation fails closed when migrated or rollback state is incomp
   const sourceResult = run("--validate", changedSource.env);
   expect(sourceResult.exitCode).toBe(1);
   expect(sourceResult.stderr.toString()).toContain("frozen source ledger fingerprint changed");
-});
+}, 15_000);
+
+test("prepared validation refuses restarted services and newly created payment work", () => {
+  const w = workspace();
+  expect(run("--prepare", w.env).exitCode).toBe(0);
+
+  for (const unit of ["caddy", "nullsink-proxy", "nullsink-payments", "nullsink-ledger"]) {
+    Bun.spawnSync([join(w.root, "fake-bin", "systemctl"), "start", unit], { env: w.env });
+    const activeResult = run("--validate", w.env);
+    expect(activeResult.exitCode, unit).toBe(1);
+    expect(activeResult.stderr.toString()).toContain(
+      `prepared cutover requires ${unit} to remain stopped`,
+    );
+    Bun.spawnSync([join(w.root, "fake-bin", "systemctl"), "stop", unit], { env: w.env });
+  }
+
+  const pending = new Database(join(w.pendingState, "pending.db"));
+  pending.run("INSERT INTO pending_orders VALUES ('created-after-prepare')");
+  pending.close();
+
+  const quietResult = run("--validate", w.env);
+  expect(quietResult.exitCode).toBe(1);
+  expect(quietResult.stderr.toString()).toContain("open payment orders must settle or expire");
+}, 15_000);
 
 test("a failed financial gate publishes no marker and automatically restores the old topology", () => {
   const w = workspace();
