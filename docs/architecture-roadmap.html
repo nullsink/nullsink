@@ -101,13 +101,13 @@
       </div>
       <div class="subtitle">architecture roadmap</div>
     </div>
-    <div class="stamp">as of 2026-08-06<br>after v1.12.0 · Step 4 ready</div>
+    <div class="stamp">as of 2026-08-11<br>production v1.13.0 · Step 4 shipped</div>
   </header>
 
   <div class="diagram">
     <svg viewBox="0 0 1400 1840" role="img" aria-labelledby="roadmap-title roadmap-desc">
       <title id="roadmap-title">nullsink current architecture and target app-box boundary</title>
-      <desc id="roadmap-desc">Caddy routes to separate proxy and payments processes. Step 4 implements distinct operating-system identities, environment files, state roots, database read groups, and a credit-socket group; release and production migration remain pending. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector when it is online. Version 1.12.0 removes operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap step five, a third ledger service owns balances and the proxy becomes stateless.</desc>
+      <desc id="roadmap-desc">Caddy routes to separate proxy and payments processes. Step 4 is live in production: distinct operating-system identities, root-owned environment files, state roots, database read groups, and a credit-socket group enforce the service boundary. The proxy still embeds the balance ledger. Payments delivers durable credits over a Unix socket and definite acknowledgement scrubs the token hash and amount. Coordinated encrypted recovery artifacts and aggregate reports cross a restricted read-only export to an hourly Raspberry Pi collector when it is online. Version 1.12.0 removed operator mutation and recovery commands while temporarily retaining two read-only live views for balances and financials. Anthropic and OpenAI are reached directly, while only Tinfoil uses an enclave-verifying sidecar. After roadmap step five, a third ledger service owns balances and the proxy becomes stateless.</desc>
       <defs>
         <marker id="arrowBone" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#c9c9c2"/></marker>
         <marker id="arrowMuted" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#8f8f88"/></marker>
@@ -119,7 +119,7 @@
       <!-- CURRENT SYSTEM -->
       <rect class="panel" x="28" y="28" width="1344" height="1160" rx="18"/>
       <text class="section-kicker" x="60" y="70">CURRENT SYSTEM</text>
-      <text class="section-title" x="60" y="101">two code trust domains · OS isolation ready</text>
+      <text class="section-title" x="60" y="101">two code + OS trust domains · production live</text>
 
       <!-- user and edge -->
       <rect class="node" x="1010" y="70" width="300" height="70" rx="10"/>
@@ -136,7 +136,7 @@
       <!-- app box -->
       <rect class="plane" x="80" y="320" width="1240" height="455" rx="14"/>
       <text class="section-kicker" x="105" y="351">APP BOX</text>
-      <text class="copy-small" x="1205" y="351" text-anchor="end">separate uid · env · state · production migration pending</text>
+      <text class="copy-small" x="1205" y="351" text-anchor="end">separate uid · env · state · enforced in production</text>
 
       <!-- caddy routing -->
       <path class="edge-muted" d="M610 270 L610 300 L365 300 L365 385" marker-end="url(#arrowMuted)"/>
@@ -177,8 +177,8 @@
       <text class="label-acid" x="700" y="657" text-anchor="middle">credit.sock</text>
 
       <!-- Step 4 OS boundary callout -->
-      <rect class="node-planned" x="270" y="720" width="860" height="42" rx="8"/>
-      <text class="label-acid" x="700" y="746" text-anchor="middle">Step 4 ready · separate uid / env / state · nsk retains group-read access only</text>
+      <rect class="node-shipped" x="270" y="720" width="860" height="42" rx="8"/>
+      <text class="label-acid" x="700" y="746" text-anchor="middle">Step 4 shipped v1.13 · separate uid / env / state · nsk group-read only</text>
 
       <!-- provider egress -->
       <text class="section-kicker" x="100" y="820">PROVIDER EGRESS</text>
@@ -302,7 +302,7 @@
   <div class="legend" aria-label="Diagram legend">
     <strong>status</strong>
     <span class="legend-item"><span class="swatch shipped"></span>shipped milestone</span>
-    <span class="legend-item"><span class="swatch planned"></span>implemented/pending or next boundary</span>
+    <span class="legend-item"><span class="swatch planned"></span>next boundary</span>
     <span class="legend-item"><span class="swatch tee"></span>verified external TEE</span>
     <span class="legend-item"><span class="swatch exception"></span>known boundary exception</span>
     <strong>links</strong>
@@ -311,7 +311,7 @@
     <span class="legend-item">dotted · Tor</span>
     <span class="legend-item" style="color: var(--acid)">acid · credit crossing</span>
   </div>
-  <div class="foot">Step 4 is implemented in source but remains pending release and production migration. After Step 5, the app box has the target three services; a nullsink TEE and public-network changes remain later work.</div>
+  <div class="foot">Step 4 is shipped and production-proven. Step 5 extracts the ledger and makes the metering proxy stateless; a nullsink TEE and public-network changes remain later work.</div>
 </main>
 </body>
 </html>
