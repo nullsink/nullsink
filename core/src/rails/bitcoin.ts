@@ -3,8 +3,8 @@
 // confirmed deposits but holds NO spend authority — no spend method is exposed (the "watch-only online,
 // cold custody" invariant). This module only talks to that watch-only descriptor wallet.
 //
-// bitcoind RPC needs auth (rpcuser/rpcpassword or the cookie) and is wallet-scoped, so BITCOIN_RPC_URL is
-// the wallet endpoint, e.g. http://127.0.0.1:8332/wallet/nullsink.
+// bitcoind RPC needs auth and is wallet-scoped. The app always reaches the dedicated watch-only node box;
+// it never runs Bitcoin Core locally.
 import * as log from "../log";
 import { numEnv } from "../env";
 import { btcUsd } from "./rate";
@@ -29,6 +29,15 @@ export function makeBitcoin(opts: BitcoinOptions) {
     opts.rpcUser != null ? "Basic " + Buffer.from(`${opts.rpcUser}:${opts.rpcPassword ?? ""}`).toString("base64") : undefined;
 
   async function rpc(method: string, params: unknown[] = []): Promise<any> {
+    let endpoint: URL;
+    try {
+      endpoint = new URL(opts.rpcUrl);
+    } catch {
+      throw new BitcoinError("BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint");
+    }
+    if (!["http:", "https:"].includes(endpoint.protocol)) {
+      throw new BitcoinError("BITCOIN_RPC_URL must be an explicit HTTP(S) wallet endpoint");
+    }
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (authHeader) headers.authorization = authHeader;
     // Force a fresh TCP connection per RPC instead of reusing Bun's fetch keep-alive pool. bitcoind closes
@@ -36,9 +45,9 @@ export function makeBitcoin(opts: BitcoinOptions) {
     // that, so the pooled socket is already dead by the next tick — Bun reuses it and the request fails with
     // "The socket connection was closed unexpectedly", silently blinding deposit detection (an on-chain,
     // confirmed payment never credits) while createAddress's burst of back-to-back calls stays inside the
-    // window and works, masking the outage. A new connection per call is negligible against local RPC.
+    // window and works, masking the outage. A new connection per call is negligible against node RPC.
     headers.connection = "close";
-    const res = await fetchImpl(opts.rpcUrl, {
+    const res = await fetchImpl(endpoint, {
       method: "POST",
       headers,
       body: JSON.stringify({ jsonrpc: "1.0", id: "0", method, params }),
@@ -115,7 +124,7 @@ export function makeBitcoin(opts: BitcoinOptions) {
   return { createAddress, incomingTransfers };
 }
 
-const RPC_URL = process.env.BITCOIN_RPC_URL ?? "http://127.0.0.1:8332/wallet/nullsink";
+const RPC_URL = process.env.BITCOIN_RPC_URL ?? "";
 const RPC_USER = process.env.BITCOIN_RPC_USER;
 const RPC_PASSWORD = process.env.BITCOIN_RPC_PASSWORD;
 const TIMEOUT_MS = numEnv("BITCOIN_TIMEOUT_MS", 30_000, 100, 600_000);

@@ -119,7 +119,7 @@ HOST=127.0.0.1
 PAYMENTS_PORT=8081
 PAY_RAILS=monero
 MONERO_WALLET_RPC_URL=http://127.0.0.1:18083/json_rpc
-BITCOIN_RPC_URL=http://127.0.0.1:8332/wallet/nullsink
+BITCOIN_RPC_URL=http://10.55.0.2:8332/wallet/nullsink
 BITCOIN_RPC_USER=
 BITCOIN_RPC_PASSWORD=
 EOF
@@ -290,9 +290,6 @@ restart_legacy_after_error() {
 }
 
 prepare() {
-  if [ ! -f "$PREPARED_MARKER" ] && systemctl is-active --quiet bitcoind 2>/dev/null; then
-    die "active same-box bitcoind still uses the legacy operator uid; disable or move it before Step 4"
-  fi
   ensure_identities
   split_or_create_envs
   ensure_directories

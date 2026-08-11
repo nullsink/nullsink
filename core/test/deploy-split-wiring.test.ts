@@ -111,7 +111,6 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(migration).toContain('usermod -a -G "$PROXY_READ_GROUP,$PAYMENTS_READ_GROUP" "$BACKUP_USER"');
   expect(migration).toContain('usermod -a -G "$CREDIT_GROUP" "$PAYMENTS_USER"');
   expect(migration).not.toMatch(/usermod -a -G "\$CREDIT_GROUP" "\$(?:PROXY|BACKUP)_USER"/);
-  expect(migration).toContain("active same-box bitcoind still uses the legacy operator uid");
   expect(migration).toContain('chown "root:$ROOT_GROUP" "$role_env"');
   expect(migration).toContain('chmod 0600 "$role_env"');
   expect(migration).not.toContain("nullsink-wallet");
@@ -247,8 +246,8 @@ test("the first isolated deploy refuses before any release mutation until explic
 
 test("release archives and root extraction cannot inherit the CI runner identity", () => {
   expect(
-    releaseWorkflow.match(/tar --owner=0 --group=0 --numeric-owner -czf/g)?.length,
-  ).toBe(2);
+    releaseWorkflow.match(/tar --owner=0 --group=0 --numeric-owner/g)?.length,
+  ).toBe(3);
   expect(deployLib.match(/tar --no-same-owner -x/g)?.length).toBe(2);
   expect(deployLib).toContain('chown -R root:root "$staging/deploy"');
   expect(deployLib).toContain('chown -R root:root "$staging"');

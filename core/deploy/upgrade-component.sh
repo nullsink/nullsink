@@ -25,7 +25,6 @@ usage() {
 Usage: sudo upgrade-component.sh <component>
 
 Components:
-  bitcoin         Bitcoin Core on a dedicated node box
   monero-wallet   monero-wallet-rpc + monero-wallet-cli on the app box
   tinfoil         tinfoil-proxy on the app box
 EOF
@@ -49,17 +48,6 @@ desired=""
 declare -a binaries=()
 
 case "$component" in
-  bitcoin)
-    unit="bitcoind"
-    desired="Bitcoin Core ${BITCOIN_VERSION}"
-    binaries=(bitcoind bitcoin-cli)
-    # This path is deliberately node-box-only. A local bitcoind on the app box is legacy architecture;
-    # refusing here prevents a day-two tool from quietly perpetuating it.
-    if systemctl cat nullsink-proxy.service >/dev/null 2>&1; then
-      echo "refusing bitcoin upgrade on an app box; run it on the dedicated node box" >&2
-      exit 2
-    fi
-    ;;
   monero-wallet)
     unit="monero-wallet-rpc"
     desired="Monero wallet ${MONERO_VERSION}"
@@ -82,7 +70,7 @@ case "$component" in
 esac
 
 # This is an upgrader, not a bootstrap/recovery command: do not silently enable or start something that the
-# operator intentionally left absent/down. setup.sh/setup-nodes.sh own first install; incident recovery stays
+# operator intentionally left absent/down. setup.sh owns first install; incident recovery stays
 # explicit. Requiring a healthy active starting point also makes rollback meaningful and testable.
 systemctl is-enabled --quiet "$unit" ||
   { echo "refusing: $unit is not enabled; use the applicable setup path first" >&2; exit 2; }
@@ -96,15 +84,6 @@ done
 component_healthy() {
   systemctl is-active --quiet "$unit" || return 1
   case "$component" in
-    bitcoin)
-      local chain wallet
-      chain="$("$BIN_DIR/bitcoin-cli" -datadir=/var/lib/bitcoind getblockchaininfo 2>/dev/null)" ||
-        return 1
-      wallet="$("$BIN_DIR/bitcoin-cli" -datadir=/var/lib/bitcoind -rpcwallet=nullsink getwalletinfo 2>/dev/null)" ||
-        return 1
-      grep -q '"initialblockdownload":[[:space:]]*false' <<<"$chain" &&
-        grep -q '"private_keys_enabled":[[:space:]]*false' <<<"$wallet"
-      ;;
     monero-wallet)
       local response
       response="$(curl -sS --max-time 10 http://127.0.0.1:18083/json_rpc \
@@ -133,7 +112,6 @@ wait_healthy() {
 
 live_is_pinned() {
   case "$component" in
-    bitcoin) bitcoin_is_pinned ;;
     monero-wallet) monero_wallet_is_pinned ;;
     tinfoil) tinfoil_proxy_is_pinned ;;
   esac
@@ -141,7 +119,6 @@ live_is_pinned() {
 
 stage_component() {
   case "$component" in
-    bitcoin) stage_verified_bitcoind "$1" ;;
     monero-wallet) stage_verified_monero_wallet "$1" ;;
     tinfoil) stage_verified_tinfoil_proxy "$1" ;;
   esac
@@ -149,7 +126,6 @@ stage_component() {
 
 staged_is_pinned() {
   case "$component" in
-    bitcoin) bitcoin_binary_matches_pin "$1/bitcoind" ;;
     monero-wallet) monero_wallet_binary_matches_pin "$1/monero-wallet-rpc" ;;
     tinfoil) echo "$TINFOIL_PROXY_SHA256_X64  $1/tinfoil-proxy" | sha256sum -c --status - ;;
   esac
@@ -157,7 +133,6 @@ staged_is_pinned() {
 
 current_description() {
   case "$component" in
-    bitcoin) "$BIN_DIR/bitcoind" --version 2>/dev/null | sed -n '1p' ;;
     monero-wallet) "$BIN_DIR/monero-wallet-rpc" --version 2>/dev/null | sed -n '1p' ;;
     tinfoil) sha256sum "$BIN_DIR/tinfoil-proxy" | cut -d' ' -f1 | sed 's/^/sha256:/' ;;
   esac

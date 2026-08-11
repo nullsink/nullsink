@@ -3,11 +3,11 @@
 Everything the production box runs that is *not* the app binary itself: the systemd units that
 supervise it, the operator scripts those units invoke, the public-edge config, and the firewall.
 
-The box is **source-free**. It runs the two compiled server binaries
+The app box is **source-free**. It runs the two compiled server binaries
 (`/usr/local/lib/nullsink/current-proxy` and `current-payments`) plus the scripts in this directory; it has
-no `src/`, no `cli/`, and no Bun. This whole directory ships to the box as a release tarball
-(`deploy-<tag>.tar.gz`, built by `.github/workflows/release.yml`) and extracts to `/opt/nullsink/deploy/`.
-The units' `ExecStart` lines point straight at these paths.
+no `src/`, no `cli/`, and no Bun. The top-level app files ship as `deploy-<tag>.tar.gz` and extract to
+`/opt/nullsink/deploy/`; `node-box/` ships separately and is excluded from that archive. App units'
+`ExecStart` lines point straight at the app paths.
 
 The app is **two processes and two OS principals**, split by privilege: `nullsink-proxy` serves the metered
 `/v1` paths and owns `balances.db`; `nullsink-payments` serves `/buy`, `/order-status`, `/rails`, runs the
@@ -25,11 +25,11 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
 | `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Drains the root backup/status one-shots before replacing their scripts, atomically swaps both binary symlinks in lockstep, refreshes units + edge, resumes timers only after health, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
-| `upgrade-component.sh` | Narrow day-two upgrade for one pinned external component: `bitcoin` on its dedicated node box, or `monero-wallet` / `tinfoil` on the app box. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
+| `upgrade-component.sh` | Narrow day-two app-box upgrade for `monero-wallet` or `tinfoil`. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
 | `install-nsk.sh` | Installs the optional read-only live balances/financials CLI. |
-| `setup-nodes.sh` | Bootstrap for a dedicated bitcoind **node box** (WireGuard-reached; no app, no ledger, no alerting). |
+| `node-box/` | Source for the separately packaged dedicated Bitcoin node day-two bundle. It is excluded from app release archives. Fresh provisioning moves to Ansible (issue #162). |
 
 ### Operator & break-glass scripts (run by units or by hand)
 | File | Role |
@@ -41,11 +41,11 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | `backup-report.sh` | Builds the versioned privacy-safe JSON report from backup snapshots: daily/asset revenue, aggregate liability, and open/undelivered-credit health—never token/payment linkage. |
 | `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` to replace the live DBs, re-arm the credit outbox, and restart both services. |
 | `backup-collector/` | Role-specific Raspberry Pi pull collector: restricted production export, hourly systemd pull, ciphertext/report retention and freshness validation, plus the recovery-drill runbook. Its units are deliberately outside the app box's top-level install glob. |
-| `regen-bitcoin-rpcauth.sh` | Break-glass: regenerate bitcoind's `rpcauth` + payments' RPC password as one matched pair. The cure for a BTC-rail 401. |
+| `node-box/regen-rpcauth.sh` | Node-only break-glass rotation of bitcoind `rpcauth`; prints the matched app password once. |
 
 ### systemd units & timers
-`nullsink-proxy.service` + `nullsink-payments.service` (the app's two halves) · `bitcoind.service` ·
-`monero-wallet-rpc.service` (the two rail watchers) ·
+`nullsink-proxy.service` + `nullsink-payments.service` (the app's two halves) ·
+`monero-wallet-rpc.service` (the local XMR watcher) ·
 `tinfoil-proxy.service` (the Tinfoil verifying proxy / enclave attestation; installed when `TINFOIL_API_KEY` is set) ·
 `nullsink-bitcoin-label-export.service` · `backup.service` + `backup.timer` · `status-check.service` + `status-check.timer` ·
 `status-alert@.service` (the templated `OnFailure=` paging sink).
@@ -53,7 +53,7 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 ### Public edge & firewall
 `Caddyfile` (TLS + reverse proxy + security headers; a host-agnostic `{$NULLSINK_DOMAIN}` template) ·
 `nftables.conf` (app box: default-deny inbound; only 22 / 80 / 443) ·
-`nftables-nodes.conf` (node box: default-deny inbound; only 22 / WireGuard, bitcoind RPC solely across `wg0`).
+The standalone node-box artifact carries its own firewall: default-deny inbound, with bitcoind RPC only across `wg0`.
 
 ## Two things to know
 
@@ -62,8 +62,8 @@ nullsink's two server binaries, optional read-only `nsk`, client UI, and deploy 
 watcher or attestation sidecar. For an existing box, activate one refreshed dependency pin explicitly:
 
 ```sh
-# Dedicated node box
-sudo /opt/nullsink/deploy/upgrade-component.sh bitcoin
+# Dedicated node box (from the separately downloaded node-box release bundle)
+sudo ./upgrade.sh
 
 # App box
 sudo /opt/nullsink/deploy/upgrade-component.sh monero-wallet
@@ -73,14 +73,13 @@ sudo /opt/nullsink/deploy/upgrade-component.sh tinfoil
 Each command refuses the wrong box role or an inactive/unconfigured target, verifies the download before
 downtime, requires a healthy rollback baseline both before and after staging, preserves the previous binaries
 under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target service, and rolls back
-automatically if the target does not recover. Concurrent upgrade attempts are rejected. `setup.sh` and
-`setup-nodes.sh` remain bootstrap tools for fresh or incomplete boxes, not routine dependency upgraders.
+automatically if the target does not recover. Concurrent upgrade attempts are rejected. App bootstrap remains
+in `setup.sh` until the Ansible replacement is proven; the node bundle deliberately has no bootstrap script.
 
-**The app-box layout is deliberately flat.** The `install_units` glob
-(`deploy/*.service`/`*.timer`), app unit paths, and operator references expect app-box files directly under
-`deploy/`. Keep new app-box units/scripts at that top level. A bundle for a different host role belongs in
-an explicit subdirectory, as `backup-collector/` does; this keeps its Pi-only units out of the app install
-glob while still including them in the release tarball and deploy lint. (The lint runner lives in
+**The app-box layout is deliberately flat.** `install_units` uses an explicit app-unit allowlist. Keep app
+units/scripts directly under `deploy/`; other host roles belong in isolated bundles. `node-box/` is packaged
+as `nullsink-node-box-<tag>.tar.gz` and excluded from `deploy-<tag>.tar.gz`, so an app release physically
+cannot install or manage bitcoind. (The lint runner lives in
 [`scripts/lint.sh`](../scripts/lint.sh), *not* here — it is a dev/CI tool.)
 
 **Nothing box-specific is committed.** Per-box config is split by authority:
@@ -103,9 +102,6 @@ Review and run `migrate-service-isolation.sh --prepare` during a financial quiet
 rerun `/opt/nullsink/deploy/deploy.sh <tag>`. Preparation stops the old app and timers, checks that there are
 no holds, open orders, or undelivered/partial credits, copies and verifies both databases, splits the root-
 owned env files, and leaves the legacy layout and sidecar permissions untouched for rollback.
-Preparation also refuses an active same-box `bitcoind`: the supported app-box topology uses the dedicated
-node box, and silently reusing the read-only operator uid for a daemon would defeat the new boundary.
-
 After the isolated services pass health and access checks, create a new encrypted artifact and prove its
 offline dry-run restore. Only then run `migrate-service-isolation.sh --finalize`; this retains the legacy
 copy but makes it root-only. Finalization is never automatic.

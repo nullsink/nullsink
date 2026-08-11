@@ -86,6 +86,15 @@ test("rpc surfaces HTTP and JSON-RPC errors as BitcoinError", async () => {
   await expect(makeBitcoin({ ...CFG, fetchImpl: router({}) }).createAddress()).rejects.toBeInstanceOf(BitcoinError);
 });
 
+test("the app requires an explicit HTTP(S) Bitcoin RPC endpoint", async () => {
+  const fetchImpl = router({ getnewaddress: () => "unused" });
+  for (const rpcUrl of ["", "node.test/wallet/nullsink", "ftp://node.test/wallet/nullsink"]) {
+    await expect(
+      makeBitcoin({ ...CFG, rpcUrl, fetchImpl }).createAddress(),
+    ).rejects.toThrow(/explicit HTTP\(S\)/);
+  }
+});
+
 test("incomingTransfers drops a UTXO whose sats exceed safe-integer precision (never mis-credits)", async () => {
   // The BTC analog of Monero's lossy-amount guard: amount is a float BTC value; amount × 1e8 can exceed
   // Number.MAX_SAFE_INTEGER, where Math.round would lose precision. Such a UTXO must be SKIPPED + warned,

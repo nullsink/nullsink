@@ -10,7 +10,7 @@ artifact is [`architecture-roadmap.png`](architecture-roadmap.png).
 
 | Milestone | State | Evidence / remaining boundary |
 | --- | --- | --- |
-| Dedicated Bitcoin node box | **Shipped** in v1.4.x | `deploy/setup-nodes.sh`; RPC crosses WireGuard. |
+| Dedicated Bitcoin node box | **Shipped** in v1.4.x | Separate `nullsink-node-box-<tag>.tar.gz` release artifact; RPC crosses WireGuard. |
 | Proxy/payments process split | **Shipped** in v1.8.0 | Two binaries, two HTTP ports, path routing, transactional credit outbox. |
 | Payment→prompt credit crossing | **Shipped** | At-least-once delivery over a pathname Unix socket; `applied_orders` makes application idempotent. |
 | Delivered-link scrubbing | **Shipped** in v1.10.1 | Definite ack atomically clears hash/amount; 11 legacy acknowledgements migrated idempotently in production; restores verify tombstones against the ledger. |

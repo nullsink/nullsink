@@ -193,18 +193,19 @@ artifacts and publishes them as a GitHub Release:
 - **`nullsink-proxy-linux-x64`** — the proxy trust domain: the metered `/v1` proxy and the balance ledger.
 - **`nullsink-payments-linux-x64`** — the payments trust domain: `/buy`, the pay rails, and the settlement poller.
 - **`nsk-linux-x64`** — optional read-only live balances and financials.
-- **`deploy-<tag>.tar.gz`** — the `core/deploy/` tree (systemd units, Caddyfile, deploy + backup scripts); the box extracts this instead of cloning source.
+- **`deploy-<tag>.tar.gz`** — the app deploy tree (app-only systemd units, Caddyfile, deploy + backup scripts); it physically excludes the node-box bundle.
+- **`nullsink-node-box-<tag>.tar.gz`** — standalone Bitcoin Core node day-two tooling; never installed on the app box.
 - **`nullsink-ui-<tag>.tar.gz`** — the static purchase UI (`client/dist`); Caddy serves it at the edge.
-- **`SHA256SUMS`** — checksums over the five artifacts; the box verifies with `sha256sum -c` before installing.
+- **`SHA256SUMS`** — checksums over the six artifacts; the box verifies with `sha256sum -c` before installing.
 
 On a box, `core/deploy/deploy.sh <tag>` fetches and checksum-verifies those artifacts,
 atomically swaps both binary symlinks in lockstep plus the UI symlink, refreshes the
 systemd units and Caddy config, restarts, and health-gates each service's `/healthz` —
 rolling the symlinks back to the previous release if either service is unhealthy.
 It deliberately does **not** install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`.
-Pinned runtime dependency updates take effect only on a fresh setup or an applicable setup
-rerun: `core/deploy/setup.sh` for an app box, and `core/deploy/setup-nodes.sh` for a dedicated
-Bitcoin node box. First-time app bootstrap is `core/deploy/setup.sh`.
+First-time app bootstrap remains `core/deploy/setup.sh` until the planned Ansible replacement is proven.
+The node bundle has day-two upgrade and credential-rotation tools; declarative fresh-node provisioning is
+tracked in issue #162.
 
 ## License
 
