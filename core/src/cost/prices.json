@@ -383,14 +383,6 @@
     "cache_write": 0,
     "cache_write_1h": 0
   },
-  "kimi-k2-6": {
-    "provider": "tinfoil",
-    "input": 1.5,
-    "output": 5.25,
-    "cache_read": 1.5,
-    "cache_write": 0,
-    "cache_write_1h": 0
-  },
   "kimi-k3": {
     "provider": "tinfoil",
     "input": 2,
