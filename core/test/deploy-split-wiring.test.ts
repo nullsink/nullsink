@@ -187,6 +187,12 @@ test("balance responses are never stored by an intermediary", () => {
   expect(caddy).toMatch(/handle @balance_outage \{\n\t\t\theader Cache-Control "no-store"/);
 });
 
+test("the public edge removes every upstream Set-Cookie as defense in depth", () => {
+  // The application strips this too. Keeping the site-wide edge deletion means a future relay/error path
+  // cannot accidentally let an LLM provider mint a stable identifier on the nullsink origin.
+  expect(caddy).toMatch(/header \{[\s\S]*?\n\t\t-Set-Cookie\n[\s\S]*?\n\t\}/);
+});
+
 test("backup and restore preserve the scrubbed-outbox money invariant", () => {
   // The outbox snapshot must precede the ledger snapshot: any tombstone/ack captured in pending.db is then
   // guaranteed to have its applied_orders marker captured in the later balances.db snapshot.

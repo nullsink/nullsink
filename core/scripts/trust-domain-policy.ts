@@ -50,6 +50,7 @@ export const INTENTIONAL_PROXY_ONLY_RUNTIME = new Set([
   "providers/anthropic.ts",
   "providers/index.ts",
   "providers/openai.ts",
+  "providers/remote-media.ts",
   "providers/tinfoil.ts",
   "proxy.ts",
   "shutdown.ts",

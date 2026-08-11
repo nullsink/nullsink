@@ -57,25 +57,25 @@ export function isModelNotFound(status: number, text: string): boolean {
   return status === 404; // any other 404 on our fixed metered endpoints is a model-not-found
 }
 
-// Structured detail for the masked-error / model-not-found logs: the provider's stable error `type` (+ `code`
-// when present — OpenAI) and a length-capped `message`, read from `error.*` ONLY. Reading just `error.*`
-// structurally DROPS Anthropic's sibling `request_id` (an upstream correlation id we don't want in the
-// journal) and replaces the old indiscriminate 300-char raw-body slice. Safe to log: the masked path is our/
-// provider-side (key, billing, provider-down) or a model 404 — that message names OUR account state or the
-// rejected model id, never a prompt (prompt-echoing 4xx are RELAYED, not masked). Non-JSON → a short bounded
-// slice (no request_id possible); JSON without `error.*` → "" (don't slice the raw — it may hold request_id).
+// Structured detail for masked-error / model-not-found logs. Only short identifier-shaped `type` and `code`
+// values cross into journald. `message` and non-JSON response text are untrusted: providers sometimes echo
+// request content there, and the billing classifier above intentionally inspects a few message phrases. A
+// caller-controlled phrase must never turn that same message into a durable prompt fragment. The HTTP status
+// and aggregate metrics retain the operational signal when no safe identifier exists.
+function logIdentifier(value: unknown): string | null {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value) ? value : null;
+}
+
 export function maskedErrorDetail(text: string): string {
   let parsed: any;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return text.slice(0, 120);
+    return "";
   }
   const err = parsed?.error;
   if (!err || typeof err !== "object") return "";
-  const head = [err.type, err.code].filter((x) => typeof x === "string").join("/");
-  const msg = typeof err.message === "string" ? err.message.slice(0, 200) : "";
-  return [head, msg].filter(Boolean).join(": ");
+  return [logIdentifier(err.type), logIdentifier(err.code)].filter((x): x is string => x !== null).join("/");
 }
 
 // A non-OK upstream response is either the USER's fault (a request they can fix) or OURS / the provider's.
@@ -88,9 +88,10 @@ function relayOrSanitizeUpstream(provider: { id: string }, upstream: Response, t
   // 404 chat / 400 responses). The permissive prefix gate forwards dated snapshots we can't pre-confirm, so a
   // typo'd or retired model surfaces HERE rather than at the door. Return our own clear `unsupported_model`
   // (byte-for-byte the gate's own rejection — opaque about the provider) instead of a misleading masked 503
-  // OR the raw provider body. WARN: refunded + client-visible + user/config-fixable; the logged model id is
-  // what an operator adds to the sync scrub list if a bad id recurs. Counted as `upstream:notfound` (routine —
-  // the client's bad model, not ours), so the served↔req gap stays fully itemized.
+  // OR the raw provider body. WARN: refunded + client-visible + user/config-fixable. The journal keeps only
+  // safe structured type/code detail; model synchronization is diagnosed from aggregate recurrence rather than
+  // persisting a caller-supplied model string. Counted as `upstream:notfound` (routine — the client's bad model,
+  // not ours), so the served↔req gap stays fully itemized.
   if (isModelNotFound(s, text)) {
     metrics.recordUpstream("notfound");
     log.warn("upstream", `model not found upstream (refunded): ${maskedErrorDetail(text)}`);

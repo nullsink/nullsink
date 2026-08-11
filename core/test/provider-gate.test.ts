@@ -4,11 +4,13 @@
 import { test, expect } from "bun:test";
 import { makeAnthropicProvider } from "../src/providers/anthropic";
 import { makeOpenAIProviders } from "../src/providers/openai";
+import { makeTinfoilProvider } from "../src/providers/tinfoil";
 import type { HoldEstimator } from "../src/hold";
 
 const estimateHold = (() => ({ micros: 0, inputTokens: 0 })) as unknown as HoldEstimator;
 const anthropic = makeAnthropicProvider({ apiKey: "k", baseUrl: "https://up", version: "2023-06-01", estimateHold });
 const { chat, responses } = makeOpenAIProviders({ apiKey: "k", baseUrl: "https://up", estimateHold });
+const tinfoil = makeTinfoilProvider({ apiKey: "k", baseUrl: "https://up", estimateHold });
 
 // providers/anthropic.ts:93 + providers/openai.ts:82/136 — `m > 0` survived `m >= 0`, so `max_tokens: 0` is
 // accepted as a valid 0-cap (an input-only hold) instead of being rejected as max_tokens_required.
@@ -62,4 +64,37 @@ test("openai ownsModel rejects off-card *-search-preview but accepts the priced 
   expect(chat.ownsModel("gpt-4o-search-preview")).toBe(false);
   expect(chat.ownsModel("gpt-4o")).toBe(true);
   expect(chat.ownsModel("claude-opus-4-8")).toBe(false); // wrong provider
+});
+
+test("OpenAI-compatible chat providers reject remote images but keep inline bytes", () => {
+  const body = (url: string) => ({
+    messages: [{ role: "user", content: [{ type: "image_url", image_url: { url } }] }],
+  });
+  for (const url of ["https://example.test/large.png", "http://example.test/large.png", "  HTTPS://example.test/large.png"]) {
+    expect(chat.premiumReject(body(url))).toEqual({ status: 400, error: "unsupported_option" });
+    expect(tinfoil.premiumReject(body(url))).toEqual({ status: 400, error: "unsupported_option" });
+  }
+  // Inline bytes are part of the serialized request and therefore remain covered by the byte-bound hold.
+  expect(chat.premiumReject(body("data:image/png;base64,iVBORw0KGgo="))).toBeNull();
+  expect(tinfoil.premiumReject(body("data:image/png;base64,iVBORw0KGgo="))).toBeNull();
+  // An ordinary URL mentioned as prompt text is not a media dereference and must remain allowed.
+  expect(chat.premiumReject({ messages: [{ role: "user", content: "Explain https://example.test/page" }] })).toBeNull();
+  expect(tinfoil.premiumReject({ messages: [{ role: "user", content: "Explain https://example.test/page" }] })).toBeNull();
+});
+
+test("Responses and Anthropic reject remote images but keep inline bytes", () => {
+  const responseBody = (image_url: string) => ({
+    input: [{ role: "user", content: [{ type: "input_image", image_url }] }],
+  });
+  expect(responses.premiumReject(responseBody("https://example.test/large.png"))).toEqual({ status: 400, error: "unsupported_option" });
+  expect(responses.premiumReject(responseBody("data:image/png;base64,iVBORw0KGgo="))).toBeNull();
+
+  const anthropicBody = (type: "url" | "base64", value: string) => ({
+    messages: [{
+      role: "user",
+      content: [{ type: "image", source: type === "url" ? { type, url: value } : { type, media_type: "image/png", data: value } }],
+    }],
+  });
+  expect(anthropic.premiumReject(anthropicBody("url", "https://example.test/large.png"))).toEqual({ status: 400, error: "unsupported_option" });
+  expect(anthropic.premiumReject(anthropicBody("base64", "iVBORw0KGgo="))).toBeNull();
 });

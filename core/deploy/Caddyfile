@@ -55,6 +55,9 @@
 		# The page uses no powerful browser APIs, so deny them all (defence in depth). payment=() forbids
 		# the browser Payment Request API — irrelevant here since funding is on-chain XMR/BTC, but explicit is better.
 		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=()"
+		# Application scrubbing is primary; this site-wide deletion prevents a future proxy/error path from
+		# letting an upstream provider mint a stable browser identifier on the nullsink origin.
+		-Set-Cookie
 		-Server
 	}
 

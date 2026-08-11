@@ -5,6 +5,7 @@ import { providerOf, extractUsage, streamUsageScanner } from "../cost";
 import type { HoldEstimator } from "../hold";
 import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
+import { hasRemoteAnthropicImage } from "./remote-media";
 
 // Anthropic betas that bill at standard per-token rates (no premium tier / per-call fee) and are therefore
 // safe to forward under the flat rate card. The handler strips `anthropic-beta` wholesale (blocking premium
@@ -72,6 +73,7 @@ export function makeAnthropicProvider(cfg: {
       // server-side tools (web search / code exec) carry usage-based fees beyond per-token rates.
       if (body?.inference_geo != null) return { status: 400, error: "unsupported_option" };
       if (hasServerTool(body?.tools)) return { status: 400, error: "unsupported_tool" };
+      if (hasRemoteAnthropicImage(body)) return { status: 400, error: "unsupported_option" };
       return null;
     },
     outputCap: (body) => {

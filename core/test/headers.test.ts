@@ -69,6 +69,7 @@ test("forward path strips client auth/org/framing and injects our key", () => {
       host: "nullsink.example",
       connection: "keep-alive",
       "content-length": "123",
+      cookie: "provider_tracking_id=stable-browser-id",
       accept: "text/event-stream",
     }),
   );
@@ -78,6 +79,7 @@ test("forward path strips client auth/org/framing and injects our key", () => {
   expect(out.has("host")).toBe(false);
   expect(out.has("connection")).toBe(false);
   expect(out.has("content-length")).toBe(false);
+  expect(out.has("cookie")).toBe(false); // a nullsink-origin cookie must never become an upstream identifier
   expect(out.get("accept")).toBe("text/event-stream"); // genuine client header preserved
 });
 
@@ -126,6 +128,7 @@ test("relay path scrubs our org/project + content framing off the response", () 
       "openai-project": "our-proj",
       "content-encoding": "gzip",
       "content-type": "application/json",
+      "set-cookie": "provider_tracking_id=stable-browser-id; Path=/; Secure; HttpOnly",
     },
   });
   const h = scrubRespHeaders(resp);
@@ -133,5 +136,6 @@ test("relay path scrubs our org/project + content framing off the response", () 
   expect(h.has("openai-organization")).toBe(false);
   expect(h.has("openai-project")).toBe(false);
   expect(h.has("content-encoding")).toBe(false);
+  expect(h.has("set-cookie")).toBe(false); // upstream cannot mint a persistent identifier on our origin
   expect(h.get("content-type")).toBe("application/json"); // genuine response header preserved
 });

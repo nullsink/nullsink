@@ -26,17 +26,18 @@ test("isModelNotFound: a genuine non-model error is NOT a model-not-found (still
   expect(isModelNotFound(500, "boom")).toBe(false);
 });
 
-test("maskedErrorDetail: logs type + model, DROPS the upstream request_id", () => {
+test("maskedErrorDetail: logs only bounded structured identifiers, never the message or request_id", () => {
   const d = maskedErrorDetail(ANTHROPIC_404);
-  expect(d).toContain("not_found_error");
-  expect(d).toContain("model: claude-sonnet-4-5-20251101"); // the model id — the actionable bit
+  expect(d).toBe("not_found_error");
+  expect(d).not.toContain("claude-sonnet-4-5-20251101"); // error.message is an untrusted privacy boundary
   expect(d).not.toContain("req_011"); // the request_id — never logged
 });
 
-test("maskedErrorDetail: openai includes type/code; non-JSON → short slice; JSON without error.* → empty", () => {
-  expect(maskedErrorDetail(OPENAI_CHAT_404)).toContain("invalid_request_error/model_not_found");
-  expect(maskedErrorDetail("<html>502 Bad Gateway</html>")).toBe("<html>502 Bad Gateway</html>");
+test("maskedErrorDetail: keeps safe type/code, drops non-JSON text and malformed identifiers", () => {
+  expect(maskedErrorDetail(OPENAI_CHAT_404)).toBe("invalid_request_error/model_not_found");
+  expect(maskedErrorDetail("<html>502 Bad Gateway</html>")).toBe("");
   expect(maskedErrorDetail(JSON.stringify({ request_id: "req_secret", x: 1 }))).toBe(""); // no error.* → don't slice raw (it holds request_id)
+  expect(maskedErrorDetail(JSON.stringify({ error: { type: "safe_type\nprompt fragment", code: "safe-code", message: "secret prompt" } }))).toBe("safe-code");
 });
 
 function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response>) {
@@ -71,7 +72,7 @@ test("handler: an upstream model 404 returns 400 unsupported_model (not a masked
 
   const line = warnSpy.mock.calls.map((c: any[]) => String(c[0])).join("\n");
   expect(line).toContain("model not found upstream");
-  expect(line).toContain("claude-sonnet-4-5-20251101"); // the model is logged (actionable)
+  expect(line).not.toContain("claude-sonnet-4-5-20251101"); // never log upstream error.message
   expect(line).not.toContain("req_011"); // the upstream request_id is NOT
   warnSpy.mockRestore();
 });
