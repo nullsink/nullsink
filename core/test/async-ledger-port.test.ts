@@ -121,6 +121,67 @@ test("buffered settlement failure never retries the hold with a different charge
   expect(holds(store)).toBe(1);
 });
 
+test("upstream forwarding waits for a definite asynchronous hold", async () => {
+  const store = openDb(":memory:");
+  const local = localMeteringLedger(store);
+  const token = "pr_async_open_hold";
+  const hash = hashToken(token);
+  store.credit(hash, INITIAL);
+  const started = deferred();
+  const release = deferred();
+  let forwarded = 0;
+  const port: MeteringLedgerPort = {
+    ...local,
+    openHold: async (tokenHash, micros, holdId) => {
+      started.resolve();
+      await release.promise;
+      return local.openHold(tokenHash, micros, holdId);
+    },
+  };
+  const upstream = (async () => {
+    forwarded += 1;
+    return Response.json({ model: MODEL, usage: { input_tokens: 1, output_tokens: 1 } });
+  }) as unknown as typeof fetch;
+
+  const responsePromise = handler(port, upstream)(request(token));
+  await started.promise;
+
+  expect(forwarded).toBe(0);
+  expect(holds(store)).toBe(0);
+
+  release.resolve();
+  expect((await responsePromise).status).toBe(200);
+  expect(forwarded).toBe(1);
+  expect(holds(store)).toBe(0);
+});
+
+test("a later upstream-body failure reuses a completed refund instead of masquerading as ledger failure", async () => {
+  const store = openDb(":memory:");
+  const local = localMeteringLedger(store);
+  const token = "pr_async_non_ok_body_failure";
+  const hash = hashToken(token);
+  store.credit(hash, INITIAL);
+  const settlements: Array<{ holdId: string; chargedMicros: number }> = [];
+  const port: MeteringLedgerPort = {
+    ...local,
+    settleHold: async (holdId, chargedMicros) => {
+      settlements.push({ holdId, chargedMicros });
+      return local.settleHold(holdId, chargedMicros);
+    },
+  };
+  const upstream = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.error(new Error("upstream error body broke")); },
+  }), { status: 429 })) as unknown as typeof fetch;
+
+  const response = await handler(port, upstream)(request(token, true));
+
+  expect(response.status).toBe(502);
+  expect(settlements).toHaveLength(1);
+  expect(settlements[0]!.chargedMicros).toBe(0);
+  expect(holds(store)).toBe(0);
+  expect(store.getBalance(hash)).toBe(INITIAL);
+});
+
 test("stream terminal races join one settlement promise and stay registered until it completes", async () => {
   const delayed = delayedSettlementPort();
   const token = "pr_async_stream";
@@ -159,5 +220,46 @@ test("stream terminal races join one settlement promise and stay registered unti
     input_tokens: 90,
     output_tokens: 0,
   }));
+  await reader.cancel().catch(() => {});
+});
+
+test("a rejected stream settlement stays registered and retries the identical operation", async () => {
+  const store = openDb(":memory:");
+  const local = localMeteringLedger(store);
+  const token = "pr_async_stream_retry";
+  const hash = hashToken(token);
+  store.credit(hash, INITIAL);
+  const calls: Array<{ holdId: string; chargedMicros: number }> = [];
+  const port: MeteringLedgerPort = {
+    ...local,
+    settleHold: async (holdId, chargedMicros) => {
+      calls.push({ holdId, chargedMicros });
+      if (calls.length === 1) throw new Error("temporary ledger failure");
+      return local.settleHold(holdId, chargedMicros);
+    },
+  };
+  const inflight = new Set<(reason?: "drain") => Promise<void>>();
+  const event = `event: message_start\ndata: ${JSON.stringify({
+    type: "message_start",
+    message: { model: MODEL, usage: { input_tokens: 90, output_tokens: 0 } },
+  })}\n\n`;
+  const upstream = (async () => new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode(event)); },
+  }), { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
+
+  const response = await handler(port, upstream, inflight)(request(token, true));
+  const reader = response.body!.getReader();
+  await reader.read();
+  const settle = [...inflight][0]!;
+
+  await expect(settle("drain")).rejects.toThrow("temporary ledger failure");
+  expect(inflight.has(settle)).toBe(true);
+  expect(holds(store)).toBe(1);
+
+  await settle("drain");
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toEqual(calls[0]);
+  expect(inflight.size).toBe(0);
+  expect(holds(store)).toBe(0);
   await reader.cancel().catch(() => {});
 });

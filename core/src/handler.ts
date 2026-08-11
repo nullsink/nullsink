@@ -196,6 +196,17 @@ export type ProxyHandlerDeps = {
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
 
+// Distinguishes a rejected/invalid ledger result from an error that happens later in the response path.
+// The outer handler may translate the latter into its existing retryable upstream response, but must never
+// reinterpret a failed settlement as a different charge.
+class LedgerSettlementError extends Error {
+  constructor(cause: unknown) {
+    super(`ledger settlement failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "LedgerSettlementError";
+    this.cause = cause;
+  }
+}
+
 type StreamTerminalCause = "complete" | "upstream_error" | "client_cancel" | "deadline" | "shutdown_drain";
 type StreamSettlementDecision =
   | { outcome: "served"; cost: number }
@@ -401,10 +412,10 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // trusting upstream. settleHold closes the journal row and refunds the unused part atomically, and is
     // idempotent (the row delete guards it), so a shutdown-drain settle racing the natural one can't
     // double-refund. Defined before the try so the catch can refund through it too.
-    // Once a settlement starts, no surrounding error path may reinterpret the request and submit a different
-    // charge. The future socket adapter owns retries for an ambiguous transport result, always with the same
-    // hold ID + charge; handler-level fallback would risk turning a real charge into a conflicting refund.
-    let settlementStarted = false;
+    // Cache a definite result so a later response-path error can reuse the same settlement without issuing
+    // another ledger operation. A rejected ledger call is tagged separately below: the surrounding upstream
+    // catch must surface it, never reinterpret it as a refund with a different payload.
+    let completedCharge: number | undefined;
     const billActual = async (actual: number): Promise<number> => {
       if (actual > holdAmount) {
         log.error("bill", `actual cost ${actual} exceeded hold ${holdAmount} — refund clamped to 0 (no overdraft)`);
@@ -415,9 +426,18 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       // floor the refund is always within [0, holdAmount].
       const cost = Math.max(0, actual);
       const effectiveDebit = Math.min(cost, holdAmount);
-      settlementStarted = true;
-      if (!await settleHold(holdId, effectiveDebit))
-        throw new Error(`ledger rejected unknown hold during settlement: ${holdId}`);
+      if (completedCharge !== undefined) {
+        if (completedCharge !== effectiveDebit)
+          throw new Error(`conflicting settlement charge for hold ${holdId}`);
+        return completedCharge;
+      }
+      try {
+        if (!await settleHold(holdId, effectiveDebit))
+          throw new Error(`ledger rejected unknown hold during settlement: ${holdId}`);
+      } catch (err) {
+        throw new LedgerSettlementError(err);
+      }
+      completedCharge = effectiveDebit;
       return effectiveDebit;
     };
 
@@ -651,7 +671,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     } catch (err) {
       // This catch also surrounds awaited ledger calls. If one failed, preserve that settlement's immutable
       // payload and surface the failure; never route it through an upstream-error refund using a new payload.
-      if (settlementStarted) throw err;
+      if (err instanceof LedgerSettlementError) throw err;
       if (bufferedReadFailedAfterOk) {
         const inputFloor = acceptedInputFloor();
         metrics.recordFailure("bufferedInputFloor", await billActual(inputFloor));
