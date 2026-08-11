@@ -15,6 +15,8 @@ const STRIP = new Set([
   "host",
   "connection",
   "content-length",
+  "cookie", // nullsink-origin state must never become a provider-controlled cross-request identifier
+  "cookie2", // obsolete, but accepting it would recreate the same round-trip on compatible gateways
   "authorization",
   "x-api-key",
   "anthropic-beta",
@@ -63,6 +65,8 @@ export function scrubRespHeaders(upstream: Response): Headers {
   const h = new Headers(upstream.headers);
   h.delete("content-encoding");
   h.delete("content-length");
+  h.delete("set-cookie"); // never let an upstream mint persistent state on the nullsink origin
+  h.delete("set-cookie2");
   h.delete("anthropic-organization-id");
   h.delete("openai-organization"); // never leak our OpenAI org id back to the client
   h.delete("openai-project");

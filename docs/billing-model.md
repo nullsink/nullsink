@@ -113,7 +113,9 @@ estimators (`hold.ts`, selected by `HOLD_ESTIMATOR`):
 - **Byte bound** (`byteBoundHold`) — prices the request's UTF-8 byte length as if every byte were
   a token, plus `max_tokens × output_rate`. It needs no upstream call and is *provably* sound:
   token counts can't exceed byte counts, and the output is capped by `max_tokens`. It's loose —
-  at worst it over-reserves and triggers a spurious "insufficient balance."
+  at worst it over-reserves and triggers a spurious "insufficient balance." That proof applies only
+  to inputs represented in the body. Provider-specific gates reject known remote `http:`/`https:` image
+  references; inline `data:`/base64 media stays allowed because its bytes are inside the bound.
 - **count_tokens** (default) — asks the provider's *free* token counter for the exact input size
   (Anthropic `POST /v1/messages/count_tokens`; OpenAI `POST /v1/responses/input_tokens`). The
   counter measures the input only — it says nothing about output — so nullsink sizes the hold as

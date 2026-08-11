@@ -7,6 +7,7 @@ import { providerOf, isOffCardModel, extractOpenAIChatUsage, openaiChatScanner, 
 import type { HoldEstimator } from "../hold";
 import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
+import { hasRemoteChatImage, hasRemoteResponsesImage } from "./remote-media";
 
 // --- OpenAI Chat Completions provider pieces (the shape passed to makeBase below) ---
 
@@ -56,6 +57,15 @@ const OPENAI_CHAT_REJECTS: Array<{ reason: string; when: (body: any) => boolean;
       b.messages.some(
         (m: any) => Array.isArray(m?.content) && m.content.some((p: any) => p?.type === "input_audio"),
       ),
+    error: "unsupported_option",
+  },
+  {
+    // The Chat count endpoint rejects `{messages}`, so its hold falls back to serialized request bytes.
+    // A remote image URL is only a few request bytes while the upstream may dereference it into a much
+    // larger billable image input. Inline data remains allowed because every media byte is inside the body
+    // covered by the byte-bound proof. Keep this shape-specific: ordinary URLs in prompt text are harmless.
+    reason: "remote image URLs expand outside the serialized-byte hold bound",
+    when: hasRemoteChatImage,
     error: "unsupported_option",
   },
 ];
@@ -108,6 +118,7 @@ function openaiResponsesPremiumReject(body: any): { status: number; error: strin
   if (body?.service_tier != null && body.service_tier !== "auto" && body.service_tier !== "default")
     return { status: 400, error: "unsupported_option" };
   if (hasResponsesBuiltinTool(body?.tools)) return { status: 400, error: "unsupported_tool" };
+  if (hasRemoteResponsesImage(body)) return { status: 400, error: "unsupported_option" };
   // Audio INPUT parts bill at off-card rates — same body-level backstop as the chat audio rules (id gate
   // is primary).
   if (

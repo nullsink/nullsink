@@ -7,6 +7,7 @@ import { providerOf, isOffCardModel, extractOpenAIChatUsage, openaiChatScanner }
 import type { HoldEstimator } from "../hold";
 import { readProxyToken } from "../http/proxy-token";
 import type { Provider } from "./types";
+import { hasRemoteChatImage } from "./remote-media";
 
 // Output ceiling: max_completion_tokens (current) or the legacy max_tokens. REQUIRED — the hold needs a sound
 // output bound. null → max_tokens_required.
@@ -25,6 +26,7 @@ function tinfoilOutputCap(body: any): number | null {
 function tinfoilPremiumReject(body: any): { status: number; error: string } | null {
   if (body?.n != null && body.n !== 1) return { status: 400, error: "unsupported_option" };
   if (body?.best_of != null && body.best_of !== 1) return { status: 400, error: "unsupported_option" };
+  if (hasRemoteChatImage(body)) return { status: 400, error: "unsupported_option" };
   return null;
 }
 
