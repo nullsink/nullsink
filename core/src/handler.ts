@@ -16,7 +16,7 @@ import { selectProviders, resolveProvider, type Provider } from "./providers";
 import { makeProxyEndpoints } from "./endpoints/proxy";
 import { deny, denyApi, apiErrorBody, NO_API_KEY, scrubRespHeaders, buildUpstreamHeaders } from "./http";
 import type { HoldEstimator } from "./hold";
-import type { BalanceStore } from "./ledger/db";
+import type { MeteringLedgerPort } from "./ledger/port";
 import type { TokenBucket } from "./ratelimit";
 
 // Does an upstream error body indicate a billing/credit/quota failure (OUR account, not the user's
@@ -167,7 +167,9 @@ export type ProxyHandlerDeps = {
   };
   upstreamTimeoutMs: number;
   maxMessagesBodyBytes: number;
-  balances: BalanceStore;
+  // Promise-only boundary for every metering read/write. Production currently supplies the local SQLite
+  // adapter; Step 5 swaps in the socket client without changing request settlement semantics.
+  balances: MeteringLedgerPort;
   // Output cap applied (and injected into the forwarded body) when a request OMITS one. 0/undefined =
   // require an explicit cap (max_tokens_required). Set it (DEFAULT_MAX_OUTPUT_TOKENS) so stock OpenAI clients
   // that don't send a cap work. Provider-agnostic.
@@ -183,7 +185,7 @@ export type ProxyHandlerDeps = {
   // itself the moment its billing finalizes (done/error/cancel). The root's shutdown handler drains this on
   // SIGTERM so a request still streaming at restart is reconciled instead of force-closed with its hold
   // un-reconciled. Idempotent, so a drain racing a natural settle is safe. Omitted in tests → throwaway set.
-  inflight?: Set<(reason?: "drain") => void>;
+  inflight?: Set<(reason?: "drain") => Promise<void>>;
   // Force-settle deadline (ms) for a streaming request whose client opens it but then neither reads nor
   // disconnects — none of done/error/cancel fire, so settle() would never run and the hold would leak until
   // restart. MUST be > upstreamTimeoutMs so a legit stream always finishes naturally first (the root enforces
@@ -193,6 +195,17 @@ export type ProxyHandlerDeps = {
   // Returns a canceller. Omitted → setTimeout/clearTimeout (unref'd so a pending deadline never blocks exit).
   scheduleStreamDeadline?: (onDeadline: () => void, ms: number) => () => void;
 };
+
+// Distinguishes a rejected/invalid ledger result from an error that happens later in the response path.
+// The outer handler may translate the latter into its existing retryable upstream response, but must never
+// reinterpret a failed settlement as a different charge.
+class LedgerSettlementError extends Error {
+  constructor(cause: unknown) {
+    super(`ledger settlement failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = "LedgerSettlementError";
+    this.cause = cause;
+  }
+}
 
 type StreamTerminalCause = "complete" | "upstream_error" | "client_cancel" | "deadline" | "shutdown_drain";
 type StreamSettlementDecision =
@@ -244,7 +257,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     maxMessagesBodyBytes: MAX_MESSAGES_BODY_BYTES,
     balances,
     upstreamFetch,
-    inflight = new Set<(reason?: "drain") => void>(),
+    inflight = new Set<(reason?: "drain") => Promise<void>>(),
     streamSettleDeadlineMs = UPSTREAM_TIMEOUT_MS + 60_000, // default sits above the upstream timeout
     scheduleStreamDeadline = (onDeadline, ms) => {
       const t = setTimeout(onDeadline, ms);
@@ -312,7 +325,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     const token = representative.readToken(req);
     if (!token) { metrics.recordGate("auth"); return denyApi(representative, 401, NO_API_KEY.code, NO_API_KEY.message); }
     const hash = hashToken(token);
-    if (getBalance(hash) === null) { metrics.recordGate("auth"); return denyApi(representative, 401, "invalid_token"); }
+    if (await getBalance(hash) === null) { metrics.recordGate("auth"); return denyApi(representative, 401, "invalid_token"); }
 
     // Buffer and parse — the source of truth for billing. Reject anything we can't price at our flat
     // rates, constraining the request to the standard pricing regime before a cent is spent.
@@ -362,7 +375,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // broke token here — else a valid-but-broke token could force a free count_tokens round-trip. (An unknown
     // token was already shed before the buffer above; this re-read also catches a token deleted mid-flight,
     // which must read as 401 not 402.) The atomic openHold debit below remains the authoritative gate.
-    const preBalance = getBalance(hash);
+    const preBalance = await getBalance(hash);
     if (preBalance === null) { metrics.recordGate("auth"); return denyApi(provider, 401, "invalid_token"); }
     if (preBalance <= 0) { metrics.recordGate("funds"); return denyApi(provider, 402, "insufficient_balance"); }
 
@@ -387,8 +400,8 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // before settle leaves a durable row that boot recovery refunds in full (db.ts recoverHolds). settleHold
     // closes that row on every exit path below; the journal makes the debit crash-safe, not just in-memory.
     const holdId = crypto.randomUUID();
-    if (!openHold(hash, holdAmount, holdId)) {
-      const gone = getBalance(hash) === null; // token deleted mid-flight → auth; else the balance lost the race → funds
+    if (!await openHold(hash, holdAmount, holdId)) {
+      const gone = await getBalance(hash) === null; // token deleted mid-flight → auth; else the balance lost the race → funds
       metrics.recordGate(gone ? "auth" : "funds");
       return gone ? denyApi(provider, 401, "invalid_token") : denyApi(provider, 402, "insufficient_balance");
     }
@@ -399,7 +412,11 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // trusting upstream. settleHold closes the journal row and refunds the unused part atomically, and is
     // idempotent (the row delete guards it), so a shutdown-drain settle racing the natural one can't
     // double-refund. Defined before the try so the catch can refund through it too.
-    const billActual = (actual: number) => {
+    // Cache a definite result so a later response-path error can reuse the same settlement without issuing
+    // another ledger operation. A rejected ledger call is tagged separately below: the surrounding upstream
+    // catch must surface it, never reinterpret it as a refund with a different payload.
+    let completedCharge: number | undefined;
+    const billActual = async (actual: number): Promise<number> => {
       if (actual > holdAmount) {
         log.error("bill", `actual cost ${actual} exceeded hold ${holdAmount} — refund clamped to 0 (no overdraft)`);
         metrics.recordBill("holdExceeded"); // trend behind the per-event ERROR (hold mis-sized if it spikes)
@@ -409,7 +426,18 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       // floor the refund is always within [0, holdAmount].
       const cost = Math.max(0, actual);
       const effectiveDebit = Math.min(cost, holdAmount);
-      settleHold(holdId, hash, holdAmount - effectiveDebit);
+      if (completedCharge !== undefined) {
+        if (completedCharge !== effectiveDebit)
+          throw new Error(`conflicting settlement charge for hold ${holdId}`);
+        return completedCharge;
+      }
+      try {
+        if (!await settleHold(holdId, effectiveDebit))
+          throw new Error(`ledger rejected unknown hold during settlement: ${holdId}`);
+      } catch (err) {
+        throw new LedgerSettlementError(err);
+      }
+      completedCharge = effectiveDebit;
       return effectiveDebit;
     };
 
@@ -423,7 +451,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       cache_read_input_tokens: 0,
     }, model);
 
-    // Past this point the hold is debited — every synchronous exit path refunds via billActual; the streaming
+    // Past this point the hold is debited — every buffered exit path awaits billActual; the streaming
     // path defers refund to settle() on the response stream's done/error/cancel callback (see below).
     let bufferedReadFailedAfterOk = false;
     try {
@@ -446,7 +474,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // A non-2xx, even for a stream request, comes back as a buffered JSON error with no SSE body to
         // meter → refund in full, exactly like the buffered non-ok path below.
         if (!upstream.ok || !upstream.body) {
-          billActual(0); // no SSE body to meter → refund in full (and close the journal row)
+          await billActual(0); // no SSE body to meter → refund in full (and close the journal row)
           return relayOrSanitizeUpstream(provider, upstream, await upstream.text());
         }
         // `served` is NOT counted here — a 2xx SSE envelope is not yet a clean bill. settle() (below) counts the
@@ -454,7 +482,6 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
         const scan = provider.makeScanner({ model, inputTokens: billableInputTokens });
-        let settled = false;
         // Mark caller/timeout termination BEFORE cancelling upstream. reader.cancel() can wake an in-flight
         // read as `done`; the done path consults this marker so that race cannot masquerade as a clean end.
         let requestedCause: "client_cancel" | "deadline" | "shutdown_drain" | null = null;
@@ -462,72 +489,83 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // stream even when the client is the one stalling (a backpressured pull won't observe a close itself).
         let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
         let cancelDeadline: (() => void) | undefined; // clears the force-settle timer; assigned after inflight.add
-        const settle = (reason: StreamTerminalCause | "drain" = "complete") => {
-          if (settled) return; // at-most-once (idempotent); exactly-once in the normal done/error/cancel flows
-          settled = true;
-          inflight.delete(settle); // billing finalized (naturally, or drained on shutdown) — stop tracking
-          cancelDeadline?.(); // every natural exit (done/error/cancel/drain) clears the force-settle timer here
+        // One promise latch joins every terminal race. It is installed before the first await, so EOF,
+        // cancellation, deadline, and shutdown all observe the SAME settlement. The callback stays in
+        // `inflight` until the ledger confirms completion; a rejected attempt clears only the attempt (not
+        // the chosen billing decision or registry entry), allowing shutdown to retry without double-counting.
+        let settlementDecision: StreamSettlementDecision | undefined;
+        let settlementAttempt: Promise<void> | undefined;
+        const settle = (reason: StreamTerminalCause | "drain" = "complete"): Promise<void> => {
+          if (settlementAttempt) return settlementAttempt;
           const cause = reason === "drain" ? "shutdown_drain" : reason;
-          if (reason === "drain") {
-            // Billing settlement alone does not stop the fetch body's blocked read. During a service restart,
-            // that previously left server.stop(true) waiting for UPSTREAM_TIMEOUT_MS (normally 10 minutes)
-            // until systemd killed the process at TimeoutStopSec. Cancel generation and end the downstream
-            // body as part of the same idempotent drain action so shutdown finishes on our 25-second schedule.
-            requestedCause = "shutdown_drain"; // mark before cancel wakes a racing reader.read()
-            reader.cancel("shutdown_drain").catch(() => {});
-            try {
-              // Supplying an Error here makes Bun print an application stack trace for this expected
-              // shutdown path. An omitted reason still aborts the body immediately, without the false alarm.
-              streamController?.error();
-            } catch {
-              /* stream already closed/errored — nothing to terminate */
+          if (!settlementDecision) {
+            cancelDeadline?.(); // the first terminal cause owns settlement and clears the deadline
+            if (reason === "drain") {
+              // Billing settlement alone does not stop the fetch body's blocked read. Mark + cancel before
+              // the ledger await so a racing pull cannot masquerade as clean completion. Cancellation is
+              // transport cleanup; the money promise remains independently tracked and awaited below.
+              requestedCause = "shutdown_drain";
+              reader.cancel("shutdown_drain").catch(() => {});
+              try {
+                streamController?.error();
+              } catch {
+                /* stream already closed/errored — nothing to terminate */
+              }
             }
+            const upstreamFailed = cause === "upstream_error" || scan.errored();
+            const metered = scan.result(upstreamFailed || cause === "shutdown_drain" ? "evidenced_only" : undefined);
+            settlementDecision = decideStreamSettlement({
+              cause,
+              metered,
+              upstreamErrored: scan.errored(),
+              inputTokens: billableInputTokens,
+              requestModel: model,
+            });
           }
-          const upstreamFailed = cause === "upstream_error" || scan.errored();
-          const metered = scan.result(upstreamFailed || cause === "shutdown_drain" ? "evidenced_only" : undefined);
-          const decision = decideStreamSettlement({
-            cause,
-            metered,
-            upstreamErrored: scan.errored(),
-            inputTokens: billableInputTokens,
-            requestModel: model,
+
+          const decision = settlementDecision!;
+          settlementAttempt = (async () => {
+            let charged: number;
+            switch (decision.outcome) {
+              case "served":
+                charged = await billActual(decision.cost);
+                metrics.recordServed();
+                break;
+              case "partial":
+                charged = await billActual(decision.cost);
+                metrics.recordServedPartial();
+                break;
+              case "upstream_partial":
+                charged = await billActual(decision.cost);
+                log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — billed metered partial`);
+                metrics.recordServedPartial();
+                metrics.recordFailure(
+                  decision.evidence === "reported" ? "streamReported" : "streamEstimated",
+                  charged,
+                );
+                break;
+              case "shutdown_aborted":
+                await billActual(0);
+                metrics.recordStreamAborted();
+                break;
+              case "upstream_aborted":
+                await billActual(0);
+                log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — no usage evidence, refunded`);
+                metrics.recordFailure("streamRefunded");
+                metrics.recordStreamAborted();
+                break;
+              case "unmetered_complete":
+                await billActual(0);
+                log.error("bill", `streamed ${provider.upstreamPath} without parseable usage — refunded in full`);
+                metrics.recordBill("refundedInFull");
+                break;
+            }
+            inflight.delete(settle); // only a definite ledger completion releases the shutdown registry
+          })().catch((error) => {
+            settlementAttempt = undefined; // same immutable decision may be retried by a later terminal/drain call
+            throw error;
           });
-          switch (decision.outcome) {
-            case "served":
-              metrics.recordServed();
-              billActual(decision.cost);
-              break;
-            case "partial":
-              metrics.recordServedPartial();
-              billActual(decision.cost);
-              break;
-            case "upstream_partial":
-              log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — billed metered partial`);
-              metrics.recordServedPartial();
-              metrics.recordFailure(
-                decision.evidence === "reported" ? "streamReported" : "streamEstimated",
-                billActual(decision.cost),
-              );
-              break;
-            case "shutdown_aborted":
-              // Expected at restart before any usage frame: routine, silent, fully refunded.
-              metrics.recordStreamAborted();
-              billActual(0);
-              break;
-            case "upstream_aborted":
-              log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — no usage evidence, refunded`);
-              metrics.recordFailure("streamRefunded");
-              metrics.recordStreamAborted();
-              billActual(0);
-              break;
-            case "unmetered_complete":
-              // Clean end, NO parseable usage: delivered a 2xx stream and metered nothing — genuine
-              // served-but-unbilled money leak, and the only streaming case that should page.
-              log.error("bill", `streamed ${provider.upstreamPath} without parseable usage — refunded in full`);
-              metrics.recordBill("refundedInFull");
-              billActual(0);
-              break;
-          }
+          return settlementAttempt;
         };
         // Track this live stream so a SIGTERM can finalize its billing before force-close (proxy.ts shutdown).
         inflight.add(settle);
@@ -544,7 +582,9 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         cancelDeadline = scheduleStreamDeadline(() => {
           requestedCause = "deadline"; // set before cancel so a racing done-pull cannot settle as complete
           reader.cancel("stream_settle_deadline").catch(() => {}); // stop generation → stop paying the provider
-          settle("deadline");
+          // Timers cannot await callbacks, but this is not best-effort: settle() installs the one tracked
+          // promise in `inflight`, and shutdown will join/retry it if the ledger attempt rejects.
+          settle("deadline").catch((err) => log.error("bill", `deadline settlement failed: ${log.errMsg(err)}`));
           try {
             streamController?.error(new Error("stream_settle_deadline"));
           } catch {
@@ -558,27 +598,33 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
           },
           // pull runs only when the client wants more, so backpressure to the client is preserved.
           async pull(controller) {
+            let chunk: { done: boolean; value?: Uint8Array };
             try {
-              const { done, value } = await reader.read();
-              if (done) {
-                settle(requestedCause ?? "complete");
-                controller.close();
-                return;
-              }
-              scan.feed(decoder.decode(value, { stream: true }));
-              controller.enqueue(value);
+              chunk = await reader.read();
             } catch (err) {
               // reader.cancel() may reject a pending read; when we initiated that cancel, preserve its already-
               // marked client/deadline cause. With no local termination pending, this is a genuine transport error.
-              settle(requestedCause ?? "upstream_error");
+              await settle(requestedCause ?? "upstream_error");
               controller.error(err);
+              return;
             }
+            if (chunk.done) {
+              try {
+                await settle(requestedCause ?? "complete");
+                controller.close(); // downstream completion means the charge is already definite
+              } catch (err) {
+                controller.error(err);
+              }
+              return;
+            }
+            scan.feed(decoder.decode(chunk.value!, { stream: true }));
+            controller.enqueue(chunk.value!);
           },
           async cancel(reason) {
             // Mark FIRST so a racing done-pull woken by reader.cancel() bills a partial, never a clean serve.
             requestedCause = "client_cancel";
             await reader.cancel(reason).catch(() => {});
-            settle("client_cancel");
+            await settle("client_cancel");
           },
         });
 
@@ -606,12 +652,12 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       if (upstream.ok) {
         const metered = provider.extractUsage(text);
         if (metered) {
+          await billActual(priceUsage(metered.model, metered.usage, model));
           metrics.recordServed(); // a 2xx we metered actual usage on — billed clean (the success outcome)
-          billActual(priceUsage(metered.model, metered.usage, model));
         } else {
+          await billActual(0);
           log.error("bill", `2xx ${provider.upstreamPath} without parseable usage — refunded in full`);
           metrics.recordBill("refundedInFull"); // 2xx but metered NOTHING — the served-but-unbilled leak (NOT served)
-          billActual(0);
         }
         return new Response(text, {
           status: upstream.status,
@@ -620,14 +666,17 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         });
       }
 
-      billActual(0); // non-OK: nothing billable happened, refund in full
+      await billActual(0); // non-OK: nothing billable happened, refund in full
       return relayOrSanitizeUpstream(provider, upstream, text);
     } catch (err) {
+      // This catch also surrounds awaited ledger calls. If one failed, preserve that settlement's immutable
+      // payload and surface the failure; never route it through an upstream-error refund using a new payload.
+      if (err instanceof LedgerSettlementError) throw err;
       if (bufferedReadFailedAfterOk) {
         const inputFloor = acceptedInputFloor();
-        metrics.recordFailure("bufferedInputFloor", billActual(inputFloor));
+        metrics.recordFailure("bufferedInputFloor", await billActual(inputFloor));
       } else {
-        billActual(0); // no accepted buffered work to substantiate — refund in full
+        await billActual(0); // no accepted buffered work to substantiate — refund in full
       }
       const timedOut = err instanceof Error && err.name === "TimeoutError";
       metrics.recordUpstream(timedOut ? "timeout" : "unreachable"); // transport-failure trend (distinct from a returned non-2xx)

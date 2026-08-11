@@ -9,6 +9,7 @@ import { createHandler, type HandlerDeps, type RailView } from "./support/handle
 import type { Usage } from "../src/cost";
 import { byteBoundHold } from "../src/hold";
 import { hashToken, openDb, type BalanceStore } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import * as metrics from "../src/metrics";
 
@@ -51,7 +52,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> = {}) {
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,
-    balances,
+    balances: localMeteringLedger(balances),
     orders: openOrderStore(":memory:"),
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([["monero", {
@@ -372,7 +373,7 @@ test("Race matrix · observed upstream failure wins over deadline and shutdown d
   try {
     for (const localTerminal of ["deadline", "drain"] as const) {
       metrics.reset(0);
-      const inflight = new Set<(reason?: "drain") => void>();
+      const inflight = new Set<(reason?: "drain") => Promise<void>>();
       let fireDeadline: (() => void) | undefined;
       const visible = "12345678";
       const body = { model: "gpt-5", max_completion_tokens: 10_000, stream: true, messages: [{ role: "user", content: "x".repeat(8000) }] };
@@ -391,7 +392,7 @@ test("Race matrix · observed upstream failure wins over deadline and shutdown d
       const reader = response.body!.getReader();
       await reader.read(); // scanner observes visible output and in-band failure
       if (localTerminal === "deadline") fireDeadline!();
-      else for (const settle of [...inflight]) settle("drain");
+      else await Promise.all([...inflight].map((settle) => settle("drain")));
       await new Promise((resolve) => setTimeout(resolve, 0));
 
       const estimatedInput = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);

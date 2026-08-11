@@ -7,6 +7,7 @@ import { test, expect } from "bun:test";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { byteBoundHold } from "../src/hold";
 import { openDb, hashToken } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import { priceUsage, type Usage } from "../src/cost";
 
@@ -31,7 +32,7 @@ function makeHandler(upstreamFetch: Upstream, over: Partial<HandlerDeps> = {}) {
     maxOpenOrders: 1000,
     maxBuyBodyBytes: 4096,
     maxMessagesBodyBytes: 33_554_432,
-    balances,
+    balances: localMeteringLedger(balances),
     orders,
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([

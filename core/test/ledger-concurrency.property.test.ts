@@ -51,14 +51,14 @@ test("balance store is linearizable under arbitrary async interleaving (conserva
         // Each actor interleaves at `await s.schedule(...)` points; the scheduler picks the order and shrinks.
         const runReq = async (q: Req, i: number) => {
           const holdId = `H${i}-${holdSeq++}`;
-          const refund = q.cost - Math.min(q.actual, q.cost); // refund ∈ [0, cost]; net debit = min(actual,cost)
+          const charge = Math.min(q.actual, q.cost); // ledger derives refund = hold - charge
           await s.schedule(Promise.resolve(), `req${i}:open`);
           const opened = r.openHold(q.hash, q.cost, holdId);
           await s.schedule(Promise.resolve(), `req${i}:settle`);
           if (opened) {
-            const settled = r.settleHold(holdId, q.hash, refund);
+            const settled = r.settleHold(holdId, charge);
             expect(settled).toBe(true); // a hold that opened MUST settle exactly once
-            netDebit[q.hash] += q.cost - refund;
+            netDebit[q.hash] += charge;
           }
         };
         const runCred = async (c: Cred, i: number) => {

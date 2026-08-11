@@ -97,22 +97,23 @@ class OpenHoldCmd implements fc.Command<Model, BalanceStore> {
 }
 
 class SettleHoldCmd implements fc.Command<Model, BalanceStore> {
-  constructor(readonly holdId: string, readonly refundRaw: number) {}
+  constructor(readonly holdId: string, readonly chargeRaw: number) {}
   check = () => true;
   run(m: Model, r: BalanceStore): void {
     const open = m.holds.get(this.holdId);
-    // An open hold settles against its OWN hash with a refund clamped to [0, micros] (what handler.ts does);
-    // an unopened id is a no-op regardless of the args.
-    const hash = open ? open.hash : "h1";
-    const refund = open ? Math.max(0, Math.min(this.refundRaw, open.micros)) : this.refundRaw;
-    expect(r.settleHold(this.holdId, hash, refund)).toBe(open != null);
+    // The handler clamps the actual charge to [0, held]. The ledger—not the caller—loads the token and
+    // reserved amount, then derives the refund. An unopened id is a no-op regardless of the charge.
+    const hash = open?.hash ?? "h1";
+    const charge = open ? Math.max(0, Math.min(this.chargeRaw, open.micros)) : this.chargeRaw;
+    expect(r.settleHold(this.holdId, charge)).toBe(open != null);
     if (open) {
       m.holds.delete(this.holdId);
+      const refund = open.micros - charge;
       if (refund > 0) m.balances.set(hash, (m.balances.get(hash) ?? 0) + refund);
       expect(r.getBalance(hash)).toBe(m.balances.get(hash)!);
     }
   }
-  toString = () => `settleHold(${this.holdId}, ${this.refundRaw})`;
+  toString = () => `settleHold(${this.holdId}, ${this.chargeRaw})`;
 }
 
 class RecoverHoldsCmd implements fc.Command<Model, BalanceStore> {
@@ -182,14 +183,24 @@ test("settleHold refunds once and is idempotent — a drain racing the natural s
   r.credit("h1", 1000);
   expect(r.openHold("h1", 400, "H")).toBe(true); // balance 600
   // actual cost 250 → refund 150
-  expect(r.settleHold("H", "h1", 150)).toBe(true);
+  expect(r.settleHold("H", 250)).toBe(true);
   expect(r.getBalance("h1")).toBe(750);
   // A second settle (e.g. the shutdown drain after the natural one) → no-op, no double refund.
-  expect(r.settleHold("H", "h1", 150)).toBe(false);
+  expect(r.settleHold("H", 250)).toBe(false);
   expect(r.getBalance("h1")).toBe(750);
   // And boot recovery ignores the already-closed hold.
   expect(r.recoverHolds()).toEqual({ count: 0, micros: 0 });
   expect(r.getBalance("h1")).toBe(750);
+});
+
+test("settleHold rejects a charge outside its recorded hold without changing the balance or journal", () => {
+  const r = openDb(":memory:");
+  r.credit("h1", 1000);
+  expect(r.openHold("h1", 400, "H")).toBe(true);
+  expect(() => r.settleHold("H", 401)).toThrow(RangeError);
+  expect(r.getBalance("h1")).toBe(600);
+  expect(r.recoverHolds()).toEqual({ count: 1, micros: 400 });
+  expect(r.getBalance("h1")).toBe(1000);
 });
 
 test("openHold writes no journal row and makes no debit when the balance can't cover it", () => {

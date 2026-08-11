@@ -8,6 +8,7 @@ import { test, expect, spyOn } from "bun:test";
 import * as metrics from "../src/metrics";
 import { createHandler, type HandlerDeps, type RailView } from "./support/handler-combined";
 import { openDb, hashToken } from "../src/ledger/db";
+import { localMeteringLedger } from "../src/ledger/port";
 import { openOrderStore } from "../src/ledger/orders";
 import { byteBoundHold } from "../src/hold";
 import { priceUsage } from "../src/cost";
@@ -18,7 +19,7 @@ function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response
     anthropic: { apiKey: "k", baseUrl: "https://up.example", version: "2023-06-01", estimateHold: byteBoundHold },
     upstreamTimeoutMs: 1000,
     margin: 1.15, buyMinUsd: 5, buyMaxUsd: 2000, orderTtlMs: 4 * 60 * 60 * 1000, maxOpenOrders: 1000,
-    maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances, orders: openOrderStore(":memory:"),
+    maxBuyBodyBytes: 4096, maxMessagesBodyBytes: 33_554_432, balances: localMeteringLedger(balances), orders: openOrderStore(":memory:"),
     upstreamFetch: upstreamFetch as typeof fetch,
     rails: new Map<string, RailView>([["monero", { name: "monero", createAddress: async () => ({ address: "8a", orderIndex: 0 }), rateUsd: async () => 150, scale: 1e12, unit: "XMR", confirmations: 10, paymentUri: (a, amt) => `monero:${a}?tx_amount=${amt}` }]]),
     defaultRail: "monero",
@@ -65,7 +66,7 @@ const warnText = (spy: any) => spy.mock.calls.map((c: any[]) => String(c[0])).jo
 test("shutdown drain of a live no-usage stream → full refund, NO refunded-in-full page", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   metrics.reset(0);
-  const inflight = new Set<(r?: "drain") => void>();
+  const inflight = new Set<(r?: "drain") => Promise<void>>();
   // a stream that opens but never produces a frame → stays live (settle pending) until we drain it
   let cancelled = false;
   const liveStream = async () => new Response(new ReadableStream<Uint8Array>({
@@ -80,8 +81,8 @@ test("shutdown drain of a live no-usage stream → full refund, NO refunded-in-f
   const res = await handler(streamReq("pr_d")); // never read → settle stays pending in inflight
   expect(res.status).toBe(200);
   expect(inflight.size).toBe(1);
-  [...inflight][0]("drain"); // shutdown drain
-  await new Promise((r) => setTimeout(r, 0)); // let the fire-and-forget upstream cancellation run
+  await [...inflight][0]("drain"); // shutdown drain waits for the ledger settlement
+  await new Promise((r) => setTimeout(r, 0)); // let upstream cancellation finish
 
   expect(cancelled).toBe(true); // even a no-usage stall must release the upstream read during shutdown
   expect(balances.getBalance(hash)).toBe(before); // refunded

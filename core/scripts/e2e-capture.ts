@@ -32,6 +32,7 @@ process.env.PENDING_DB_PATH = ":memory:";
 const { createHandler } = await import("../test/support/handler-combined");
 const { byteBoundHold } = await import("../src/hold");
 const { openDb, hashToken } = await import("../src/ledger/db");
+const { localMeteringLedger } = await import("../src/ledger/port");
 const { openOrderStore } = await import("../src/ledger/orders");
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
@@ -62,7 +63,7 @@ const deps: HandlerDeps = {
   maxOpenOrders: 1000,
   maxBuyBodyBytes: 4096,
   maxMessagesBodyBytes: 33_554_432,
-  balances,
+  balances: localMeteringLedger(balances),
   orders: openOrderStore(":memory:"),
   upstreamFetch: fetch,
   rails: new Map<string, RailView>([

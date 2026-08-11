@@ -3,7 +3,7 @@
 // endpoint factories (endpoints/proxy.ts, endpoints/payments.ts). Each endpoint factory destructures only what it needs. Kept narrow on purpose (ISP): the endpoints see
 // the rail registry + the order/balance store methods + the limits, never the full handler internals.
 import type { RailView } from "../rails/types";
-import type { BalanceStore } from "../ledger/db";
+import type { MeteringLedgerPort } from "../ledger/port";
 import type { OrdersStore } from "../ledger/orders";
 import type { OrderProgress } from "../ledger/orderstatus";
 import type { TokenBucket } from "../ratelimit";
@@ -13,7 +13,7 @@ import type { ModelListing } from "../cost";
 // Reads only the balance store + the served-model catalog; never the rails or order store.
 export type ProxyEndpointDeps = {
   servedModels: ModelListing[]; // GET /v1/models: the priced models an active provider owns (computed once at boot)
-  getBalance: BalanceStore["getBalance"]; // /balance
+  getBalance: MeteringLedgerPort["getBalance"]; // /balance
   readRateLimit?: TokenBucket; // global read throttle for /balance; omitted = no limit (tests). One bucket per trust domain.
 };
 

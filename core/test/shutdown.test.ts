@@ -20,9 +20,9 @@ const fakeClock = (onTick?: (t: number) => void) => {
 test("force-settles every stream still live at the grace deadline, exactly once", async () => {
   const clock = fakeClock(); // streams never finish on their own → both hit the deadline
   const settled: string[] = [];
-  const inflight = new Set<() => void>();
+  const inflight = new Set<() => Promise<void>>();
   const add = (id: string) => {
-    const s = () => {
+    const s = async () => {
       settled.push(id);
       inflight.delete(s); // settle() removes itself, mutating the set mid-drain — the snapshot must survive this
     };
@@ -40,8 +40,8 @@ test("force-settles every stream still live at the grace deadline, exactly once"
 });
 
 test("does NOT force-settle when in-flight streams finish naturally before the deadline", async () => {
-  const inflight = new Set<() => void>();
-  const s = () => inflight.delete(s);
+  const inflight = new Set<() => Promise<void>>();
+  const s = async () => { inflight.delete(s); };
   inflight.add(s);
   // The stream finishes on its own once the (simulated) clock passes 200ms — well inside the grace.
   const clock = fakeClock((t) => {
@@ -83,16 +83,16 @@ test("a throwing settle() does not strand its siblings — they still settle, th
   const clock = fakeClock(); // none finish naturally → all hit the deadline
   const settled: string[] = [];
   const errors: unknown[] = [];
-  const inflight = new Set<() => void>();
+  const inflight = new Set<() => Promise<void>>();
   const good = (id: string) => {
-    const s = () => {
+    const s = async () => {
       settled.push(id);
       inflight.delete(s);
     };
     inflight.add(s);
   };
   const bad = () => {
-    const s = () => {
+    const s = async () => {
       inflight.delete(s);
       throw new Error("settle boom");
     };
@@ -113,8 +113,8 @@ test("a throwing settle() does not strand its siblings — they still settle, th
 test("graceMs=0 force-settles immediately with no natural-completion window", async () => {
   const clock = fakeClock();
   const settled: string[] = [];
-  const inflight = new Set<() => void>();
-  const s = () => {
+  const inflight = new Set<() => Promise<void>>();
+  const s = async () => {
     settled.push("x");
     inflight.delete(s);
   };
@@ -130,8 +130,8 @@ test("graceMs=0 force-settles immediately with no natural-completion window", as
 test("a rejected handlersReturned still drains a live stream (no unhandled rejection, force-settled at deadline)", async () => {
   const clock = fakeClock();
   const settled: string[] = [];
-  const inflight = new Set<() => void>();
-  const s = () => {
+  const inflight = new Set<() => Promise<void>>();
+  const s = async () => {
     settled.push("x");
     inflight.delete(s);
   };
@@ -149,14 +149,14 @@ test("force-settle iterates a SNAPSHOT, so a settle() that removes ANOTHER strag
   // Iterating the live Set instead would skip the removed sibling; the snapshot must not.
   const clock = fakeClock();
   const visited: string[] = [];
-  const inflight = new Set<() => void>();
-  let sb: () => void;
-  const sa = () => {
+  const inflight = new Set<() => Promise<void>>();
+  let sb: () => Promise<void>;
+  const sa = async () => {
     visited.push("a");
     inflight.delete(sa);
     inflight.delete(sb); // also removes b BEFORE the loop would reach it
   };
-  sb = () => {
+  sb = async () => {
     visited.push("b");
     inflight.delete(sb);
   };
@@ -167,4 +167,39 @@ test("force-settle iterates a SNAPSHOT, so a settle() that removes ANOTHER strag
 
   expect(res.forceSettled).toBe(2); // both settled from the snapshot (live-set iteration would skip b → 1)
   expect(visited.sort()).toEqual(["a", "b"]);
+});
+
+test("force-settle awaits an asynchronous ledger settlement before reporting the drain complete", async () => {
+  const clock = fakeClock();
+  let release!: () => void;
+  let started!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const began = new Promise<void>((r) => { started = r; });
+  const inflight = new Set<() => Promise<void>>();
+  const settle = async () => {
+    started();
+    await gate;
+    inflight.delete(settle);
+  };
+  inflight.add(settle);
+  let returned = false;
+
+  const draining = drainInflight({
+    inflight,
+    handlersReturned: Promise.resolve(),
+    graceMs: 0,
+    now: clock.now,
+    sleep: clock.sleep,
+  }).then((result) => {
+    returned = true;
+    return result;
+  });
+  await began;
+
+  expect(returned).toBe(false);
+  expect(inflight.size).toBe(1);
+
+  release();
+  expect(await draining).toEqual({ forceSettled: 1 });
+  expect(inflight.size).toBe(0);
 });
