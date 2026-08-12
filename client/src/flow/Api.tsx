@@ -59,7 +59,7 @@ const OPENAI_ERROR_SHAPE = `{
 // /models page. Tinfoil's open-weight set is sealed (a TEE that can't read your text), so it takes the seal.
 const CLAUDE_IDS = ["claude-opus-4-8", "claude-haiku-4-5", "claude-fable-5"];
 const OPENAI_IDS = ["gpt-5.5", "gpt-5.5-pro"];
-const TINFOIL_IDS = ["gpt-oss-120b", "glm-5-2", "kimi-k2-6"];
+export const TINFOIL_IDS = ["gpt-oss-120b", "kimi-k3", "glm-5-2"];
 
 // Tinfoil is the sealed-enclave provider, so its coin takes the purple seal ring instead of acid (same
 // semantic as the SquareGlyph sealed marker on /models).
