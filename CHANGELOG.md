@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.1](https://github.com/nullsink/nullsink/compare/v1.13.0...v1.13.1) (2026-08-12)
+
+
+### Bug Fixes
+
+* **pricing:** refresh the committed model catalogue from models.dev ([055bfbb](https://github.com/nullsink/nullsink/commit/055bfbb44076e40b3e8ff3fc7b5d6aaddc2dc7eb))
+
 ## [1.13.0](https://github.com/nullsink/nullsink/compare/v1.12.0...v1.13.0) (2026-08-09)
 
 
