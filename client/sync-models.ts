@@ -48,7 +48,7 @@ function isDatedAlias(id: string): boolean {
 const FAMILY: Record<string, string[]> = {
   anthropic: ["claude-fable", "claude-opus", "claude-sonnet", "claude-haiku"],
   openai: ["gpt-5", "o4", "o3", "o1", "gpt-4.1", "gpt-4o", "gpt-4", "gpt-3"],
-  tinfoil: ["glm", "kimi", "gpt-oss-120b", "llama", "gemma", "gpt-oss"],
+  tinfoil: ["kimi", "glm", "gpt-oss-120b", "llama", "gemma", "gpt-oss"],
 };
 
 // First (longest) matching family prefix wins; an unlisted family sorts last.
