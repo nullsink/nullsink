@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.2](https://github.com/nullsink/nullsink/compare/v1.13.1...v1.13.2) (2026-08-12)
+
+
+### Bug Fixes
+
+* **client:** refresh Tinfoil model examples ([#173](https://github.com/nullsink/nullsink/issues/173)) ([966fd98](https://github.com/nullsink/nullsink/commit/966fd981c0709d83a81f8366204eea4b74e1ce63))
+
 ## [1.13.1](https://github.com/nullsink/nullsink/compare/v1.13.0...v1.13.1) (2026-08-12)
 
 
