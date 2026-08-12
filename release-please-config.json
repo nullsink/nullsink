@@ -3,6 +3,7 @@
   "release-type": "simple",
   "include-component-in-tag": false,
   "bump-minor-pre-major": true,
+  "last-release-sha": "4e4e08d197f94a1df22fd326ff094edb9eb57f81",
   "packages": {
     ".": {
       "component": "",
