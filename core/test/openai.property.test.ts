@@ -316,13 +316,14 @@ test("default output cap: with the default off (0, the prod-test default), an om
   expect(j.error.type).toBe("invalid_request_error");
 });
 
-test("masked upstream errors on an OpenAI endpoint wear OpenAI's native envelope (opaque), refunded, no leak", async () => {
-  const errSpy = spyOn(console, "error").mockImplementation(() => {}); // masked errors log a server-side snippet
+test("OpenAI upstream errors relay exact detail except operator-private auth, and always refund", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const token = "pr_oamask";
   const cases = [
-    { up: 401, body: JSON.stringify({ error: { message: "Incorrect API key SECRET-oa-key", type: "invalid_request_error", code: "invalid_api_key" } }), want: 503, type: "server_error", code: "service_unavailable", retry: "false" },
-    { up: 429, body: "slow down LEAK-oa", want: 429, type: "rate_limit_error", code: "rate_limited", retry: "true" },
-    { up: 500, body: "boom SECRET-oa", want: 503, type: "server_error", code: "service_unavailable", retry: "true" },
+    { up: 401, body: JSON.stringify({ error: { message: "Incorrect API key SECRET-oa-key", type: "invalid_request_error", code: "invalid_api_key" } }), want: 503, relayed: false, retry: "false" },
+    { up: 500, body: JSON.stringify({ error: { message: "Gateway misclassified our key failure SECRET-oa-key", type: "invalid_request_error", code: "invalid_api_key" } }), want: 503, relayed: false, retry: "false" },
+    { up: 429, body: JSON.stringify({ error: { message: "Per-model limit reached; retry in 12s", type: "rate_limit_error", code: "rate_limit_exceeded" } }), want: 429, relayed: true, retry: "true" },
+    { up: 500, body: JSON.stringify({ error: { message: "Unsupported thinking_effort='minimal'; supported values are ['high', 'low', 'max'].", type: "InternalServerError", code: "unsupported_value" } }), want: 500, relayed: true, retry: "true" },
   ];
   for (const c of cases) {
     const { handler, balances } = makeHandler(async () => new Response(c.body, { status: c.up, headers: { "content-type": "application/json" } }));
@@ -331,11 +332,15 @@ test("masked upstream errors on an OpenAI endpoint wear OpenAI's native envelope
     const out = await res.text();
     expect([c.up, res.status]).toEqual([c.up, c.want]);
     expect([c.up, res.headers.get("x-should-retry")]).toEqual([c.up, c.retry]);
-    const j = JSON.parse(out);
-    expect([c.up, j.error.type]).toEqual([c.up, c.type]); // OpenAI-native object envelope
-    expect([c.up, j.error.code]).toEqual([c.up, c.code]);
-    expect([c.up, j.error.message]).toEqual([c.up, c.code]); // opaque generic code, never the upstream body
-    expect([c.up, out.includes("SECRET-oa") || out.includes("LEAK-oa")]).toEqual([c.up, false]); // body never relayed
+    if (c.relayed) {
+      expect([c.up, out]).toEqual([c.up, c.body]);
+    } else {
+      const j = JSON.parse(out);
+      expect([c.up, j.error.type]).toEqual([c.up, "server_error"]);
+      expect([c.up, j.error.code]).toEqual([c.up, "service_unavailable"]);
+      expect([c.up, j.error.message]).toEqual([c.up, "service_unavailable"]);
+      expect([c.up, out.includes("SECRET-oa")]).toEqual([c.up, false]);
+    }
     expect([c.up, balances.getBalance(hashToken(token))]).toEqual([c.up, INITIAL]); // refunded in full
   }
   errSpy.mockRestore();

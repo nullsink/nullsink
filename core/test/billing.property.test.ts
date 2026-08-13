@@ -198,9 +198,9 @@ test("non-billable outcomes refund in full (status + zero net debit)", async () 
       let wantStatus: number;
       switch (outcome.kind) {
         case "non2xx":
-          // a 5xx is our/upstream side, so the handler sanitizes it as 503 (see relayOrSanitizeUpstream)
+          // The provider's exact 5xx is transparent; it is still non-billable and refunded in full.
           upstream = async () => new Response(JSON.stringify({ error: "upstream boom" }), { status: 500 });
-          wantStatus = 503;
+          wantStatus = 500;
           break;
         case "noUsage":
           upstream = async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
@@ -228,28 +228,28 @@ test("non-billable outcomes refund in full (status + zero net debit)", async () 
   errSpy.mockRestore();
 });
 
-// Non-OK responses are always refunded. User-fixable request errors relay verbatim; operator auth/billing
-// stays opaque + terminal; transient throttle/server overload is sanitized but explicitly retryable.
-test("upstream errors: safe semantics preserved, operator state masked (always refunded, no leak)", async () => {
+// Non-OK responses are always refunded. Every upstream response relays verbatim except errors describing
+// nullsink's own upstream credentials/account/billing state, which stay opaque and terminal.
+test("upstream errors: exact details relay while operator auth/billing stays private (always refunded)", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const model = "claude-opus-4-8";
   const cases = [
-    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "max_tokens: too large for model" } }), want: 400, relayed: true, label: "generic 400 invalid_request" },
+    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "max_tokens: too large for model" } }), want: 400, relayed: true, retry: "false", label: "generic 400 invalid_request" },
     // a real bad request whose message echoes the user's own text containing "billing"/"quota": must RELAY
     // (the tightened isBillingError scopes to error.type/code + a tight phrase, not the whole body)
-    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: too long; trim your notes about billing and quota usage" } }), want: 400, relayed: true, label: "400 echoing billing/quota in user text (must relay)" },
-    { up: 413, body: JSON.stringify({ type: "error", error: { type: "request_too_large" } }), want: 413, relayed: true, label: "413 too large" },
+    { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages.0.content: too long; trim your notes about billing and quota usage" } }), want: 400, relayed: true, retry: "false", label: "400 echoing billing/quota in user text (must relay)" },
+    { up: 413, body: JSON.stringify({ type: "error", error: { type: "request_too_large" } }), want: 413, relayed: true, retry: "false", label: "413 too large" },
     { up: 400, body: JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API. Purchase credits at https://console.anthropic.com/settings/billing" } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "400 billing (the leak)" },
     // OpenAI ships out-of-funds as a 429 insufficient_quota (per its docs), which retrying never clears, so
-    // it must mask to 503, NOT 429 rate_limited. A real throttle 429 (below) still masks to 429.
+    // it must mask to 503. A real throttle 429 (below) relays with its actionable provider detail.
     { up: 429, body: JSON.stringify({ error: { type: "insufficient_quota", code: "insufficient_quota", message: "You exceeded your current quota, please check your plan and billing details." } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "429 openai insufficient_quota -> 503" },
     // Anthropic also defines a 402 billing_error (real low-credit usually arrives as the 400 above)
     { up: 402, body: JSON.stringify({ type: "error", error: { type: "billing_error", message: "There's an issue with your billing or payment information." } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "402 anthropic billing_error" },
     { up: 401, body: JSON.stringify({ error: { message: "invalid api key" } }), want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "401 our key" },
     { up: 403, body: "forbidden", want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "false", label: "403 permission" },
-    { up: 429, body: "slow down", want: 429, relayed: false, type: "rate_limit_error", message: "rate_limited", retry: "true", label: "429 provider throttle" },
-    { up: 500, body: "boom", want: 503, relayed: false, type: "api_error", message: "service_unavailable", retry: "true", label: "500 provider error" },
-    { up: 529, body: JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "LEAK-MARKER overloaded" }, request_id: "req_secret" }), want: 529, relayed: false, type: "overloaded_error", message: "upstream_overloaded", retry: "true", retryAfter: "12", label: "529 overloaded" },
+    { up: 429, body: "slow down", want: 429, relayed: true, retry: "true", label: "429 provider throttle" },
+    { up: 500, body: JSON.stringify({ type: "error", error: { type: "InternalServerError", message: "Unsupported thinking_effort='minimal'; supported values are ['high', 'low', 'max']." } }), want: 500, relayed: true, retry: "true", label: "misclassified request-validation 500" },
+    { up: 529, body: JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "provider overloaded" }, request_id: "req_support" }), want: 529, relayed: true, retry: "true", retryAfter: "12", label: "529 overloaded" },
   ];
   for (const c of cases) {
     const { handler, balances } = makeHandler(async () => new Response(c.body, {
@@ -265,9 +265,11 @@ test("upstream errors: safe semantics preserved, operator state masked (always r
     expect([c.label, balances.getBalance(hashToken(token))]).toEqual([c.label, initial]); // always refunded
     if (c.relayed) {
       expect([c.label, out]).toEqual([c.label, c.body]); // verbatim so the developer can fix the request
+      expect([c.label, res.headers.get("x-should-retry")]).toEqual([c.label, c.retry!]);
+      expect([c.label, res.headers.get("retry-after")]).toEqual([c.label, c.retryAfter ?? null]);
     } else {
       const lower = out.toLowerCase();
-      expect([c.label, lower.includes("credit balance") || lower.includes("anthropic") || lower.includes("console") || lower.includes("leak-marker") || lower.includes("req_secret")]).toEqual([c.label, false]);
+      expect([c.label, lower.includes("credit balance") || lower.includes("anthropic") || lower.includes("console") || lower.includes("invalid api key") || lower.includes("forbidden")]).toEqual([c.label, false]);
       // /v1/messages keeps a native Anthropic envelope while synthesizing the safe type/message.
       const j = JSON.parse(out);
       expect([c.label, j.type]).toEqual([c.label, "error"]);
@@ -311,7 +313,7 @@ test("buffered 2xx body-read failure bills only a conservative input floor", asy
   }
 });
 
-test("masked errors preserve a numeric Retry-After so clients still back off on the provider's delay", async () => {
+test("relayed transient errors preserve Retry-After and the exact provider body", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   const upstream: Upstream = async () => new Response("slow down", { status: 429, headers: { "content-type": "text/plain", "retry-after": "30" } });
   const { handler, balances } = makeHandler(upstream);
@@ -321,9 +323,7 @@ test("masked errors preserve a numeric Retry-After so clients still back off on 
   expect(res.status).toBe(429);
   expect(res.headers.get("retry-after")).toBe("30");
   expect(res.headers.get("x-should-retry")).toBe("true"); // genuine throttle → safe to mark retryable
-  const j = JSON.parse(await res.text());
-  expect(j.error.type).toBe("rate_limit_error"); // native envelope
-  expect(j.error.message).toBe("rate_limited"); // opaque generic code, not the upstream body
+  expect(await res.text()).toBe("slow down");
   errSpy.mockRestore();
 });
 
@@ -603,10 +603,7 @@ test("streaming: an upstream error frame THEN a client disconnect still refunds 
   errSpy.mockRestore();
 });
 
-test("streaming: a non-2xx upstream is masked (429 stays 429), refunds in full, and never leaks the body", async () => {
-  // Distinctive marker in the upstream body — the real no-leak assertion is that THIS never reaches the
-  // client (the native masked envelope's own `type` may coincide with the upstream's, so a substring check
-  // on the type would be a false signal; a unique marker is the meaningful guard).
+test("streaming: a non-2xx upstream relays exact detail and refunds in full", async () => {
   const upstream: Upstream = async () =>
     new Response(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "LEAK-MARKER-org-acme-42 slow down" } }), {
       status: 429,
@@ -621,9 +618,8 @@ test("streaming: a non-2xx upstream is masked (429 stays 429), refunds in full, 
   expect(res.status).toBe(429);
   expect(res.headers.get("x-should-retry")).toBe("true");
   const j = JSON.parse(out);
-  expect(j.error.type).toBe("rate_limit_error"); // native masked envelope
-  expect(j.error.message).toBe("rate_limited"); // opaque generic code
-  expect(out).not.toContain("LEAK-MARKER"); // the upstream body is never relayed
+  expect(j.error.type).toBe("rate_limit_error");
+  expect(j.error.message).toBe("LEAK-MARKER-org-acme-42 slow down");
   expect(balances.getBalance(hashToken(token))).toBe(initial);
 });
 

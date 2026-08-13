@@ -13,8 +13,8 @@
 //     classified in handler.ts relayOrSanitizeUpstream + the transport catch. Level is per-member, not a
 //     family-wide rule: the our/provider-side causes below pair with a per-event log → WARN; relayed4xx is
 //     the CLIENT's own request error → routine INFO (no per-event log — a 4xx body can echo the prompt).
-//       throttle    a GENUINE HTTP 429 rate limit — the ceiling tripwire (NOT an out-of-funds 429)
-//       server      5xx / overloaded — provider degraded
+//       throttle    a relayed genuine HTTP 429 rate limit — the ceiling tripwire (NOT an out-of-funds 429)
+//       server      relayed 5xx / overload — provider failure or a compatibility layer's misclassified request error
 //       auth        401/403 — OUR key/permission is wrong (operator must fix)
 //       billing     out-of-funds (the upstream wore 400/402/429; we mask to 503) — top up the account
 //       timeout     the upstream call hit our wall-clock cap (504) — often a long generation, not an outage
@@ -23,10 +23,10 @@
 //                   ours, not the provider's). Routine INFO, not a problem: no operator action, it just
 //                   itemizes the gap. (Emitted as `upstream:4xx`, keeping the family's label prefix.)
 //       notfound    the provider rejected the MODEL (Anthropic 404 / OpenAI 404|400) — the CLIENT's bad or
-//                   unsupported model, returned as our `unsupported_model`. Routine INFO, like relayed4xx.
+//                   unsupported model, relayed with the exact provider explanation. Routine INFO, like relayed4xx.
 //                   Emitted as `upstream:notfound`.
-//       other       a masked non-2xx that is none of the buckets above (a rare 405/409/…) — our/provider
-//                   side, masked to 503. WARN. Emitted as `upstream:other`. With notfound + other, EVERY
+//       other       a relayed non-2xx that is none of the buckets above (a rare 405/409/…). WARN. Emitted as
+//                   `upstream:other`. With notfound + other, EVERY
 //                   forwarded non-2xx is now bucketed, so served + Σ upstream.* = req (the gap reconciles).
 //   failure.*  — detail counters for the ambiguous accepted-request failures whose rate and exposure we need to
 //     measure. These do NOT add another primary request outcome; they annotate servedPartial,
@@ -258,7 +258,7 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   if (m.upstream.billing) problems.push(`upstream:billing=${m.upstream.billing}`);
   if (m.upstream.timeout) problems.push(`upstream:timeout=${m.upstream.timeout}`);
   if (m.upstream.unreachable) problems.push(`upstream:unreachable=${m.upstream.unreachable}`);
-  if (m.upstream.other) problems.push(`upstream:other=${m.upstream.other}`); // a rare masked 405/409/… — our/provider side
+  if (m.upstream.other) problems.push(`upstream:other=${m.upstream.other}`); // a rare relayed 405/409/…
   if (m.reject.buy) problems.push(`reject:buy=${m.reject.buy}`);
   if (m.reject.read) problems.push(`reject:read=${m.reject.read}`);
   if (m.reject.orders) problems.push(`reject:orders=${m.reject.orders}`);

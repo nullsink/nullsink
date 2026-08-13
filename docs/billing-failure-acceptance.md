@@ -6,7 +6,7 @@ change; these externally observable outcomes must not change without an explicit
 | Scenario | What the caller observes | Settlement |
 | --- | --- | --- |
 | Provider fails before returning response headers | `502` or `504` | Full refund |
-| Provider returns non-2xx | Relayed or sanitized error | Full refund |
+| Provider returns non-2xx | Exact upstream status/body, except operator auth/permission/billing failures are sanitized | Full refund |
 | Buffered provider returns 2xx and a complete usage-bearing body | Complete response | Exact reported usage |
 | Buffered provider returns 2xx headers, then its body breaks | nullsink returns `502`; no partial provider body is forwarded | Conservative input-only charge |
 | Caller disconnects before nullsink has response headers/body to return | Caller receives no response | Downstream abort is not propagated; accepted upstream work continues and settles by its normal terminal outcome |
