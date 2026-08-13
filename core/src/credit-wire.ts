@@ -9,7 +9,7 @@
 // read after accept.) The ledger owns the socket's mode; see credit-server.ts for the bind-time rules.
 
 // Bump on ANY change to the request/response shape. The server refuses a mismatch (fail closed + loud) so a
-// partial rollback that pairs new payments with an old proxy wedges the durable outbox instead of crediting
+// partial rollback that pairs new payments with an old ledger wedges the durable outbox instead of crediting
 // under a shape the two sides don't share.
 export const CREDIT_WIRE_VERSION = 1;
 export const CREDIT_PATH = "/credit";
