@@ -97,10 +97,25 @@ const openaiDeps = OPENAI_API_KEY
   : undefined;
 
 // Tinfoil provider — OPTIONAL, OpenAI-compatible (open-weight models in attested TEEs). Shares
-// /v1/chat/completions with OpenAI (the handler routes by model). No count_tokens endpoint → byte-bound hold.
+// /v1/chat/completions with OpenAI (the handler routes by model). Its input-token endpoint accepts the Chat
+// body and selects the tokenization fields itself, so the shared estimator needs no omit list.
 const TINFOIL_API_KEY = process.env.TINFOIL_API_KEY;
 const TINFOIL_BASE_URL = process.env.TINFOIL_BASE_URL ?? "https://inference.tinfoil.sh";
-const tinfoilDeps = TINFOIL_API_KEY ? { apiKey: TINFOIL_API_KEY, baseUrl: TINFOIL_BASE_URL, estimateHold: byteBoundHold } : undefined;
+const tinfoilDeps = TINFOIL_API_KEY
+  ? {
+      apiKey: TINFOIL_API_KEY,
+      baseUrl: TINFOIL_BASE_URL,
+      estimateHold:
+        HOLD_ESTIMATOR === "byte"
+          ? byteBoundHold
+          : makeCountTokensHold({
+              countUrl: TINFOIL_BASE_URL + "/v1/chat/completions/input_tokens",
+              authHeaders: { authorization: `Bearer ${TINFOIL_API_KEY}` },
+              omit: new Set(),
+              timeoutMs: COUNT_TOKENS_TIMEOUT_MS,
+            }),
+    }
+  : undefined;
 
 // At least one upstream provider must be configured — an all-absent set would 404 every metered path. Fail fast.
 if (!anthropicDeps && !openaiDeps && !tinfoilDeps) {

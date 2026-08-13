@@ -115,12 +115,13 @@ estimators (`hold.ts`, selected by `HOLD_ESTIMATOR`):
   token counts can't exceed byte counts, and the output is capped by `max_tokens`. It's loose —
   at worst it over-reserves and triggers a spurious "insufficient balance."
 - **count_tokens** (default) — asks the provider's *free* token counter for the exact input size
-  (Anthropic `POST /v1/messages/count_tokens`; OpenAI `POST /v1/responses/input_tokens`). The
-  counter measures the input only — it says nothing about output — so nullsink sizes the hold as
-  that count plus `max_tokens × output_rate` on top. The count is a documented estimate, so it's
-  padded (~10% + 64 tokens) and **capped at the byte bound**; on any failure — bad response,
-  timeout, a count below 1, or an OpenAI chat-completions body the endpoint won't count — it falls
-  back to the byte bound. The byte cap and settle-time clamp are what keep it sound.
+  (Anthropic `POST /v1/messages/count_tokens`; OpenAI `POST /v1/responses/input_tokens`; Tinfoil
+  `POST /v1/chat/completions/input_tokens`). The counter measures the input only — it says nothing
+  about output — so nullsink sizes the hold as that count plus `max_tokens × output_rate` on top.
+  The count is a documented estimate, so it's padded (~10% + 64 tokens) and **capped at the byte
+  bound**; on any failure — bad response, timeout, a count below 1, or an OpenAI chat-completions
+  body the endpoint won't count — it falls back to the byte bound. The byte cap and settle-time
+  clamp are what keep it sound.
 
 ## Settle, and why a balance can't go negative
 
