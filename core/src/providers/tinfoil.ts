@@ -56,7 +56,7 @@ export function makeTinfoilProvider(cfg: TinfoilConfig): Provider {
     id: "tinfoil",
     baseUrl: cfg.baseUrl,
     upstreamPath: "/v1/chat/completions",
-    estimateHold: cfg.estimateHold, // always the byte bound — Tinfoil has no count_tokens endpoint (proxy.ts)
+    estimateHold: cfg.estimateHold,
     // Tinfoil follows the OpenAI-compatible Bearer convention, with x-api-key as fallback.
     readToken: (req) => readProxyToken(req, "bearer"),
     premiumReject: tinfoilPremiumReject,

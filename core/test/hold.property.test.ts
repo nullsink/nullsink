@@ -179,6 +179,41 @@ test("count_tokens body forwards unknown/new fields (denylist) but strips contro
   expect(sent.model).toBe("claude-opus-4-8");
 });
 
+test("Tinfoil input-token counting sends the full Chat body with Bearer auth", async () => {
+  let sentUrl = "";
+  let sentHeaders: Headers | null = null;
+  let sentBody: any = null;
+  const capture: typeof fetch = (async (url: string, init: any) => {
+    sentUrl = url;
+    sentHeaders = new Headers(init.headers);
+    sentBody = JSON.parse(init.body);
+    return new Response(JSON.stringify({ input_tokens: 42 }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+  const body = {
+    model: "glm-5-2",
+    max_completion_tokens: 100,
+    stream: true,
+    messages: [{ role: "user", content: "hi" }],
+  };
+
+  const got = await makeCountTokensHold({
+    countUrl: "https://tinfoil.example/v1/chat/completions/input_tokens",
+    authHeaders: { authorization: "Bearer tinfoil-key" },
+    omit: new Set(),
+    timeoutMs: 1000,
+    fetchImpl: capture,
+  })({ model: "glm-5-2", raw: JSON.stringify(body), body, maxTokens: 100 });
+
+  expect(sentUrl).toBe("https://tinfoil.example/v1/chat/completions/input_tokens");
+  expect(sentHeaders!.get("authorization")).toBe("Bearer tinfoil-key");
+  expect(sentBody).toEqual(body); // Tinfoil selects the tokenization fields; nullsink needn't mirror that schema.
+  expect(got.inputTokens).toBe(42);
+  expect(got.inputTokensSource).toBe("counted");
+});
+
 test("count_tokens forwards the client's anthropic-beta (countHeaders) so beta-gated fields are accepted", async () => {
   let headers: Headers | null = null;
   const capture: typeof fetch = (async (_url: string, init: any) => {

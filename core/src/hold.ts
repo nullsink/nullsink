@@ -52,7 +52,7 @@ export function byteBoundHold({ model, raw, maxTokens, oneHourCache }: HoldInput
   };
 }
 
-// Tighter estimator: asks Anthropic's `/v1/messages/count_tokens` for the EXACT input-token count
+// Tighter estimator: asks the provider's input-token endpoint for the EXACT input-token count
 // (images included — the byte bound is ~62× loose on base64 images, ~5× on ASCII), then sizes the hold
 // at priceHoldBound(model, padded_input_tokens, max_tokens). count_tokens is free but a DOCUMENTED ESTIMATE
 // that "may differ slightly from actual usage", so we add token headroom (HOLD_INPUT_MARGIN/PAD) against
@@ -138,12 +138,12 @@ export const OPENAI_COUNT_OMIT = new Set([
 export type CountTokensHoldOptions = {
   countUrl: string; // full URL of the provider's token-count endpoint
   authHeaders: Record<string, string>; // provider auth (x-api-key+version, or Authorization: Bearer), merged with content-type
-  omit: Set<string>; // body fields to strip before counting (ANTHROPIC_COUNT_OMIT / OPENAI_COUNT_OMIT)
+  omit: Set<string>; // body fields to strip before counting; empty when the endpoint selects input fields itself
   timeoutMs: number;
   fetchImpl?: typeof fetch; // injectable so tests don't hit the network
 };
 
-// Both providers' counters return `{ input_tokens }`, so the parse + headroom + byte-cap logic is shared;
+// All provider counters return `{ input_tokens }`, so the parse + headroom + byte-cap logic is shared;
 // only the URL, auth headers, and omit-set differ (closed over per provider in proxy.ts).
 export function makeCountTokensHold(opts: CountTokensHoldOptions): HoldEstimator {
   const fetchImpl = opts.fetchImpl ?? fetch;
