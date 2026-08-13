@@ -189,7 +189,12 @@ test("a delayed retired-session start retry cannot reclaim leadership", async ()
   const second = client(f.socket, S2);
 
   const delayedFirstStart = first.startSession();
-  await firstReached;
+  await Promise.race([
+    firstReached,
+    delayedFirstStart.then(() => {
+      throw new Error("startSession completed before the post-commit barrier");
+    }),
+  ]);
   await second.startSession();
   expect(await second.openHold(HASH, 300, H1)).toBe(true);
   expect(f.ledger.getBalance(HASH)).toBe(700);

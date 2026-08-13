@@ -15,7 +15,7 @@ export function createCreditHandler(balances: BalanceStore, now: () => number = 
     if (req.method !== "POST" || new URL(req.url).pathname !== CREDIT_PATH)
       return Response.json({ error: "unsupported_endpoint" }, { status: 404 });
 
-    // Fail CLOSED and loud on a wire-version skew (a partial rollback pairing new payments with an old proxy):
+    // Fail CLOSED and loud on a wire-version skew (a partial rollback pairing new payments with an old ledger):
     // better to wedge the durable outbox — nothing is lost — than to credit under a shape the two sides don't share.
     const wire = req.headers.get(CREDIT_WIRE_HEADER);
     if (wire !== String(CREDIT_WIRE_VERSION)) {

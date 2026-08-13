@@ -1,32 +1,39 @@
 // The credit crossing over a unix socket. Exactly-once must survive the hop: the outbox is
 // at-least-once delivery, creditOnce's applied_orders marker is the idempotent receiver, and the sender acks ONLY
 // on a definite applied/already_applied. Anything else — timeout, non-2xx, an unrecognised 2xx body, no socket —
-// is AMBIGUOUS (the proxy may have committed and lost the response), so the row stays unacked and is retried.
-import { test, expect, afterEach } from "bun:test";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+// is AMBIGUOUS (the ledger may have committed and lost the response), so the row stays unacked and is retried.
+import { test, expect, afterEach, afterAll } from "bun:test";
+import { existsSync, mkdtempSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { openDb } from "../src/ledger/db";
 import { openOrderStore } from "../src/ledger/orders";
 import { createCreditHandler, serveCreditSocket } from "../src/credit-server";
 import { makeSocketSender, drainCreditOutboxOverSocket, oldestUnackedAgeMs, type CreditSender } from "../src/credit-sender";
-import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION } from "../src/credit-wire";
+import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION, parseCreditRequest } from "../src/credit-wire";
 
 const HASH = "a".repeat(64);
-const SOCK = "/tmp/nullsink-credit-test.sock";
+// Unix socket paths are short (104 bytes on macOS), so keep the unique worker directory directly under /tmp.
+const TEST_DIR = mkdtempSync("/tmp/nullsink-credit-test-");
+const SOCK = join(TEST_DIR, "credit.sock");
+const NOT_A_SOCKET = join(TEST_DIR, "not-a-socket");
 const NOW = 1_700_000_000_000;
 
-const rmSock = () => {
+const rmPath = (path: string) => {
   try {
-    if (existsSync(SOCK)) unlinkSync(SOCK);
+    if (existsSync(path)) unlinkSync(path);
   } catch {
     /* already gone */
   }
 };
+const rmSock = () => rmPath(SOCK);
 let running: { stop: () => void } | null = null;
 afterEach(() => {
   running?.stop();
   running = null;
   rmSock();
+  rmPath(NOT_A_SOCKET);
 });
+afterAll(() => rmSync(TEST_DIR, { recursive: true, force: true }));
 
 const creditReq = (body: unknown, wire: string | null = String(CREDIT_WIRE_VERSION)) =>
   new Request(`http://x${CREDIT_PATH}`, {
@@ -35,7 +42,7 @@ const creditReq = (body: unknown, wire: string | null = String(CREDIT_WIRE_VERSI
     body: JSON.stringify(body),
   });
 
-// --- the receiver (proxy side) ---
+// --- the receiver (ledger side) ---
 
 test("credit handler: first delivery applies; redelivery of the same key is already_applied (credited once)", async () => {
   const balances = openDb(":memory:");
@@ -70,7 +77,44 @@ test("credit handler: malformed credits are rejected and move no money", async (
     { hash: HASH, micros: 1 }, // missing key
     "nonsense",
   ];
-  for (const b of bad) expect((await h(creditReq(b))).status).toBe(400);
+  for (const b of bad) {
+    const r = await h(creditReq(b));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "invalid_credit" });
+  }
+  expect(balances.getBalance(HASH)).toBeNull();
+});
+
+test("credit parser: exact financial and identifier boundaries", () => {
+  const valid = { hash: HASH, micros: 0, idempotency_key: "k" };
+  expect(parseCreditRequest(valid)).toEqual(valid); // zero-micro dust credits are valid
+  expect(parseCreditRequest({ ...valid, idempotency_key: "k".repeat(200) })).not.toBeNull();
+
+  const invalid: Array<[string, unknown]> = [
+    ["null", null],
+    ["array", []],
+    ["coercible hash", { ...valid, hash: [HASH] }],
+    ["hash prefix", { ...valid, hash: `x${HASH}` }],
+    ["hash suffix", { ...valid, hash: `${HASH}x` }],
+    ["negative micros", { ...valid, micros: -1 }],
+    ["fractional micros", { ...valid, micros: 0.5 }],
+    ["unsafe micros", { ...valid, micros: Number.MAX_SAFE_INTEGER + 1 }],
+    ["empty key", { ...valid, idempotency_key: "" }],
+    ["key over 200", { ...valid, idempotency_key: "k".repeat(201) }],
+  ];
+  for (const [label, body] of invalid) expect([label, parseCreditRequest(body)]).toEqual([label, null]);
+});
+
+test("credit handler: malformed raw JSON is a 400 and moves no money", async () => {
+  const balances = openDb(":memory:");
+  const h = createCreditHandler(balances, () => NOW);
+  const r = await h(new Request(`http://x${CREDIT_PATH}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", [CREDIT_WIRE_HEADER]: String(CREDIT_WIRE_VERSION) },
+    body: "{",
+  }));
+  expect(r.status).toBe(400);
+  expect(await r.json()).toEqual({ error: "invalid_json" });
   expect(balances.getBalance(HASH)).toBeNull();
 });
 
@@ -95,21 +139,37 @@ test("round-trip over a real unix socket: applied, then already_applied; balance
   expect(balances.getBalance(HASH)).toBe(5_000_000);
 });
 
-test("the socket is bound owner-only (umask 0077): no group/other bits, so only the owning uid may connect", () => {
+test("the socket is bound owner-only without changing the process umask", () => {
   rmSock();
-  running = serveCreditSocket({ path: SOCK, balances: openDb(":memory:") });
-  expect(statSync(SOCK).isSocket()).toBe(true);
-  // connect(2) needs the WRITE bit; leaving group/other unset means only the owning uid may connect. Both
-  // services share that uid today, so this mode IS the authentication. A uid split must grant payments the
-  // write bit (group or POSIX ACL) and relax this assertion accordingly.
-  expect(statSync(SOCK).mode & 0o077).toBe(0);
+  const original = process.umask();
+  try {
+    process.umask(0o027); // explicit sentinel: independent of earlier tests and the runner's starting umask
+    running = serveCreditSocket({ path: SOCK, balances: openDb(":memory:") });
+    expect(process.umask()).toBe(0o027);
+    expect(statSync(SOCK).isSocket()).toBe(true);
+    // Production systemd widens the completed socket to the dedicated credit group before starting payments;
+    // this bind-level test proves there is no permissive creation window.
+    expect(statSync(SOCK).mode & 0o077).toBe(0);
+  } finally {
+    process.umask(original);
+  }
+});
+
+test("serveCreditSocket replaces a stale socket left by an earlier process", async () => {
+  const stale = Bun.serve({ unix: SOCK, fetch: () => new Response("stale") });
+  try {
+    running = serveCreditSocket({ path: SOCK, balances: openDb(":memory:"), now: () => NOW });
+    expect(await makeSocketSender(SOCK)({ hash: HASH, micros: 1, idempotency_key: "fresh" }))
+      .toEqual({ ok: true, outcome: "applied" });
+  } finally {
+    stale.stop(true);
+  }
 });
 
 test("serveCreditSocket refuses to unlink a path that is not a socket", () => {
-  const notASocket = "/tmp/nullsink-credit-not-a-socket";
-  Bun.write(notASocket, "i am a file");
-  expect(() => serveCreditSocket({ path: notASocket, balances: openDb(":memory:") })).toThrow(/not a socket/);
-  unlinkSync(notASocket);
+  writeFileSync(NOT_A_SOCKET, "i am a file");
+  expect(() => serveCreditSocket({ path: NOT_A_SOCKET, balances: openDb(":memory:") })).toThrow(/not a socket/);
+  expect(statSync(NOT_A_SOCKET).isFile()).toBe(true);
 });
 
 // --- the sender's ambiguity rules (never ack on anything but a definite outcome) ---
@@ -125,6 +185,53 @@ test("sender: a 2xx with an unrecognised body is NOT an ack", async () => {
   const server = Bun.serve({ unix: SOCK, fetch: () => Response.json({ result: "weird" }) });
   running = { stop: () => void server.stop(true) };
   expect(await makeSocketSender(SOCK)({ hash: HASH, micros: 1, idempotency_key: "k" })).toEqual({ ok: false, reason: "unrecognized_response" });
+});
+
+test("sender: null or malformed 2xx JSON is NOT an ack", async () => {
+  for (const response of [Response.json(null), new Response("{", { status: 200, headers: { "content-type": "application/json" } })]) {
+    rmSock();
+    const server = Bun.serve({ unix: SOCK, fetch: () => response });
+    try {
+      expect((await makeSocketSender(SOCK)({ hash: HASH, micros: 1, idempotency_key: "k" })).ok).toBe(false);
+    } finally {
+      server.stop(true);
+      rmSock();
+    }
+  }
+});
+
+test("sender: emits the exact versioned JSON request contract", async () => {
+  const seen: { value?: { method: string; path: string; wire: string | null; contentType: string | null; body: unknown } } = {};
+  const server = Bun.serve({
+    unix: SOCK,
+    fetch: async (req) => {
+      seen.value = {
+        method: req.method,
+        path: new URL(req.url).pathname,
+        wire: req.headers.get(CREDIT_WIRE_HEADER),
+        contentType: req.headers.get("content-type"),
+        body: await req.json(),
+      };
+      return Response.json({ result: "applied" });
+    },
+  });
+  running = { stop: () => void server.stop(true) };
+  const credit = { hash: HASH, micros: 1, idempotency_key: "k" };
+  expect(await makeSocketSender(SOCK)(credit)).toEqual({ ok: true, outcome: "applied" });
+  expect(seen.value).toEqual({
+    method: "POST",
+    path: CREDIT_PATH,
+    wire: String(CREDIT_WIRE_VERSION),
+    contentType: "application/json",
+    body: credit,
+  });
+});
+
+test("the socket stop handle actually stops accepting credits", async () => {
+  running = serveCreditSocket({ path: SOCK, balances: openDb(":memory:") });
+  running.stop();
+  running = null;
+  expect((await makeSocketSender(SOCK, 100)({ hash: HASH, micros: 1, idempotency_key: "k" })).ok).toBe(false);
 });
 
 test("sender: a non-2xx is not an ack", async () => {
@@ -164,7 +271,7 @@ test("crash before ack: the redelivered row reports already_applied and the bala
   orders.enqueueCredit("tx:1", HASH, 5_000_000, 100);
   const send = makeSocketSender(SOCK);
 
-  // Simulate the crash: the credit is delivered (and committed proxy-side) but ackCredit never runs.
+  // Simulate the crash: the credit is delivered (and committed ledger-side) but ackCredit never runs.
   expect(await send({ hash: HASH, micros: 5_000_000, idempotency_key: "tx:1" })).toEqual({ ok: true, outcome: "applied" });
   expect(orders.listUnackedCredits()).toHaveLength(1);
 

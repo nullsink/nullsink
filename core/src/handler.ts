@@ -19,6 +19,8 @@ import type { HoldEstimator } from "./hold";
 import type { MeteringLedgerPort } from "./ledger/port";
 import type { TokenBucket } from "./ratelimit";
 
+const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object";
+
 // Does an upstream error body indicate a billing/credit/quota failure (OUR account, not the user's
 // request)? Match the provider's STRUCTURED error fields (type/code, and a tight message phrase), not the
 // whole body: a generic 400 often echoes the user's own prompt, which could contain "billing"/"quota" and
@@ -26,16 +28,18 @@ import type { TokenBucket } from "./ratelimit";
 // Anthropic has no distinct type, so we anchor on its exact phrasing. Falls back to the raw text only when
 // the body isn't JSON.
 function isBillingError(text: string): boolean {
-  const phrase = /credit balance is too low|purchase credits|insufficient[_ ]?quota/i;
-  let err: any;
+  const phrase = /credit balance is too low|purchase credits/i;
+  let parsed: unknown;
   try {
-    err = JSON.parse(text)?.error;
+    parsed = JSON.parse(text);
   } catch {
     return phrase.test(text); // non-JSON body: best-effort on the raw text
   }
-  if (!err || typeof err !== "object") return phrase.test(text);
-  const tag = `${typeof err.type === "string" ? err.type : ""} ${typeof err.code === "string" ? err.code : ""}`;
-  return /insufficient_quota|billing/i.test(tag) || phrase.test(typeof err.message === "string" ? err.message : "");
+  if (!isRecord(parsed) || !isRecord(parsed.error)) return false;
+  const err = parsed.error;
+  const tags = [err.type, err.code].filter((value): value is string => typeof value === "string");
+  return tags.some((tag) => tag === "insufficient_quota" || tag === "billing_error")
+    || phrase.test(typeof err.message === "string" ? err.message : "");
 }
 
 // Did the provider reject OUR substituted upstream credential or permission? Status is usually 401/403, but
@@ -43,15 +47,16 @@ function isBillingError(text: string): boolean {
 // making unrelated statuses transparent cannot expose operator account state.
 function isOperatorAuthError(status: number, text: string): boolean {
   if (status === 401 || status === 403 || status === 407) return true;
-  let err: any;
+  let parsed: unknown;
   try {
-    err = JSON.parse(text)?.error;
+    parsed = JSON.parse(text);
   } catch {
     return false;
   }
-  if (!err || typeof err !== "object") return false;
-  const tag = `${typeof err.type === "string" ? err.type : ""} ${typeof err.code === "string" ? err.code : ""}`;
-  return /authentication_error|permission_error|invalid_?api_?key|unauthorized|forbidden/i.test(tag);
+  if (!isRecord(parsed) || !isRecord(parsed.error)) return false;
+  const err = parsed.error;
+  const tags = [err.type, err.code].filter((value): value is string => typeof value === "string");
+  return tags.some((tag) => ["authentication_error", "permission_error", "invalid_api_key"].includes(tag));
 }
 
 // Did the upstream reject the MODEL ITSELF (not the request shape)? Handled uniformly across providers +
@@ -60,17 +65,15 @@ function isOperatorAuthError(status: number, text: string): boolean {
 // `error.code: "model_not_found"`. Our metered paths are fixed + valid, so any 404 from them is a bad model;
 // OpenAI also flags it on a 400 via the code — which a bare status check would miss (and would wrongly relay).
 export function isModelNotFound(status: number, text: string): boolean {
-  let err: any;
+  if (status === 404) return true; // metered endpoints are fixed, so any 404 means their model is unavailable
+  let parsed: unknown;
   try {
-    err = JSON.parse(text)?.error;
+    parsed = JSON.parse(text);
   } catch {
-    return status === 404; // non-JSON body: fall back to the status
+    return false;
   }
-  if (err && typeof err === "object") {
-    if (err.code === "model_not_found") return true; // OpenAI (chat 404 / responses 400)
-    if (status === 404 && err.type === "not_found_error") return true; // Anthropic
-  }
-  return status === 404; // any other 404 on our fixed metered endpoints is a model-not-found
+  if (!isRecord(parsed) || !isRecord(parsed.error)) return false;
+  return parsed.error.code === "model_not_found"; // OpenAI /v1/responses reports this on a 400
 }
 
 // Structured detail for operator-private / model-not-found logs: the provider's stable error `type` (+ `code`
@@ -82,14 +85,14 @@ export function isModelNotFound(status: number, text: string): boolean {
 // Non-JSON → a short bounded
 // slice (no request_id possible); JSON without `error.*` → "" (don't slice the raw — it may hold request_id).
 export function maskedErrorDetail(text: string): string {
-  let parsed: any;
+  let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return text.slice(0, 120);
   }
-  const err = parsed?.error;
-  if (!err || typeof err !== "object") return "";
+  if (!isRecord(parsed) || !isRecord(parsed.error)) return "";
+  const err = parsed.error;
   const head = [err.type, err.code].filter((x) => typeof x === "string").join("/");
   const msg = typeof err.message === "string" ? err.message.slice(0, 200) : "";
   return [head, msg].filter(Boolean).join(": ");

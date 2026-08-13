@@ -17,6 +17,7 @@ test("isModelNotFound: catches every provider/endpoint model error despite diffe
   expect(isModelNotFound(404, ANTHROPIC_404)).toBe(true); // anthropic /v1/messages
   expect(isModelNotFound(404, OPENAI_CHAT_404)).toBe(true); // openai /v1/chat/completions
   expect(isModelNotFound(400, OPENAI_RESPONSES_400)).toBe(true); // openai /v1/responses — a bare 404 check would MISS this
+  expect(isModelNotFound(404, JSON.stringify({ error: { code: "invalid_value" } }))).toBe(true); // fixed endpoint: any 404 means model unavailable
   expect(isModelNotFound(404, "<html>gateway</html>")).toBe(true); // non-JSON 404 → status fallback
 });
 
@@ -25,6 +26,9 @@ test("isModelNotFound: a genuine non-model error is NOT a model-not-found (still
   expect(isModelNotFound(401, JSON.stringify({ error: { type: "authentication_error" } }))).toBe(false);
   expect(isModelNotFound(429, JSON.stringify({ error: { type: "rate_limit_error" } }))).toBe(false);
   expect(isModelNotFound(500, "boom")).toBe(false);
+  for (const error of [undefined, null, "model_not_found", ["model_not_found"]]) {
+    expect(isModelNotFound(400, JSON.stringify(error === undefined ? {} : { error }))).toBe(false);
+  }
 });
 
 test("maskedErrorDetail: logs type + model, DROPS the upstream request_id", () => {
@@ -37,7 +41,12 @@ test("maskedErrorDetail: logs type + model, DROPS the upstream request_id", () =
 test("maskedErrorDetail: openai includes type/code; non-JSON → short slice; JSON without error.* → empty", () => {
   expect(maskedErrorDetail(OPENAI_CHAT_404)).toContain("invalid_request_error/model_not_found");
   expect(maskedErrorDetail("<html>502 Bad Gateway</html>")).toBe("<html>502 Bad Gateway</html>");
+  expect(maskedErrorDetail("x".repeat(121))).toBe("x".repeat(120));
   expect(maskedErrorDetail(JSON.stringify({ request_id: "req_secret", x: 1 }))).toBe(""); // no error.* → don't slice raw (it holds request_id)
+  expect(maskedErrorDetail(JSON.stringify({ error: null, request_id: "req_secret" }))).toBe("");
+  expect(maskedErrorDetail(JSON.stringify({ error: "secret", request_id: "req_secret" }))).toBe("");
+  expect(maskedErrorDetail(JSON.stringify({ error: { type: ["billing_error"], code: 7, message: ["secret"] } }))).toBe("");
+  expect(maskedErrorDetail(JSON.stringify({ error: { message: "x".repeat(201) } }))).toBe("x".repeat(200));
 });
 
 function makeHandler(upstreamFetch: (url: string, init: any) => Promise<Response>) {
