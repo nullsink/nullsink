@@ -43,7 +43,9 @@ test("app unit installation is an allowlist without bitcoind", () => {
   const committed = readdirSync(DEPLOY_DIR)
     .filter((name) => /\.(?:service|timer)$/.test(name))
     .sort();
-  const allowlisted = [...installUnits.matchAll(/\b[\w@-]+\.(?:service|timer)\b/g)]
+  const unitLoop = installUnits.match(/for unit in \\\n([\s\S]*?); do/)?.[1];
+  expect(unitLoop).toBeDefined();
+  const allowlisted = [...(unitLoop ?? "").matchAll(/\b[\w@-]+\.(?:service|timer)\b/g)]
     .map((match) => match[0])
     .sort();
   expect(allowlisted).toEqual(committed);
