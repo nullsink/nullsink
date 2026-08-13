@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.14.0](https://github.com/nullsink/nullsink/compare/v1.13.2...v1.14.0) (2026-08-13)
+
+
+### Features
+
+* add replay-safe ledger sessions ([#168](https://github.com/nullsink/nullsink/issues/168)) ([7cf4d00](https://github.com/nullsink/nullsink/commit/7cf4d000fe134ccf1f98a657596f8f0ed026a445))
+* extract dedicated ledger service ([#169](https://github.com/nullsink/nullsink/issues/169)) ([1edac45](https://github.com/nullsink/nullsink/commit/1edac453fbcf34b321e86fda1c640eb7d546af5e))
+* **tinfoil:** use input-token counts for holds ([#175](https://github.com/nullsink/nullsink/issues/175)) ([8f69781](https://github.com/nullsink/nullsink/commit/8f69781d055d8e49447e157b1e2bdc5699bcd02d))
+
+
+### Bug Fixes
+
+* **client:** refresh Tinfoil model examples ([#173](https://github.com/nullsink/nullsink/issues/173)) ([966fd98](https://github.com/nullsink/nullsink/commit/966fd981c0709d83a81f8366204eea4b74e1ce63))
+* **deploy:** make release activation ownership-safe ([#159](https://github.com/nullsink/nullsink/issues/159)) ([83d70a7](https://github.com/nullsink/nullsink/commit/83d70a74820c7c9f16933ebd925744de82805494))
+* drain edge alongside proxy cutover ([#178](https://github.com/nullsink/nullsink/issues/178)) ([5ac0e04](https://github.com/nullsink/nullsink/commit/5ac0e0402edcde59f6e34282178f921e76a24438))
+* **pricing:** sync prices from models.dev ([#164](https://github.com/nullsink/nullsink/issues/164)) ([055bfbb](https://github.com/nullsink/nullsink/commit/055bfbb44076e40b3e8ff3fc7b5d6aaddc2dc7eb))
+* **pricing:** sync prices from models.dev ([#176](https://github.com/nullsink/nullsink/issues/176)) ([0f64d7f](https://github.com/nullsink/nullsink/commit/0f64d7f7d8e8e2644e435c2fa816f5ec71a6fae1))
+* relay actionable upstream errors ([#170](https://github.com/nullsink/nullsink/issues/170)) ([cf9d34d](https://github.com/nullsink/nullsink/commit/cf9d34d239e084c28bf14aff24541c7bdafb66ba))
+* **release:** orient manual v1.13.1 boundary ([#172](https://github.com/nullsink/nullsink/issues/172)) ([19795c9](https://github.com/nullsink/nullsink/commit/19795c945dc270bb19ee4dbfa1809ebe3e8e608f))
+
+
+### Refactoring
+
+* **deploy:** remove app-box bitcoind ([#161](https://github.com/nullsink/nullsink/issues/161)) ([4e8d10b](https://github.com/nullsink/nullsink/commit/4e8d10b57eddb944a17a1ee1e92cf38774ca2ee1))
+* prepare async ledger boundary ([#167](https://github.com/nullsink/nullsink/issues/167)) ([d010689](https://github.com/nullsink/nullsink/commit/d0106893e65c786a9b486e69c8c9d71dbbc36c9d))
+
+
+### Documentation
+
+* mark service isolation shipped ([#166](https://github.com/nullsink/nullsink/issues/166)) ([94ae338](https://github.com/nullsink/nullsink/commit/94ae3388f3eff5dc7e8fcfd64ed005ee8e989278))
+
+
+### Maintenance
+
+* **main:** record v1.13.1 pricing release ([#171](https://github.com/nullsink/nullsink/issues/171)) ([b75b7ac](https://github.com/nullsink/nullsink/commit/b75b7ac9ff8ad7f5365101915dfee84139ef3da1))
+* **main:** record v1.13.2 model catalog release ([#174](https://github.com/nullsink/nullsink/issues/174)) ([b9749cf](https://github.com/nullsink/nullsink/commit/b9749cf37606b43e226eebb7336498174dc3654d))
+
 ## [1.13.2](https://github.com/nullsink/nullsink/compare/v1.13.1...v1.13.2) (2026-08-12)
 
 
