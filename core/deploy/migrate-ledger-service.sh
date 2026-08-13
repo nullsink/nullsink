@@ -287,12 +287,20 @@ prepare() {
   PREPARE_RECOVERY_ARMED=1
   trap recover_failed_prepare EXIT
 
-  # Stop public admission first. The proxy then receives SIGTERM and completes its bounded drain while it still
-  # owns balances.db. Payments stops before the credit receiver disappears; unacked rows remain durable.
-  [ "$PREPARE_CADDY_ACTIVE" -eq 0 ] || systemctl stop caddy
+  # Caddy closes admission immediately but preserves established streams while their upstream drains. Install
+  # the shared timeout contract before stopping it: the edge must outlive the proxy's full systemd stop window.
+  install -d -o root -g "$ROOT_GROUP" -m 0755 "$SYSTEMD_DIR/caddy.service.d"
+  install -o root -g "$ROOT_GROUP" -m 0644 "$(dirname "$0")/caddy-drain.conf" \
+    "$SYSTEMD_DIR/caddy.service.d/nullsink-drain.conf"
+  systemctl daemon-reload
+  [ "$PREPARE_CADDY_ACTIVE" -eq 0 ] || systemctl stop --no-block caddy
   systemctl stop backup.timer status-check.timer 2>/dev/null || true
   systemctl stop backup.service status-check.service 2>/dev/null || true
+  # Signal the financial services without waiting for Caddy's graceful stream drain. Proxy shutdown has up to
+  # 60 seconds to settle in-flight billing; once it exits, Caddy's upstream streams close naturally.
   systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT"
+  [ "$PREPARE_CADDY_ACTIVE" -eq 0 ] || systemctl stop caddy
+  is_active caddy && die "caddy did not stop"
   is_active "$PROXY_UNIT" && die "$PROXY_UNIT did not stop"
   is_active "$PAYMENTS_UNIT" && die "$PAYMENTS_UNIT did not stop"
 

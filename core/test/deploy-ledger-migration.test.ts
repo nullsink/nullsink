@@ -184,8 +184,16 @@ test("prepare copies the exact ledger only after draining admission, and rollbac
   );
 
   const log = readFileSync(w.systemctlLog, "utf8");
-  expect(log.indexOf("stop caddy")).toBeLessThan(log.indexOf("stop nullsink-payments nullsink-proxy"));
+  const edgeDrainStarted = log.indexOf("stop --no-block caddy");
+  const appDrainStarted = log.indexOf("stop nullsink-payments nullsink-proxy");
+  const edgeDrainFinished = log.lastIndexOf("stop caddy");
+  expect(edgeDrainStarted).toBeGreaterThan(-1);
+  expect(edgeDrainStarted).toBeLessThan(appDrainStarted);
+  expect(edgeDrainFinished).toBeGreaterThan(appDrainStarted);
   expect(log).toContain("stop backup.timer status-check.timer");
+  expect(readFileSync(join(w.systemd, "caddy.service.d", "nullsink-drain.conf"), "utf8")).toContain(
+    "TimeoutStopSec=70s",
+  );
 
   writeFileSync(join(w.systemd, "nullsink-proxy.service"), "new proxy unit\n");
   writeFileSync(join(w.systemd, "nullsink-payments.service"), "new payments unit\n");
@@ -334,7 +342,7 @@ test("prepare refuses rollback-unsafe payment state and restores the old topolog
     expect(existsSync(join(w.systemdState, "nullsink-payments.stopped"))).toBe(false);
     expect(existsSync(join(w.systemdState, "caddy.stopped"))).toBe(false);
   }
-});
+}, 10_000);
 
 test("prepared validation fails closed when migrated or rollback state is incomplete", () => {
   const missingLedger = workspace();

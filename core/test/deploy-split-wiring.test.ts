@@ -153,6 +153,7 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_READ_GROUP" "\$(?:PROXY|PAYMENTS)_USER"/);
   expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_PROXY_GROUP" "\$(?:PAYMENTS|BACKUP)_USER"/);
   expect(deployLib).toContain("activate_isolation_sidecars");
+  expect(deployLib).toContain('caddy.service.d/nullsink-drain.conf');
   expect(deployLib).toContain("/etc/nullsink-ledger-extraction.activated");
   expect(deployLib).toContain("balances=/var/lib/nullsink-proxy/balances.db");
   expect(deployLib).toContain("balances=/var/lib/nullsink-ledger/balances.db");

@@ -141,6 +141,9 @@ install_units() {  # refresh the explicit app-box unit allowlist; other host rol
     backup.service backup.timer status-check.service status-check.timer status-alert@.service; do
     install -m644 "$APP_DIR/deploy/$unit" "/etc/systemd/system/$unit"
   done
+  install -d -m755 /etc/systemd/system/caddy.service.d
+  install -m644 "$APP_DIR/deploy/caddy-drain.conf" \
+    /etc/systemd/system/caddy.service.d/nullsink-drain.conf
   systemctl daemon-reload
 }
 
