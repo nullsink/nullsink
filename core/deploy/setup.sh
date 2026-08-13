@@ -16,9 +16,8 @@ MONITOR_ENV_FILE="/etc/nullsink-monitor.env"
 LEGACY_ENV_FILE="/etc/nullsink.env"
 WEB_BASE="/var/www/nullsink"   # base for the versioned client UI ($WEB_BASE/web-<tag> + current-web symlink)
 
-# Shared "apply repo config" library (install_units + health_ok + the PROXY_UNIT/PAYMENTS_UNIT names), also
-# sourced by deploy.sh so the unit-install glob is one source of truth across bootstrap + redeploy. The app
-# is TWO units with distinct identities and role-specific environments.
+# Shared "apply repo config" library (install_units + health_ok + the three app-unit names), also sourced by
+# deploy.sh so the unit-install allowlist is one source of truth across bootstrap + redeploy.
 # shellcheck source=deploy/lib.sh
 source "$(dirname "$0")/lib.sh"
 
@@ -115,6 +114,18 @@ if [ ! -f /etc/nullsink-service-isolation.prepared ] \
 fi
 prepare_service_isolation
 
+# A fresh box has no proxy-owned ledger to move, so preparation only creates the dedicated identity/state and
+# marker. An existing balances.db is a money-bearing boundary change: setup must not quietly stop traffic or
+# move it. Use the verified release bundle's one-time migration during an explicit quiet window instead.
+if [ ! -f /etc/nullsink-ledger-extraction.prepared ] \
+  && [ -f /var/lib/nullsink-proxy/balances.db ]; then
+  echo "    Existing balances require an explicit, quiet-window ledger extraction. Extraction was not started." >&2
+  echo "    Verify this release bundle, then run: deploy/migrate-ledger-service.sh --prepare" >&2
+  echo "    Immediately continue with that same bundle's deploy.sh $RELEASE_TAG." >&2
+  exit 1
+fi
+"$APP_DIR/deploy/migrate-ledger-service.sh" --prepare
+
 if rail_active bitcoin && ! bitcoin_rpc_is_configured; then
   echo "    Bitcoin rail requires BITCOIN_RPC_URL to be an explicit HTTP(S) wallet endpoint." >&2
   exit 1
@@ -152,14 +163,14 @@ install_units
 activate_isolation_sidecars
 
 step "Installing the app binaries (pinned release)"
-# Fetch+verify+activate the pinned binaries for nullsink-proxy + nullsink-payments (one release, deployed in
-# lockstep). Guarded: a failure here (network down, or the release missing) must NOT abort the rest of the
+# Fetch+verify+activate the pinned ledger, proxy, and payments binaries (one release, deployed in lockstep).
+# Guarded: a failure here (network down, or the release missing) must NOT abort the rest of the
 # bootstrap — the box still gets units/edge/firewall; finish the binary install after. The units won't start
 # until the binaries are in place (next step warns/continues).
 if install_binary "$RELEASE_TAG"; then
   :
 else
-  todo "app binaries not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — $PROXY_UNIT/$PAYMENTS_UNIT won't start until they're in place"
+  todo "app binaries not installed (re-run, or run: sudo deploy/deploy.sh $RELEASE_TAG) — $LEDGER_UNIT/$PROXY_UNIT/$PAYMENTS_UNIT won't start until they're in place"
 fi
 
 step "Installing the client UI (pinned release)"
@@ -190,8 +201,7 @@ else
 fi
 
 step "Installing systemd services"
-# Each unit's ExecStart points at its binary (/usr/local/lib/nullsink/current-{proxy,payments}), installed in
-# the step above.
+# Each unit's ExecStart points at its versioned binary through current-{ledger,proxy,payments}.
 enable_app_units
 # The proxy env EXISTING isn't the same as it being CONFIGURED. On a re-run we (re)start so the
 # buy-rail poller runs — but if ANTHROPIC_API_KEY is still the placeholder, WARN: the box boots and the rails
@@ -200,12 +210,18 @@ enable_app_units
 # operator to fill; nullsink-payments would start fine, but there's no reason to run half the app.
 if [ "$FRESH_ENV" -eq 0 ]; then
   restart_app
+  if health_ok_app; then
+    "$APP_DIR/deploy/migrate-ledger-service.sh" --activate
+  else
+    echo "    Ledger readiness or app health failed; public admission was not restored." >&2
+    exit 1
+  fi
   _akey="$(grep -E '^ANTHROPIC_API_KEY=' "$PROXY_ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2- || true)"
   if [ -z "$_akey" ] || [ "$_akey" = replace-me ]; then
-    todo "ANTHROPIC_API_KEY is still the placeholder in $PROXY_ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart $PROXY_UNIT"
+    todo "ANTHROPIC_API_KEY is still the placeholder in $PROXY_ENV_FILE — the app runs (buy rails OK) but /v1/messages will 401 until you set a real Anthropic key (or use OPENAI_API_KEY for OpenAI-only), then restart all three app units together"
   fi
 else
-  todo "Edit $PROXY_ENV_FILE (set ANTHROPIC_API_KEY, OPENAI_API_KEY, and/or TINFOIL_API_KEY — at least one), then: systemctl start $PROXY_UNIT $PAYMENTS_UNIT"
+  todo "Edit $PROXY_ENV_FILE (set at least one provider key), then start $LEDGER_UNIT $PROXY_UNIT $PAYMENTS_UNIT and run: $APP_DIR/deploy/migrate-ledger-service.sh --activate"
 fi
 
 step "Configuring monero-wallet-rpc (XMR buy-rail watcher)"
@@ -315,16 +331,19 @@ systemctl enable --now nftables
 nft -f /etc/nftables.conf   # apply now (idempotent — the file starts with `flush ruleset`)
 
 step "Done"
-for _unit in "$PROXY_UNIT" "$PAYMENTS_UNIT"; do
+for _unit in "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; do
   _state="$(systemctl is-active "$_unit" 2>/dev/null || true)"
   if [ "$_state" = active ]; then _sc="$_g"; else _sc="$_y"; fi
   printf '    %s.service: %s%s%s   (detail: systemctl status %s)\n' "$_unit" "$_sc" "${_state:-unknown}" "$_z" "$_unit"
 done
-# Extra, non-fatal confirmation that both services actually answer /healthz (a unit being "active" isn't the
-# same as it serving). A fresh env (app not started yet) or a still-warming app simply prints "no" here.
-if health_ok_app; then note "both /healthz responded 200"; else note "/healthz not answering yet on one or both services (fine if the app isn't started / still warming)"; fi
+# Extra, non-fatal confirmation that the ledger sockets and both HTTP services are ready.
+if health_ok_app; then note "ledger sockets ready and both /healthz probes returned 200"; else note "app is not fully ready yet (fine on an unconfigured fresh box)"; fi
 if [ ! -f /etc/nullsink-service-isolation.finalized ]; then
-  todo "After both services are healthy, create an encrypted backup, prove its offline dry-run restore, then run: $APP_DIR/deploy/migrate-service-isolation.sh --finalize"
+  todo "After all app units are healthy, create an encrypted backup, prove its offline dry-run restore, then run: $APP_DIR/deploy/migrate-service-isolation.sh --finalize"
+fi
+if [ -f /etc/nullsink-ledger-extraction.activated ] \
+  && [ ! -f /etc/nullsink-ledger-extraction.finalized ]; then
+  todo "After an encrypted backup and offline restore proof, remove the frozen proxy-owned ledger with: $APP_DIR/deploy/migrate-ledger-service.sh --finalize"
 fi
 printf '\n%sAccess%s — the app is PRIVATE on %s127.0.0.1:%s (proxy) + :%s (payments)%s; Caddy is the only public edge:\n' \
   "$_c" "$_z" "$_b" "$(proxy_port)" "$(payments_port)" "$_z"

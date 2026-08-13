@@ -3,7 +3,7 @@
 //
 // Owns pending.db (in-flight orders, the sales book, the credit outbox), the pay rails and their watch-only
 // wallets. Serves /buy, /order-status, /rails on a loopback port behind Caddy. Credits reach the balance ledger
-// only through the credit socket — the single, one-directional crossing (payments → proxy).
+// only through the credit socket — the single, one-directional crossing (payments → ledger).
 //
 // It must never import proxy trust domain code (no balance store, no providers, no metered path). Enforced by
 // test/trust-domain-isolation.test.ts in the source graph and by scripts/assert-trust-domains.ts in Bun metadata + binary.
@@ -25,7 +25,7 @@ import { DEFAULT_MARGIN } from "./pricing-config";
 
 const PORT = numEnv("PAYMENTS_PORT", 8081, 1, 65535);
 const HOST = process.env.HOST ?? "127.0.0.1";
-// The credit crossing. The proxy binds this socket; we connect. Our write permission on the socket file IS the
+// The credit crossing. The ledger binds this socket; we connect. Our write permission on the socket file IS the
 // authentication (Linux checks it at connect(2)), granted by the deploy — see credit-server.ts.
 const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink-credit/credit.sock";
 const CREDIT_TIMEOUT_MS = numEnv("CREDIT_TIMEOUT_MS", 5_000, 100, 60_000);
@@ -69,7 +69,7 @@ const READ_RATE_CAPACITY = numEnv("READ_RATE_CAPACITY", 60, 1, 1_000_000);
 const READ_RATE_REFILL_PER_MIN = numEnv("READ_RATE_REFILL_PER_MIN", 3000, 1, 60_000_000);
 const readRateLimit = makeTokenBucket({ capacity: READ_RATE_CAPACITY, refillPerSec: READ_RATE_REFILL_PER_MIN / 60 });
 
-// The one on-disk store this service owns. The proxy opens balances.db; neither touches the other's.
+// The one on-disk store this service owns. The ledger opens balances.db; neither touches the other's.
 const orders = openOrderStore(PENDING_DB_PATH);
 // Migrate acknowledged payloads written by pre-scrub releases through the normal exactly-once crossing. We
 // cannot erase them blindly: balances.db may have been restored independently and be missing the matching
@@ -189,7 +189,7 @@ async function pollOnce(): Promise<void> {
   // Ambiguous delivery (proxy restarting, socket not yet bound, timeout): the rows stay durable and we retry.
   // Say what it MEANS ourselves — the raw reason can be Bun's generic "Was there a typo in the url or port?",
   // which reads like a config error when it is just the proxy being down.
-  if (blocked) log.warn("credit", `proxy unreachable or not acking over the credit socket — credits stay queued, retrying next tick (${blocked})`);
+  if (blocked) log.warn("credit", `ledger unreachable or not acking over the credit socket — credits stay queued, retrying next tick (${blocked})`);
   // The "is money still crossing?" alarm. Greppable marker for deploy/status-check.sh.
   const age = oldestUnackedAgeMs(orders, now);
   if (age > OUTBOX_AGE_ALERT_MS)

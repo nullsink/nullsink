@@ -2,10 +2,10 @@
 Description=nullsink payments — buy rails + settlement poller (payments trust domain)
 After=network-online.target
 Wants=network-online.target
-# Ordering ONLY, never Requires=/BindsTo=: /buy must keep quoting and the poller must keep detecting
-# deposits while the proxy is down. Credits simply queue in the durable outbox and cross when it returns.
-# After= just avoids a guaranteed-failing first delivery attempt on a cold boot.
-After=nullsink-proxy.service
+# Ordering ONLY, never Requires=/BindsTo=: /buy must keep quoting and the poller must keep detecting deposits
+# while the ledger is down. Credits queue durably and cross when it returns. After= only avoids a guaranteed
+# failed first delivery attempt on a cold boot.
+After=nullsink-ledger.service
 OnFailure=status-alert@%n.service
 
 [Service]
@@ -28,12 +28,12 @@ StateDirectoryMode=0750
 UMask=0027
 Environment=PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db
 
-# The credit crossing (payments → proxy, one direction, one verb). nullsink-proxy.service binds this socket
+# The credit crossing (payments → ledger, one direction, one verb). nullsink-ledger.service binds this socket
 # and owns its RuntimeDirectory; we only connect, so this unit must NOT declare RuntimeDirectory=nullsink —
 # systemd tears a RuntimeDirectory down when the unit that declares it stops, which would delete the live
-# socket out from under a running proxy. ProtectSystem=strict leaves /run read-only, which does not block
+# socket out from under a running ledger. ProtectSystem=strict leaves /run read-only, which does not block
 # this: the kernel exempts sockets from the read-only-filesystem check, and connect(2) still enforces the
-# socket file's own write bit. Must match nullsink-proxy.service's CREDIT_SOCK exactly.
+# socket file's own write bit. Must match nullsink-ledger.service's CREDIT_SOCK exactly.
 Environment=CREDIT_SOCK=/run/nullsink-credit/credit.sock
 
 # Memory + task containment; the small half of the old single-unit envelope (see nullsink-proxy.service).

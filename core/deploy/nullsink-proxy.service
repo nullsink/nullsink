@@ -1,6 +1,7 @@
 [Unit]
 Description=nullsink proxy — metered LLM proxy (proxy trust domain)
-After=network-online.target
+Requires=nullsink-ledger.service
+After=network-online.target nullsink-ledger.service
 Wants=network-online.target
 # Page Telegram if this unit enters `failed` (a clean crash, or a crash-loop that trips the start limit).
 # Secondary to status-check.timer, which catches a hung-but-"active" or stalled service every 10 min.
@@ -10,38 +11,19 @@ OnFailure=status-alert@%n.service
 Type=simple
 User=nullsink-proxy
 Group=nullsink-proxy-read
+SupplementaryGroups=nullsink-ledger-proxy
 WorkingDirectory=/opt/nullsink
 # Provider credentials and proxy-only tuning. Storage/socket locations stay unit-owned below.
 EnvironmentFile=/etc/nullsink-proxy.env
 # Runs the self-contained `bun build --compile` artifact via the `current-proxy` symlink, swapped atomically
 # by deploy.sh/setup.sh's install_binary (versioned binary + relative symlink for rollback).
 ExecStart=/usr/local/lib/nullsink/current-proxy
-# Type=simple considers ExecStart launched before the process has bound its owner-only credit socket. Gate the
-# start job on that socket, then grant the credit group access to BOTH the directory and socket. This must run
-# in ExecStartPost: the ExecStartPre chgrp did not survive systemd's RuntimeDirectory ownership handling.
-# Payments' After= ordering therefore covers actual crossing readiness, not merely process creation.
-ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-credit/credit.sock ]; do sleep 0.1; done; chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock; chmod 0660 /run/nullsink-credit/credit.sock'
+# The ledger unit's ExecStartPost publishes this socket before it becomes active. The process then performs
+# startSession as a hard barrier and binds HTTP only after receiving a definite success.
+Environment=LEDGER_SOCK=/run/nullsink-ledger/proxy.sock
 TimeoutStartSec=60
 Restart=always
 RestartSec=2
-
-# Balance ledger lives here: /var/lib/nullsink-proxy, created service-owned and writable even under
-# ProtectSystem=strict. This is the only stateful asset this service owns — back it up (losing it =
-# refunding everyone). It holds token hashes + balances + the applied-credit markers; no identity, no
-# request history. The read group has no directory or file write bit.
-StateDirectory=nullsink-proxy
-StateDirectoryMode=0750
-UMask=0027
-Environment=DB_PATH=/var/lib/nullsink-proxy/balances.db
-
-# The credit crossing. THIS service binds the socket; nullsink-payments connects to it. RuntimeDirectory is
-# created service-owned and torn down when this unit stops — payments then sees ENOENT, which its durable
-# outbox treats as ambiguous (retry next tick), never as a lost credit. ExecStartPost assigns the completed
-# directory and socket to the dedicated credit group before this unit is considered started. Payments is the
-# group's only non-root member.
-RuntimeDirectory=nullsink-credit
-RuntimeDirectoryMode=0710
-Environment=CREDIT_SOCK=/run/nullsink-credit/credit.sock
 
 # Holds many concurrent, minutes-long upstream connections.
 LimitNOFILE=1048576
@@ -51,10 +33,10 @@ LimitNOFILE=1048576
 # the cgroup OOM killer, which reaps only processes in THIS unit (never Caddy/sshd box-wide), and
 # OOMPolicy=stop + Restart=always relaunch cleanly. MemoryHigh applies reclaim back-pressure first (soft),
 # below the hard cap. A post-OOM kill strands any in-flight holds, the same accepted edge as any ungraceful
-# death (see proxy.ts shutdown notes). TasksMax bounds a thread/fork runaway. The two services' envelopes
+# death (see proxy.ts shutdown notes). TasksMax bounds a thread/fork runaway. The three services' envelopes
 # are deliberately asymmetric: this service streams 32 MiB bodies over long-lived connections and gets the
-# bulk; payments handles tiny JSON and gets 256M. Their MemoryMax sums to 2048M, leaving roughly 2 GB for
-# everything else on the box.
+# bulk; ledger and payments each get 256M. Their MemoryMax sums to 2304M, leaving roughly 1.7 GB for
+# everything else on a 4 GB box.
 MemoryHigh=1408M
 MemoryMax=1792M
 TasksMax=512
@@ -67,8 +49,8 @@ OOMPolicy=stop
 KillSignal=SIGTERM
 TimeoutStopSec=60
 
-# Hardening. The app writes only the balance ledger (StateDirectory) and the credit socket
-# (RuntimeDirectory); ProtectSystem=strict keeps the rest of the filesystem read-only.
+# Hardening. The proxy has no writable persistent or runtime directory; it holds only provider credentials and
+# in-flight request state. ProtectSystem=strict therefore leaves its entire filesystem view read-only.
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only

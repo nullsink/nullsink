@@ -1,6 +1,6 @@
-// The metering proxy's complete money interface. Request handling deliberately sees promises even while
-// production still uses the in-process SQLite store: Step 5 can replace this adapter with a Unix-socket
-// client without changing any billing path or accidentally leaving a money write un-awaited.
+// The metering proxy's complete money interface. Request handling deliberately sees promises: production
+// injects the Unix-socket client while unit tests can use the in-process SQLite adapter, without changing a
+// billing path or accidentally leaving a money write un-awaited.
 import type { BalanceStore } from "./db";
 
 export type MeteringLedgerPort = {
@@ -9,9 +9,8 @@ export type MeteringLedgerPort = {
   settleHold(holdId: string, chargedMicros: number): Promise<boolean>;
 };
 
-// Temporary local composition for the pre-extraction proxy. SQLite remains synchronous internally, while
-// the proxy-facing contract is unconditionally async. Keeping the adapter here—not in handler.ts—makes the
-// eventual socket client a straight implementation swap rather than another request-path refactor.
+// Test-only local composition. Production uses the socket client; unit/property tests retain a fast
+// in-process adapter without changing the handler's asynchronous money contract.
 export function localMeteringLedger(store: BalanceStore): MeteringLedgerPort {
   return {
     getBalance: async (hash) => store.getBalance(hash),

@@ -1,18 +1,16 @@
 // Composition root for the PROXY service (proxy trust domain). All side effects live here — env validation, the
-// balance store, the HTTP port, the credit socket, timers, signal handlers. Request logic is in handler.ts,
+// ledger client, the HTTP port, timers, signal handlers. Request logic is in handler.ts,
 // which is pure/injectable and import-safe (importing it binds no port, starts no timer).
 //
-// Owns balances.db (tokens + holds journal + applied_orders) and the upstream provider keys. Serves the metered
-// /v1 paths + /balance + /v1/models on a loopback port behind Caddy, and runs the CREDIT SOCKET server — the one
-// door the payments trust domain may open into this one (payments → proxy, `credit`).
+// Owns the upstream provider keys and serves the metered /v1 paths + /balance + /v1/models on a loopback port
+// behind Caddy. It reaches balances only through the ledger service's narrow metering socket.
 //
 // It must never import payments trust domain code (no rails, no order store, no settle, no /buy). Enforced by
 // test/trust-domain-isolation.test.ts in the source graph and by scripts/assert-trust-domains.ts in Bun metadata + binary.
-import { openDb, DB_PATH } from "./ledger/db";
-import { localMeteringLedger } from "./ledger/port";
+import { randomUUID } from "node:crypto";
 import { createProxyHandler } from "./handler";
 import { deny } from "./http";
-import { serveCreditSocket } from "./credit-server";
+import { makeLedgerSocketClient, type FatalLedgerError } from "./ledger/client";
 import { byteBoundHold, makeCountTokensHold, ANTHROPIC_COUNT_OMIT, OPENAI_COUNT_OMIT } from "./hold";
 import { makeTokenBucket } from "./ratelimit";
 import { drainInflight } from "./shutdown";
@@ -25,9 +23,9 @@ const PORT = numEnv("PORT", 8080, 1, 65535);
 // Bind address. Defaults to 127.0.0.1 (safe by default): the service must NEVER face the open net — Caddy
 // fronts it and reverse-proxies to localhost. Override with HOST=0.0.0.0 only for local dev.
 const HOST = process.env.HOST ?? "127.0.0.1";
-// The credit crossing. THIS service binds the socket (owner-only; see credit-server.ts) and the payments
-// service connects to the same path — its write permission on this file is the authentication.
-const CREDIT_SOCK = process.env.CREDIT_SOCK ?? "/run/nullsink-credit/credit.sock";
+// The proxy receives only the metering capability. The ledger owns this pathname and systemd grants access
+// solely through the nullsink-ledger-proxy group.
+const LEDGER_SOCK = process.env.LEDGER_SOCK ?? "/run/nullsink-ledger/proxy.sock";
 // Total wall-clock cap on the upstream call (reaps hung/stalled connections). Matches the Anthropic SDK's
 // ~10min default; raise it if long generations get cut.
 const UPSTREAM_TIMEOUT_MS = numEnv("UPSTREAM_TIMEOUT_MS", 600_000, 1000, 3_600_000);
@@ -123,9 +121,26 @@ if (!anthropicDeps && !openaiDeps && !tinfoilDeps) {
   process.exit(1);
 }
 
-// The one on-disk store this service owns. The payments service opens pending.db; neither touches the other's.
-const balanceStore = openDb(DB_PATH);
-const balances = localMeteringLedger(balanceStore);
+// A fresh UUID fences every proxy process. This is a hard admission barrier: no HTTP port is bound until the
+// ledger definitely accepts the session and atomically recovers any prior-session holds. A stale or
+// indeterminate mutation means this process cannot prove its financial state, so it exits; systemd restarts
+// it with a new session and the ledger performs bounded recovery.
+const sessionId = randomUUID();
+const balances = makeLedgerSocketClient({
+  path: LEDGER_SOCK,
+  sessionId,
+  fatal(error: FatalLedgerError): never {
+    log.error("ledger", error.message);
+    process.exit(1);
+  },
+});
+const session = await balances.startSession();
+if (session.recoveredHolds > 0) {
+  log.warn(
+    "boot",
+    `ledger recovered ${session.recoveredHolds} stranded hold(s), refunded ${session.recoveredMicros} µ$`,
+  );
+}
 
 // Live streaming settlements. handler.ts registers each stream's settle() here for its lifetime and removes it
 // the moment billing finalizes. The shutdown handler drains this so a request still streaming at restart is
@@ -146,13 +161,6 @@ const handler = createProxyHandler({
   inflight,
 });
 
-// Crash recovery: refund any holds journaled by a request whose process died (SIGKILL / OOM / power loss)
-// between the up-front debit and its settle. On a fresh boot there are no live requests, so every surviving
-// holds row is stranded and refunded in full BEFORE we serve. Aggregate-only log, no identity.
-const recovered = balanceStore.recoverHolds();
-if (recovered.count > 0)
-  log.warn("boot", `recovered ${recovered.count} stranded hold(s), refunded ${recovered.micros} µ$ (ungraceful prior shutdown)`);
-
 const server = Bun.serve({
   port: PORT,
   hostname: HOST,
@@ -170,19 +178,14 @@ const server = Bun.serve({
   },
 });
 
-// The credit crossing. Bound AFTER the balance store exists (it applies credits) and after recoverHolds, so the
-// first credit can never race boot recovery. Payments may already be retrying against a missing socket — that is
-// ambiguous to it, never a failure: its outbox is durable and it retries next tick.
-const creditSocket = serveCreditSocket({ path: CREDIT_SOCK, balances: balanceStore });
-
 const providerSummary = [anthropicDeps && `anthropic ${anthropicDeps.baseUrl}`, openaiDeps && `openai ${openaiDeps.baseUrl}`, tinfoilDeps && `tinfoil ${tinfoilDeps.baseUrl}`].filter(Boolean).join(" + ");
-log.info("boot", `nullsink-proxy ${BUILD_VERSION} → ${providerSummary} listening on ${HOST}:${server.port} (credit socket ${CREDIT_SOCK})`);
+log.info("boot", `nullsink-proxy ${BUILD_VERSION} → ${providerSummary} listening on ${HOST}:${server.port} (ledger session ${session.outcome})`);
 
 // --- Metrics flush. Aggregate, identity-free counters emitted to one [metrics] journald line on a coarse
 // cadence, then the window resets. Only logged when something happened. Default hourly. ---
 const METRICS_FLUSH_MS = numEnv("METRICS_FLUSH_MS", 60 * 60 * 1000, 60_000, 24 * 60 * 60 * 1000);
 metrics.reset(Date.now());
-if (recovered.count > 0) metrics.recordRecoveredHolds(recovered.count);
+if (session.recoveredHolds > 0) metrics.recordRecoveredHolds(session.recoveredHolds);
 function flushMetrics(): void {
   const out = metrics.formatMetricsLine(metrics.snapshot(), Date.now());
   if (out) log[out.level]("metrics", out.line);
@@ -212,9 +215,6 @@ const shutdown = async () => {
   if (forceSettled > 0)
     log.warn("shutdown", `force-settled ${forceSettled} in-flight stream(s) at the drain deadline (metered partial billed, rest refunded)`);
   flushMetrics();
-  // Close the credit socket LAST — payments may still be mid-drain, and a credit that lands during our stream
-  // drain is one fewer retry. Anything it can't deliver stays durable in its outbox.
-  creditSocket.stop();
   await server.stop(true); // hard-close anything still open
   process.exit(0);
 };

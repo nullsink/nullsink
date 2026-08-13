@@ -1,5 +1,5 @@
-// Proxy side of the credit crossing: receive a credit over the unix socket and apply it to the balance ledger.
-// PROXY TRUST DOMAIN module — imports the balance store, never the order store, rails, or settle.
+// Ledger side of the credit crossing: receive a credit over the Unix socket and apply it exactly once.
+// LEDGER TRUST DOMAIN module — imports the balance store, never the order store, rails, or prompt path.
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { CREDIT_PATH, CREDIT_WIRE_HEADER, CREDIT_WIRE_VERSION, parseCreditRequest } from "./credit-wire";
 import * as log from "./log";
@@ -44,7 +44,7 @@ export function createCreditHandler(balances: BalanceStore, now: () => number = 
 //  2. umask 0077 around the bind, so the socket is owner-only from the instant it exists. Bun creates it at the
 //     process umask (commonly 0755 → world-readable, owner-writable); narrowing it afterwards would leave a
 //     TOCTOU window. systemd widens the COMPLETED socket to 0660 for the dedicated nullsink-credit group before
-//     considering the proxy started. Payments is that group's only non-root member; no database group crosses.
+//     considering the ledger started. Payments is that group's only non-root member; no database group crosses.
 //  3. A stale socket file survives an ungraceful death (Bun unlinks only on clean close, and otherwise throws
 //     EADDRINUSE). Unlinking it before bind is safe ONLY because systemd guarantees a single instance
 //     (stop-old-before-start-new); we additionally refuse to unlink anything that isn't a socket.

@@ -1,0 +1,49 @@
+[Unit]
+Description=nullsink ledger — balances, holds, and applied credits
+Before=nullsink-proxy.service nullsink-payments.service
+OnFailure=status-alert@%n.service
+
+[Service]
+Type=simple
+User=nullsink-ledger
+Group=nullsink-ledger-read
+WorkingDirectory=/opt/nullsink
+ExecStart=/usr/local/lib/nullsink/current-ledger
+
+# The process binds both sockets owner-only. This post-start readiness gate widens each completed pathname to
+# exactly one caller group before systemd considers the ledger started.
+ExecStartPost=+/bin/sh -ec 'until [ -S /run/nullsink-ledger/proxy.sock ] && [ -S /run/nullsink-credit/credit.sock ]; do sleep 0.1; done; chgrp nullsink-ledger-proxy /run/nullsink-ledger /run/nullsink-ledger/proxy.sock; chgrp nullsink-credit /run/nullsink-credit /run/nullsink-credit/credit.sock; chmod 0710 /run/nullsink-ledger /run/nullsink-credit; chmod 0660 /run/nullsink-ledger/proxy.sock /run/nullsink-credit/credit.sock'
+TimeoutStartSec=60
+Restart=always
+RestartSec=2
+
+# The ledger is the only balances.db writer. The read group is limited to the backup and temporary operator
+# principals; proxy and payments receive only their separate socket capabilities.
+StateDirectory=nullsink-ledger
+StateDirectoryMode=0750
+UMask=0027
+Environment=DB_PATH=/var/lib/nullsink-ledger/balances.db
+
+RuntimeDirectory=nullsink-ledger nullsink-credit
+RuntimeDirectoryMode=0710
+Environment=LEDGER_SOCK=/run/nullsink-ledger/proxy.sock
+Environment=CREDIT_SOCK=/run/nullsink-credit/credit.sock
+
+MemoryHigh=192M
+MemoryMax=256M
+TasksMax=128
+OOMPolicy=stop
+
+# During a joint app restart, After=/Before= ordering stops the proxy before this process, leaving the ledger
+# available throughout the proxy's bounded stream drain and final settlements.
+KillSignal=SIGTERM
+TimeoutStopSec=60
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

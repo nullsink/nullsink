@@ -3,7 +3,7 @@
 import { Database } from "bun:sqlite";
 
 export const BALANCES_DB_PATH =
-  process.env.BALANCES_DB_PATH ?? process.env.DB_PATH ?? "/var/lib/nullsink-proxy/balances.db";
+  process.env.BALANCES_DB_PATH ?? process.env.DB_PATH ?? "/var/lib/nullsink-ledger/balances.db";
 export const PENDING_DB_PATH =
   process.env.PENDING_DB_PATH ?? "/var/lib/nullsink-payments/pending.db";
 

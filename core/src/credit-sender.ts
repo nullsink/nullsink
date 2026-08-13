@@ -1,4 +1,4 @@
-// Payments side of the credit crossing: drain the durable outbox into the proxy over the unix socket.
+// Payments side of the credit crossing: drain the durable outbox into the ledger over the Unix socket.
 // PAYMENTS TRUST DOMAIN module — imports the order store, never the balance store, providers, or the metered path.
 //
 // A test-only in-process drain exists too (test/support/drain.ts, driven by the settle property tests). It is
@@ -11,7 +11,7 @@ import type { OrdersStore } from "./ledger/orders";
 
 export type CreditSender = (c: CreditRequest) => Promise<DeliveryResult>;
 
-// Send ONE credit over the socket. Every non-definite result is AMBIGUOUS — the proxy may have committed the
+// Send ONE credit over the socket. Every non-definite result is AMBIGUOUS — the ledger may have committed the
 // credit and lost the response — so the caller must NOT ack, and will retry; applied_orders makes the redelivery
 // a no-op. In particular a 2xx whose body we don't recognise is ambiguous, NEVER an ack.
 export function makeSocketSender(sockPath: string, timeoutMs = 5_000): CreditSender {
@@ -29,7 +29,7 @@ export function makeSocketSender(sockPath: string, timeoutMs = 5_000): CreditSen
       if (body?.result === "applied" || body?.result === "already_applied") return { ok: true, outcome: body.result };
       return { ok: false, reason: "unrecognized_response" }; // a 2xx we don't understand is not an ack
     } catch (err) {
-      // Connect refused (proxy not up yet), timeout, reset — all ambiguous. Never a boot failure: the outbox is
+      // Connect refused (ledger not up yet), timeout, reset — all ambiguous. Never a boot failure: the outbox is
       // durable, so the next tick retries.
       return { ok: false, reason: log.errMsg(err) };
     }

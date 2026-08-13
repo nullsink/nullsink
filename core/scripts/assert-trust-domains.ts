@@ -7,6 +7,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
+  INTENTIONAL_PAYMENTS_LEDGER_RUNTIME,
+  INTENTIONAL_PROXY_LEDGER_RUNTIME,
   INTENTIONAL_SHARED_RUNTIME,
   inspectTrustDomains,
   sorted,
@@ -14,11 +16,13 @@ import {
 } from "./trust-domain-policy";
 
 const PROXY = "nullsink-proxy-linux-x64";
+const LEDGER = "nullsink-ledger-linux-x64";
 const PAYMENTS = "nullsink-payments-linux-x64";
 const PROXY_META = "nullsink-proxy.metafile.json";
+const LEDGER_META = "nullsink-ledger.metafile.json";
 const PAYMENTS_META = "nullsink-payments.metafile.json";
 
-for (const file of [PROXY, PAYMENTS, PROXY_META, PAYMENTS_META]) {
+for (const file of [PROXY, LEDGER, PAYMENTS, PROXY_META, LEDGER_META, PAYMENTS_META]) {
   if (!existsSync(file)) {
     console.error(`assert-trust-domains: missing ${file} — run the build first`);
     process.exit(1);
@@ -45,11 +49,17 @@ fail("unresolved local runtime imports", trustDomains.unresolved.map(({ importer
 fail("opaque runtime imports are forbidden", trustDomains.opaque.map(({ importer, expression }) => `${importer} -> ${expression}`));
 fail("service roots reach local modules outside src", trustDomains.outsideSource);
 fail("unreviewed modules are shared by proxy + payments", trustDomains.unexpectedShared);
-fail("shared-module allowances are stale", trustDomains.staleSharedAllowances);
+fail("proxy + payments shared-module allowances are stale", trustDomains.staleSharedAllowances);
+fail("unreviewed modules are shared by proxy + ledger", trustDomains.unexpectedProxyLedgerShared);
+fail("proxy + ledger shared-module allowances are stale", trustDomains.staleProxyLedgerSharedAllowances);
+fail("unreviewed modules are shared by payments + ledger", trustDomains.unexpectedPaymentsLedgerShared);
+fail("payments + ledger shared-module allowances are stale", trustDomains.stalePaymentsLedgerSharedAllowances);
 fail("unreviewed modules are proxy-only", trustDomains.unexpectedProxyOnly);
 fail("proxy-only allowances are stale or misowned", trustDomains.staleProxyOnlyAllowances);
 fail("unreviewed modules are payments-only", trustDomains.unexpectedPaymentsOnly);
 fail("payments-only allowances are stale or misowned", trustDomains.stalePaymentsOnlyAllowances);
+fail("unreviewed modules are ledger-only", trustDomains.unexpectedLedgerOnly);
+fail("ledger-only allowances are stale or misowned", trustDomains.staleLedgerOnlyAllowances);
 fail("non-service modules are reachable by a service", trustDomains.reachedNonService);
 fail("src modules lack an owner", trustDomains.unclassifiedSource);
 fail("non-service module allowances are stale", trustDomains.staleNonServiceAllowances);
@@ -72,8 +82,9 @@ function bundledSourceModules(file: string): Set<string> {
 }
 
 const proxyInputs = bundledSourceModules(PROXY_META);
+const ledgerInputs = bundledSourceModules(LEDGER_META);
 const paymentsInputs = bundledSourceModules(PAYMENTS_META);
-if (!proxyInputs.has("proxy.ts") || !paymentsInputs.has("payments.ts")) {
+if (!proxyInputs.has("proxy.ts") || !ledgerInputs.has("ledger-service.ts") || !paymentsInputs.has("payments.ts")) {
   console.error("assert-trust-domains: metafile positive control FAILED — composition root missing from its own bundle");
   process.exit(1);
 }
@@ -81,10 +92,19 @@ if (!proxyInputs.has("proxy.ts") || !paymentsInputs.has("payments.ts")) {
 // Bun may tree-shake a structurally reachable module, so the metadata can be a subset of the AST closure.
 // It must never contain a local source module the parser did not reach: that would expose a syntax blind spot.
 fail("proxy metafile contains modules absent from its AST graph", difference(proxyInputs, trustDomains.proxy));
+fail("ledger metafile contains modules absent from its AST graph", difference(ledgerInputs, trustDomains.ledger));
 fail("payments metafile contains modules absent from its AST graph", difference(paymentsInputs, trustDomains.payments));
 fail(
   "Bun embedded an unreviewed module in both service binaries",
   difference(intersection(proxyInputs, paymentsInputs), INTENTIONAL_SHARED_RUNTIME),
+);
+fail(
+  "Bun embedded an unreviewed module in proxy + ledger",
+  difference(intersection(proxyInputs, ledgerInputs), INTENTIONAL_PROXY_LEDGER_RUNTIME),
+);
+fail(
+  "Bun embedded an unreviewed module in payments + ledger",
+  difference(intersection(paymentsInputs, ledgerInputs), INTENTIONAL_PAYMENTS_LEDGER_RUNTIME),
 );
 
 const has = (binary: Buffer, needle: string): boolean => binary.includes(Buffer.from(needle, "utf8"));
@@ -92,10 +112,12 @@ const has = (binary: Buffer, needle: string): boolean => binary.includes(Buffer.
 // Present only in payments trust-domain behavior (pending.db SQL + the rail wallet call). The source + metafile
 // checks above are exhaustive; these symbols are an independent assertion against the executable bytes.
 const PAYMENT_MARKERS = ["INTO credit_outbox", "FROM pending_orders", "incomingTransfers"];
-// Present only in proxy trust-domain behavior (balances.db SQL).
-const PROXY_MARKER = "INTO applied_orders";
+// Present only in ledger trust-domain behavior (balances.db SQL), and only in proxy behavior (provider gate).
+const LEDGER_MARKERS = ["INTO applied_orders", "retired_ledger_sessions"];
+const PROXY_MARKERS = ["no providers configured", "unhandled proxy request error"];
 
 const proxy = readFileSync(PROXY);
+const ledger = readFileSync(LEDGER);
 const payments = readFileSync(PAYMENTS);
 
 // Positive controls keep the byte-level checks from becoming vacuous after a query/symbol rename.
@@ -104,15 +126,22 @@ if (missingInPayments.length) {
   console.error(`assert-trust-domains: binary positive control FAILED — payments lacks ${missingInPayments.join(", ")}; update the markers`);
   process.exit(1);
 }
-if (!has(proxy, PROXY_MARKER)) {
-  console.error(`assert-trust-domains: binary positive control FAILED — proxy lacks "${PROXY_MARKER}"; update the marker`);
-  process.exit(1);
+for (const [name, binary, markers] of [
+  ["proxy", proxy, PROXY_MARKERS],
+  ["ledger", ledger, LEDGER_MARKERS],
+] as const) {
+  const missing = markers.filter((marker) => !has(binary, marker));
+  if (missing.length) {
+    console.error(`assert-trust-domains: binary positive control FAILED — ${name} lacks ${missing.join(", ")}; update the markers`);
+    process.exit(1);
+  }
 }
 
-fail("compiled proxy contains payments trust-domain symbols", PAYMENT_MARKERS.filter((marker) => has(proxy, marker)));
-if (has(payments, PROXY_MARKER)) {
-  console.error(`assert-trust-domains: compiled payments contains proxy trust-domain symbol: ${PROXY_MARKER}`);
-  process.exit(1);
-}
+fail("compiled proxy contains payments symbols", PAYMENT_MARKERS.filter((marker) => has(proxy, marker)));
+fail("compiled proxy contains ledger symbols", LEDGER_MARKERS.filter((marker) => has(proxy, marker)));
+fail("compiled ledger contains payments symbols", PAYMENT_MARKERS.filter((marker) => has(ledger, marker)));
+fail("compiled ledger contains proxy symbols", PROXY_MARKERS.filter((marker) => has(ledger, marker)));
+fail("compiled payments contains proxy symbols", PROXY_MARKERS.filter((marker) => has(payments, marker)));
+fail("compiled payments contains ledger symbols", LEDGER_MARKERS.filter((marker) => has(payments, marker)));
 
-console.log("assert-trust-domains: ✓ AST ownership, Bun inputs, and compiled symbols preserve the boundary between the two trust domains");
+console.log("assert-trust-domains: ✓ AST ownership, Bun inputs, and compiled symbols preserve all three trust domains");

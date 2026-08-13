@@ -11,7 +11,7 @@
 #   - TWO upstreams, both loopback-bound (HOST=127.0.0.1); only Caddy faces the internet.
 #       :8080  nullsink-proxy    — the proxy trust domain: /v1/* + /balance
 #       :8081  nullsink-payments — the payments trust domain: /buy + /order-status + /rails
-#     The two processes separate privilege: a request that carries a prompt never reaches the process that
+#     The two HTTP routers separate privilege: a request that carries a prompt never reaches the process that
 #     holds the payment→token link, and vice versa. Route each path to exactly one upstream — there is no
 #     shared router behind these ports, so a misrouted path is a hard 404, not a silent cross-trust-domain call.
 #   - Public surface = the static UI + POST /v1/messages + POST /v1/chat/completions + POST /v1/responses + GET /v1/models
@@ -141,7 +141,7 @@
 		}
 	}
 
-	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; BOTH services
+	# --- Everything else → the static purchase UI. (/healthz is intentionally NOT routed; both HTTP services
 	#     expose it as a localhost-only liveness check, so public requests for it just 404 here.) ---
 	handle {
 		root * {$NULLSINK_WEBROOT:/var/www/nullsink/current-web}

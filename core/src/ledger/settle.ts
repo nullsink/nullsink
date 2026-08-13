@@ -93,8 +93,8 @@ export function settle(
     for (const o of orders.openOrders(rail))
       if (o.seen_at == null && o.created_at < cutoff) orders.removeOrder(o.order_index, rail);
   }
-  // NO applied_orders purge here. applied_orders lives with the balance ledger (proxy-side) and is never
+  // NO applied_orders purge here. applied_orders lives with the dedicated balance ledger and is never
   // purged: purging on the payments-side clock could drop a marker while an outbox retry is still in
-  // flight → double-credit. It is ~50 bytes/sale; a payments→proxy safe-point watermark can prune it later.
+  // flight → double-credit. It is ~50 bytes/sale; a payments→ledger safe-point watermark can prune it later.
   return enqueued;
 }

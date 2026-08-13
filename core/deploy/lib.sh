@@ -127,16 +127,16 @@ install_verified_tinfoil_proxy() {  # local attestation sidecar
   echo "    tinfoil-proxy ${TINFOIL_PROXY_VERSION} installed"
 }
 
-# The two app units: one proxy trust domain process, one payments trust domain process. Every caller that means "the app"
-# means both, in this order — the proxy binds the credit socket the payments service connects to, so it goes
-# up first and comes down last.
+# The three app units. systemd owns the ordering: ledger starts first; on a joint restart, proxy/payments stop
+# before ledger so the proxy can finish its bounded settlement drain while the ledger is still available.
+LEDGER_UNIT="nullsink-ledger"
 PROXY_UNIT="nullsink-proxy"
 PAYMENTS_UNIT="nullsink-payments"
 
 install_units() {  # refresh the explicit app-box unit allowlist; other host roles cannot leak into this box
   local unit
   for unit in \
-    nullsink-proxy.service nullsink-payments.service \
+    nullsink-ledger.service nullsink-proxy.service nullsink-payments.service \
     monero-wallet-rpc.service tinfoil-proxy.service nullsink-bitcoin-label-export.service \
     backup.service backup.timer status-check.service status-check.timer status-alert@.service; do
     install -m644 "$APP_DIR/deploy/$unit" "/etc/systemd/system/$unit"
@@ -144,11 +144,12 @@ install_units() {  # refresh the explicit app-box unit allowlist; other host rol
   systemctl daemon-reload
 }
 
-enable_app_units() { systemctl enable "$PROXY_UNIT" "$PAYMENTS_UNIT"; }   # idempotent; also arms them for reboot
+enable_app_units() { systemctl enable "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"; }
 
-restart_app() {  # proxy first: it binds the credit socket payments connects to (payments retries regardless)
-  systemctl restart "$PROXY_UNIT"
-  systemctl restart "$PAYMENTS_UNIT"
+restart_app() {
+  # One transaction lets systemd honor Before=/After= for both stop and start. Sequentially restarting the
+  # ledger first would take it away from a still-draining proxy.
+  systemctl restart "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"
 }
 
 CONTROL_TIMERS_SUSPENDED=0
@@ -183,33 +184,33 @@ enable_timers() {  # reconcile the box's timers from the repo — shared by setu
   CONTROL_TIMERS_WERE_ACTIVE=()
 }
 
-install_binary() {  # $1=tag — fetch+verify+activate BOTH self-contained app binaries for a release tag
-  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-{proxy,payments}-<tag> + a `current-proxy` /
-  # `current-payments` symlink per service -> the active version (RELATIVE targets, so the dir is
+install_binary() {  # $1=tag — fetch+verify+activate all self-contained app binaries for a release tag
+  # Binary layout: versioned /usr/local/lib/nullsink/nullsink-{ledger,proxy,payments}-<tag> + one `current-*`
+  # symlink per service -> the active version (RELATIVE targets, so the dir is
   # self-contained/relocatable). Each unit's ExecStart runs its symlink; activation is an atomic `ln -sfn`
   # swap, rollback is repointing it at the previous target. Each binary is a self-contained
   # `bun build --compile` artifact (bundles prices.json etc.) — it runs with role-specific environment and
   # state paths, no source/Bun needed.
   #
-  # The two are ONE release, deployed in lockstep: they speak a versioned credit wire and a mismatched pair
-  # fails closed (the proxy 400s an unknown wire version, credits wait in the durable outbox). So fetch and
-  # verify BOTH before flipping EITHER symlink — a half-applied activation is the one state we can always
+  # The three are ONE release, deployed in lockstep: they speak versioned socket contracts and a mismatched set
+  # fails closed. Fetch and verify ALL before flipping ANY symlink — a half-applied activation is the one state
+  # we can always
   # avoid here.
   local tag="$1" tmp svc
   mkdir -p /usr/local/lib/nullsink
   tmp="$(mktemp -d)"
-  for svc in proxy payments; do fetch_asset "$tag" "nullsink-$svc-linux-x64" "$tmp"; done
+  for svc in ledger proxy payments; do fetch_asset "$tag" "nullsink-$svc-linux-x64" "$tmp"; done
   fetch_asset "$tag" 'SHA256SUMS' "$tmp"
-  for svc in proxy payments; do test -f "$tmp/nullsink-$svc-linux-x64"; done   # assert both assets downloaded
-  verify_sums "$tmp" || return 1   # the checksum gate — fires even when a caller invokes us in an `if` (see verify_sums). Verify BOTH assets before flipping EITHER symlink.
-  for svc in proxy payments; do
+  for svc in ledger proxy payments; do test -f "$tmp/nullsink-$svc-linux-x64"; done
+  verify_sums "$tmp" || return 1
+  for svc in ledger proxy payments; do
     install -m755 "$tmp/nullsink-$svc-linux-x64" "/usr/local/lib/nullsink/nullsink-$svc-$tag"
   done
-  for svc in proxy payments; do
+  for svc in ledger proxy payments; do
     ln -sfn "nullsink-$svc-$tag" "/usr/local/lib/nullsink/current-$svc"   # atomic activate (relative target)
   done
   rm -rf "$tmp"
-  echo "    app binaries $tag activated (current-proxy + current-payments -> nullsink-{proxy,payments}-$tag)"
+  echo "    app binaries $tag activated (current-{ledger,proxy,payments} -> nullsink-{ledger,proxy,payments}-$tag)"
 }
 
 install_nsk() {  # $1=tag — install the optional read-only operator CLI
@@ -222,11 +223,16 @@ install_nsk() {  # $1=tag — install the optional read-only operator CLI
   verify_sums "$tmp" || return 1
   install -m755 "$tmp/nsk-linux-x64" "/usr/local/lib/nullsink/nsk-$tag"
   ln -sfn "nsk-$tag" /usr/local/lib/nullsink/current-nsk
-  wrapper="$tmp/nsk"
+wrapper="$tmp/nsk"
   cat > "$wrapper" <<'EOF'
 #!/bin/sh
+if [ -f /etc/nullsink-ledger-extraction.activated ]; then
+  balances=/var/lib/nullsink-ledger/balances.db
+else
+  balances=/var/lib/nullsink-proxy/balances.db
+fi
 exec env \
-  BALANCES_DB_PATH=/var/lib/nullsink-proxy/balances.db \
+  BALANCES_DB_PATH="$balances" \
   PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db \
   /usr/local/lib/nullsink/current-nsk "$@"
 EOF
@@ -350,6 +356,12 @@ health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TI
   return 1
 }
 
-health_ok_app() {  # BOTH services must serve. Proxy first (it's the one that comes up first).
-  health_ok "$(proxy_port)" && health_ok "$(payments_port)"
+health_ok_legacy_app() { health_ok "$(proxy_port)" && health_ok "$(payments_port)"; }
+
+health_ok_app() {  # Ledger readiness plus both public-facing service health endpoints.
+  systemctl is-active --quiet "$LEDGER_UNIT" \
+    && [ -S /run/nullsink-ledger/proxy.sock ] \
+    && [ -S /run/nullsink-credit/credit.sock ] \
+    && health_ok "$(proxy_port)" \
+    && health_ok "$(payments_port)"
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Restore the billing DBs from a backup.sh artifact. DEFAULT is a SAFE DRY-RUN: decrypt + extract to a temp
 # dir and run PRAGMA integrity_check on each DB, touching NOTHING live. Pass --apply to actually replace the
-# live DBs (stops both services, installs the files service-owned, re-arms the credit outbox, restarts). A
+# live DBs (stops all three services, installs the files service-owned, re-arms the credit outbox, restarts). A
 # dry-run is also how you TEST a backup is restorable without risking production.
 #
 # Decryption (.tar.age artifacts) needs your age IDENTITY (private key), which is kept OFFLINE, NOT on the
@@ -10,9 +10,9 @@
 #
 # Usage:
 #   restore.sh <artifact>            # dry-run: verify integrity, report, change nothing
-#   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts both services)
+#   restore.sh --apply <artifact>    # DESTRUCTIVE: replace the live DBs (stops/starts all three services)
 # Env: BALANCES_DB_PATH, PENDING_DB_PATH, DB_DIR (legacy shared-directory fallback), per-DB USER/GROUP,
-# PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
+# LEDGER_UNIT, PROXY_UNIT, PAYMENTS_UNIT, BACKUP_AGE_IDENTITY (age key file, for .tar.age artifacts).
 set -euo pipefail
 
 apply=0
@@ -26,15 +26,16 @@ fi
 DB_DIR="${DB_DIR:-}"
 BALANCES_DB_PATH="${BALANCES_DB_PATH:-${DB_DIR:+$DB_DIR/balances.db}}"
 PENDING_DB_PATH="${PENDING_DB_PATH:-${DB_DIR:+$DB_DIR/pending.db}}"
-BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-proxy/balances.db}"
+BALANCES_DB_PATH="${BALANCES_DB_PATH:-/var/lib/nullsink-ledger/balances.db}"
 PENDING_DB_PATH="${PENDING_DB_PATH:-/var/lib/nullsink-payments/pending.db}"
 SVC_USER="${SVC_USER:-}"
 SVC_GROUP="${SVC_GROUP:-}"
-BALANCES_DB_USER="${BALANCES_DB_USER:-${SVC_USER:-nullsink-proxy}}"
+BALANCES_DB_USER="${BALANCES_DB_USER:-${SVC_USER:-nullsink-ledger}}"
 PENDING_DB_USER="${PENDING_DB_USER:-${SVC_USER:-nullsink-payments}}"
-BALANCES_DB_GROUP="${BALANCES_DB_GROUP:-${SVC_GROUP:-nullsink-proxy-read}}"
+BALANCES_DB_GROUP="${BALANCES_DB_GROUP:-${SVC_GROUP:-nullsink-ledger-read}}"
 PENDING_DB_GROUP="${PENDING_DB_GROUP:-${SVC_GROUP:-nullsink-payments-read}}"
 PROXY_UNIT="${PROXY_UNIT:-nullsink-proxy}"
+LEDGER_UNIT="${LEDGER_UNIT:-nullsink-ledger}"
 PAYMENTS_UNIT="${PAYMENTS_UNIT:-nullsink-payments}"
 RESTORE_MAX_MEMBER_BYTES="${RESTORE_MAX_MEMBER_BYTES:-8589934592}" # 8 GiB/member; real billing DBs are far smaller
 [[ "$RESTORE_MAX_MEMBER_BYTES" =~ ^[0-9]+$ ]] && [ "$RESTORE_MAX_MEMBER_BYTES" -gt 0 ] || {
@@ -215,10 +216,10 @@ for db in balances.db pending.db; do
   staged+=("$db")
 done
 
-# Payments first, proxy second: payments is the only writer of pending.db, and the proxy owns the credit
-# socket it delivers over. Stopping the sender before its receiver avoids a burst of doomed connects.
-echo "STOPPING $PAYMENTS_UNIT + $PROXY_UNIT to swap in the restored ledger…"
-systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT"
+# Stop all three in one transaction. systemd ordering drains the proxy before stopping the ledger and stops
+# payments before its credit receiver disappears.
+echo "STOPPING $PAYMENTS_UNIT + $PROXY_UNIT + $LEDGER_UNIT to swap in the restored databases…"
+systemctl stop "$PAYMENTS_UNIT" "$PROXY_UNIT" "$LEDGER_UNIT"
 for db in "${staged[@]}"; do
   live_path="$(live_path_for "$db")"
   stage_path="$(stage_path_for "$db")"
@@ -253,7 +254,7 @@ done
 # settle() always enqueues a 64-hex token hash and nothing else writes ''.
 #
 # The recovery control plane needs to write pending.db while reading balances.db, a capability neither app
-# principal has in steady state. Run this bounded transaction as root while both services are stopped, then
+# principal has in steady state. Run this bounded transaction as root while all three services are stopped, then
 # normalize every DB/sidecar back to its declared owner and read group before either service starts.
 if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
   # This is the ONLY thing standing between a rewound ledger and a permanently-skipped paid credit, so it must
@@ -265,7 +266,7 @@ if [ -f "$PENDING_DB_PATH" ] && command -v sqlite3 >/dev/null; then
       echo "!! credit-outbox re-arm FAILED — sqlite3 said:" >&2
       printf '%s\n' "$out" >&2
       echo "!! The databases ARE restored but the outbox was NOT re-armed, so a paid credit may be marked" >&2
-      echo "!! delivered while the restored ledger never received it. $PROXY_UNIT + $PAYMENTS_UNIT are left" >&2
+      echo "!! delivered while the restored ledger never received it. $LEDGER_UNIT + $PROXY_UNIT + $PAYMENTS_UNIT are left" >&2
       echo "!! STOPPED on purpose. Fix the cause, re-run this script, and only then start them." >&2
       exit 1
     fi
@@ -312,8 +313,8 @@ else
   echo "skip credit-outbox re-arm (no pending.db, or sqlite3 not installed — apt-get install sqlite3)"
 fi
 
-systemctl start "$PROXY_UNIT" "$PAYMENTS_UNIT"
-echo "--- restored + both services restarted. Verify with nsk financials, both /healthz endpoints,"
+systemctl start "$LEDGER_UNIT" "$PROXY_UNIT" "$PAYMENTS_UNIT"
+echo "--- restored + all three services restarted. Verify with nsk financials, both /healthz endpoints,"
 echo "    the next finalized aggregate report, and credit delivery in:"
 echo "      journalctl -u $PAYMENTS_UNIT -f"
 echo "    then remove $BALANCES_DB_PATH.prerestore and $PENDING_DB_PATH.prerestore once you're happy. ---"

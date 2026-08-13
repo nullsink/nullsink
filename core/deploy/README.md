@@ -3,17 +3,16 @@
 Everything the production box runs that is *not* the app binary itself: the systemd units that
 supervise it, the operator scripts those units invoke, the public-edge config, and the firewall.
 
-The app box is **source-free**. It runs the two compiled server binaries
-(`/usr/local/lib/nullsink/current-proxy` and `current-payments`) plus the scripts in this directory; it has
+The app box is **source-free**. It runs the three compiled server binaries
+(`/usr/local/lib/nullsink/current-ledger`, `current-proxy`, and `current-payments`) plus these scripts; it has
 no `src/`, no `cli/`, and no Bun. The top-level app files ship as `deploy-<tag>.tar.gz` and extract to
 `/opt/nullsink/deploy/`; `node-box/` ships separately and is excluded from that archive. App units'
 `ExecStart` lines point straight at the app paths.
 
-The app is **two processes and two OS principals**, split by privilege: `nullsink-proxy` serves the metered
-`/v1` paths and owns `balances.db`; `nullsink-payments` serves `/buy`, `/order-status`, `/rails`, runs the
-settlement poller, and owns `pending.db`. A request carrying a prompt never reaches the process that holds
-the payment→token link. The only channel between them is `/run/nullsink-credit/credit.sock`, where the
-`nullsink-credit` group permits only payments to send one-way credit commands.
+The app is **three processes and three OS principals**. `nullsink-proxy` serves metered `/v1` traffic and
+holds provider credentials but no database. `nullsink-ledger` exclusively owns `balances.db`; the proxy gets
+only a balance/hold/settle socket. `nullsink-payments` owns `pending.db`, wallets, and rail credentials; it gets
+only a distinct credit socket. A prompt never reaches payments, and neither caller can read the ledger DB.
 
 See setup.sh to stand up a box, and deploy.sh / upgrade-component.sh / backup.sh for day-2 work (app
 redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This file is just the map.
@@ -24,10 +23,11 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | File | Role |
 |------|------|
 | `setup.sh` | First-boot bootstrap for a fresh Ubuntu box (idempotent). Installs the toolchain, units, Caddy edge, and firewall, fetches + verifies the pinned release, and prints a next-steps checklist. |
-| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Drains the root backup/status one-shots before replacing their scripts, atomically swaps both binary symlinks in lockstep, refreshes units + edge, resumes timers only after health, warns if an enabled rail-daemon unit changed (it won't bounce a node mid-sync), and **rolls back** if either service fails `/healthz`. It does not install or upgrade Bitcoin Core, Monero, or `tinfoil-proxy`. |
+| `deploy.sh` | Health-gated redeploy of an *existing* box to a release tag. Drains control one-shots, swaps all three binaries in lockstep, restarts them as one ordered systemd transaction, resumes timers only after ledger readiness and both HTTP health probes, and rolls back all three on failure. |
 | `upgrade-component.sh` | Narrow day-two app-box upgrade for `monero-wallet` or `tinfoil`. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
+| `migrate-ledger-service.sh` | One-time, fail-closed extraction of the proxy-owned balance ledger. `--prepare` stops admission and snapshots exact state; any pre-activation deploy failure restores the old topology; activation requires both sockets and all three units; `--finalize` removes the frozen old copy after recovery proof. |
 | `install-nsk.sh` | Installs the optional read-only live balances/financials CLI. |
 | `node-box/` | Source for the separately packaged dedicated Bitcoin node day-two bundle. It is excluded from app release archives. Fresh provisioning moves to Ansible (issue #162). |
 
@@ -39,12 +39,12 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | `backup.sh` | Four-hour coordinated (`sqlite3 .backup`) snapshot of the billing DBs; validates the pair, atomically publishes the recovery artifact, optionally age-encrypts/pushes it, and emits an aggregate-only report. |
 | `backup-bitcoin-labels.sh` | Payments-owned, best-effort export of watch-only Bitcoin labels for the next artifact; backup never receives wallet RPC credentials. |
 | `backup-report.sh` | Builds the versioned privacy-safe JSON report from backup snapshots: daily/asset revenue, aggregate liability, and open/undelivered-credit health—never token/payment linkage. |
-| `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` to replace the live DBs, re-arm the credit outbox, and restart both services. |
+| `restore.sh` | Restore from a `backup.sh` artifact. **Safe dry-run by default**; `--apply` replaces both live DBs, re-arms the credit outbox, and restarts all three services. |
 | `backup-collector/` | Role-specific Raspberry Pi pull collector: restricted production export, hourly systemd pull, ciphertext/report retention and freshness validation, plus the recovery-drill runbook. Its units are deliberately outside the app box's top-level install glob. |
 | `node-box/regen-rpcauth.sh` | Node-only break-glass rotation of bitcoind `rpcauth`; prints the matched app password once. |
 
 ### systemd units & timers
-`nullsink-proxy.service` + `nullsink-payments.service` (the app's two halves) ·
+`nullsink-ledger.service` + `nullsink-proxy.service` + `nullsink-payments.service` ·
 `monero-wallet-rpc.service` (the local XMR watcher) ·
 `tinfoil-proxy.service` (the Tinfoil verifying proxy / enclave attestation; installed when `TINFOIL_API_KEY` is set) ·
 `nullsink-bitcoin-label-export.service` · `backup.service` + `backup.timer` · `status-check.service` + `status-check.timer` ·
@@ -58,7 +58,7 @@ The standalone node-box artifact carries its own firewall: default-deny inbound,
 ## Two things to know
 
 **App releases and pinned runtime dependencies have separate activation paths.** `deploy.sh <tag>` installs
-nullsink's two server binaries, optional read-only `nsk`, client UI, and deploy configuration. It never restarts a rail
+nullsink's three server binaries, optional read-only `nsk`, client UI, and deploy configuration. It never restarts a rail
 watcher or attestation sidecar. For an existing box, activate one refreshed dependency pin explicitly:
 
 ```sh
@@ -86,7 +86,7 @@ cannot install or manage bitcoind. (The lint runner lives in
 `/etc/nullsink-proxy.env`, `/etc/nullsink-payments.env`, `/etc/nullsink-backup.env`, and the root-only
 `/etc/nullsink-monitor.env`. Storage and socket paths remain unit-owned.
 
-## One-time shared-layout migration
+## One-time boundary migrations
 
 The installed pre-Step-4 `deploy.sh` cannot contain the new refusal gate retroactively. For this one boundary-
 crossing release, verify the new `deploy-<tag>.tar.gz` off-box, copy it to the app box, extract it into a temporary
@@ -94,7 +94,7 @@ directory, and run `deploy.sh <tag>` from there — **not** the old `/opt/nullsi
 verified deploy tree, then exits before changing units because the prepared marker is absent. Subsequent commands
 use the newly installed `/opt/nullsink/deploy/` tree normally.
 
-After that boundary-crossing release, the installed deploy script checks the prepared marker before downloading
+After that boundary-crossing release, the installed deploy script checks the service-isolation marker before downloading
 or activating any release artifact. Routine redeploys also stop and drain `status-check` and `backup` before the
 live deploy tree changes, so an old unit can never execute a new script during the transition.
 
@@ -106,6 +106,15 @@ After the isolated services pass health and access checks, create a new encrypte
 offline dry-run restore. Only then run `migrate-service-isolation.sh --finalize`; this retains the legacy
 copy but makes it root-only. Finalization is never automatic.
 
+The ledger extraction uses the same verified-bundle rule. Run `migrate-ledger-service.sh --prepare` from the
+new release bundle. It stops Caddy first, drains/stops proxy and payments, snapshots `balances.db` with an
+integrity and logical-fingerprint check, and leaves admission closed. Any failure before traffic activation
+automatically restores the old topology. Then run that bundle's `deploy.sh <tag>`: systemd starts ledger first,
+the proxy completes a replay-safe `startSession` barrier before binding HTTP, and Caddy returns only after both
+sockets plus both HTTP health probes pass. Before traffic activation, a failed health gate restores the old
+two-service topology. After a new encrypted backup passes an offline restore drill, `--finalize` removes the
+frozen proxy-owned DB and rollback bundle.
+
 ## Backup and reporting boundary
 
 `backup.timer` runs every four hours. `backup.sh` snapshots `pending.db` first and `balances.db` second,
@@ -115,7 +124,7 @@ directory, then atomically renamed. A collector therefore sees a complete final 
 in-progress artifact.
 
 Backup, restore, status, and the temporary live readers accept explicit `BALANCES_DB_PATH` and
-`PENDING_DB_PATH` values. Installed units pin them to `/var/lib/nullsink-proxy/balances.db` and
+`PENDING_DB_PATH` values. Installed units pin them to `/var/lib/nullsink-ledger/balances.db` and
 `/var/lib/nullsink-payments/pending.db`; `DB_DIR` remains an explicit legacy/test fallback. The archive
 format and pending-first snapshot order do not change.
 

@@ -1,5 +1,5 @@
-// The trust-domain policy is intentionally exhaustive. Ownership is derived from the two real composition
-// roots; only a small reviewed set may appear in BOTH runtime closures, and every src module must either be
+// The trust-domain policy is intentionally exhaustive. Ownership is derived from the three real composition
+// roots; only small reviewed sets may appear in pairwise runtime intersections, and every src module must either be
 // reachable from a service or be named as intentionally non-service. This avoids sampled deny-lists whose
 // omissions make a boundary test silently vacuous.
 import { readdirSync } from "node:fs";
@@ -10,22 +10,33 @@ import { runtimeModuleGraph, type OpaqueRuntimeImport, type UnresolvedLocalImpor
 export const CORE_DIR = fileURLToPath(new URL("../", import.meta.url));
 export const SRC_DIR = resolve(CORE_DIR, "src");
 export const PROXY_ROOT = "proxy.ts";
+export const LEDGER_ROOT = "ledger-service.ts";
 export const PAYMENTS_ROOT = "payments.ts";
 
-// Pure infrastructure/contracts deliberately used by both binaries. This is an ALLOW-list for the exact
-// intersection, not a sample: a new shared module fails until its cross-trust-domain use is explicitly reviewed.
+// Exact pairwise intersections. These include the two modules shared by all three roots; keeping each complete
+// makes every crossing independently reviewable and avoids a permissive generic "shared" bucket.
 export const INTENTIONAL_SHARED_RUNTIME = new Set([
-  "credit-wire.ts",
   "endpoints/read-throttle.ts",
   "env.ts",
   "http/body.ts",
   "http/errors.ts",
   "http/headers.ts",
   "http/index.ts",
-  "ledger/sqlite.ts",
   "log.ts",
   "metrics.ts",
   "ratelimit.ts",
+  "version.ts",
+]);
+export const INTENTIONAL_PROXY_LEDGER_RUNTIME = new Set([
+  "ledger/hash.ts",
+  "ledger/wire.ts",
+  "log.ts",
+  "version.ts",
+]);
+export const INTENTIONAL_PAYMENTS_LEDGER_RUNTIME = new Set([
+  "credit-wire.ts",
+  "ledger/sqlite.ts",
+  "log.ts",
   "version.ts",
 ]);
 
@@ -39,15 +50,12 @@ export const INTENTIONAL_PROXY_ONLY_RUNTIME = new Set([
   "cost/usage/index.ts",
   "cost/usage/openai.ts",
   "cost/usage/types.ts",
-  "credit-server.ts",
   "endpoints/proxy.ts",
   "endpoints/reads.ts",
   "handler.ts",
   "hold.ts",
   "http/proxy-token.ts",
-  "ledger/db.ts",
-  "ledger/hash.ts",
-  "ledger/port.ts",
+  "ledger/client.ts",
   "providers/anthropic.ts",
   "providers/index.ts",
   "providers/openai.ts",
@@ -77,17 +85,20 @@ export const INTENTIONAL_PAYMENTS_ONLY_RUNTIME = new Set([
   "rails/units.ts",
 ]);
 
-// Source modules intentionally absent from both service binaries. The first two are erased type contracts;
-// the staged ledger client/server/wire are exercised in PR-2 transport tests but do not enter a production
-// closure until the atomic activation PR; the others serve local tools or the browser client. Exactness
-// prevents stale exemptions.
+export const INTENTIONAL_LEDGER_ONLY_RUNTIME = new Set([
+  "credit-server.ts",
+  "ledger-service.ts",
+  "ledger/db.ts",
+  "ledger/server.ts",
+]);
+
+// Source modules intentionally absent from all three service binaries. Type-only contracts erase at runtime;
+// the others serve local tools or the browser client. Exactness prevents stale exemptions.
 export const INTENTIONAL_NON_SERVICE_MODULES = new Set([
   "providers/types.ts",
   "rails/types.ts",
-  "ledger/client.ts",
   "ledger/financials.ts",
-  "ledger/server.ts",
-  "ledger/wire.ts",
+  "ledger/port.ts",
   "token-format.ts",
 ]);
 
@@ -133,16 +144,26 @@ function union(...sets: Set<string>[]): Set<string> {
 
 export type TrustDomainInspection = {
   proxy: Set<string>;
+  ledger: Set<string>;
   payments: Set<string>;
   shared: Set<string>;
+  proxyLedgerShared: Set<string>;
+  paymentsLedgerShared: Set<string>;
   proxyOnly: Set<string>;
+  ledgerOnly: Set<string>;
   paymentsOnly: Set<string>;
   unexpectedShared: Set<string>;
   staleSharedAllowances: Set<string>;
+  unexpectedProxyLedgerShared: Set<string>;
+  staleProxyLedgerSharedAllowances: Set<string>;
+  unexpectedPaymentsLedgerShared: Set<string>;
+  stalePaymentsLedgerSharedAllowances: Set<string>;
   unexpectedProxyOnly: Set<string>;
   staleProxyOnlyAllowances: Set<string>;
   unexpectedPaymentsOnly: Set<string>;
   stalePaymentsOnlyAllowances: Set<string>;
+  unexpectedLedgerOnly: Set<string>;
+  staleLedgerOnlyAllowances: Set<string>;
   reachedNonService: Set<string>;
   unclassifiedSource: Set<string>;
   staleNonServiceAllowances: Set<string>;
@@ -154,36 +175,50 @@ export type TrustDomainInspection = {
 export function inspectTrustDomains(coreDir = CORE_DIR): TrustDomainInspection {
   const srcDir = resolve(coreDir, "src");
   const proxyGraph = runtimeModuleGraph([resolve(srcDir, PROXY_ROOT)]);
+  const ledgerGraph = runtimeModuleGraph([resolve(srcDir, LEDGER_ROOT)]);
   const paymentsGraph = runtimeModuleGraph([resolve(srcDir, PAYMENTS_ROOT)]);
   const proxy = namedModules(proxyGraph.modules, srcDir);
+  const ledger = namedModules(ledgerGraph.modules, srcDir);
   const payments = namedModules(paymentsGraph.modules, srcDir);
   const shared = intersection(proxy, payments);
-  const serviceModules = union(proxy, payments);
+  const proxyLedgerShared = intersection(proxy, ledger);
+  const paymentsLedgerShared = intersection(payments, ledger);
+  const serviceModules = union(proxy, ledger, payments);
   const sourceModules = allSourceModules(srcDir);
   const outsideSource = new Set(
-    [...union(proxyGraph.modules, paymentsGraph.modules)]
+    [...union(proxyGraph.modules, ledgerGraph.modules, paymentsGraph.modules)]
       .filter((path) => sourceModuleName(path, srcDir) == null)
       .map((path) => slash(relative(coreDir, path))),
   );
 
   return {
     proxy,
+    ledger,
     payments,
     shared,
-    proxyOnly: difference(proxy, payments),
-    paymentsOnly: difference(payments, proxy),
+    proxyLedgerShared,
+    paymentsLedgerShared,
+    proxyOnly: difference(proxy, union(payments, ledger)),
+    ledgerOnly: difference(ledger, union(proxy, payments)),
+    paymentsOnly: difference(payments, union(proxy, ledger)),
     unexpectedShared: difference(shared, INTENTIONAL_SHARED_RUNTIME),
     staleSharedAllowances: difference(INTENTIONAL_SHARED_RUNTIME, shared),
-    unexpectedProxyOnly: difference(difference(proxy, payments), INTENTIONAL_PROXY_ONLY_RUNTIME),
-    staleProxyOnlyAllowances: difference(INTENTIONAL_PROXY_ONLY_RUNTIME, difference(proxy, payments)),
-    unexpectedPaymentsOnly: difference(difference(payments, proxy), INTENTIONAL_PAYMENTS_ONLY_RUNTIME),
-    stalePaymentsOnlyAllowances: difference(INTENTIONAL_PAYMENTS_ONLY_RUNTIME, difference(payments, proxy)),
+    unexpectedProxyLedgerShared: difference(proxyLedgerShared, INTENTIONAL_PROXY_LEDGER_RUNTIME),
+    staleProxyLedgerSharedAllowances: difference(INTENTIONAL_PROXY_LEDGER_RUNTIME, proxyLedgerShared),
+    unexpectedPaymentsLedgerShared: difference(paymentsLedgerShared, INTENTIONAL_PAYMENTS_LEDGER_RUNTIME),
+    stalePaymentsLedgerSharedAllowances: difference(INTENTIONAL_PAYMENTS_LEDGER_RUNTIME, paymentsLedgerShared),
+    unexpectedProxyOnly: difference(difference(proxy, union(payments, ledger)), INTENTIONAL_PROXY_ONLY_RUNTIME),
+    staleProxyOnlyAllowances: difference(INTENTIONAL_PROXY_ONLY_RUNTIME, difference(proxy, union(payments, ledger))),
+    unexpectedPaymentsOnly: difference(difference(payments, union(proxy, ledger)), INTENTIONAL_PAYMENTS_ONLY_RUNTIME),
+    stalePaymentsOnlyAllowances: difference(INTENTIONAL_PAYMENTS_ONLY_RUNTIME, difference(payments, union(proxy, ledger))),
+    unexpectedLedgerOnly: difference(difference(ledger, union(proxy, payments)), INTENTIONAL_LEDGER_ONLY_RUNTIME),
+    staleLedgerOnlyAllowances: difference(INTENTIONAL_LEDGER_ONLY_RUNTIME, difference(ledger, union(proxy, payments))),
     reachedNonService: intersection(serviceModules, INTENTIONAL_NON_SERVICE_MODULES),
     unclassifiedSource: difference(difference(sourceModules, serviceModules), INTENTIONAL_NON_SERVICE_MODULES),
     staleNonServiceAllowances: difference(INTENTIONAL_NON_SERVICE_MODULES, sourceModules),
     outsideSource,
-    unresolved: [...proxyGraph.unresolved, ...paymentsGraph.unresolved],
-    opaque: [...proxyGraph.opaque, ...paymentsGraph.opaque],
+    unresolved: [...proxyGraph.unresolved, ...ledgerGraph.unresolved, ...paymentsGraph.unresolved],
+    opaque: [...proxyGraph.opaque, ...ledgerGraph.opaque, ...paymentsGraph.opaque],
   };
 }
 
