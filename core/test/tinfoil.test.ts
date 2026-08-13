@@ -212,6 +212,33 @@ test("Tinfoil rejects output-multiplying options (n/best_of != 1) with unsupport
   expect(calls.length).toBe(1);
 });
 
+test("Tinfoil rejects hosted tools the counter cannot price, while ordinary function tools pass", async () => {
+  const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
+  const token = "pr_tf_hosted_tools";
+  const { handler, balances } = makeHandler(fetchImpl);
+  fund(balances, token);
+  const base = { model: TF, max_completion_tokens: 100, messages: [{ role: "user", content: "hi" }] };
+
+  for (const bad of [
+    { web_search_options: {} },
+    { code_execution_options: {} },
+    { web_search_options: {}, code_execution_options: {} },
+  ]) {
+    const res = await handler(chatReq(token, { ...base, ...bad }));
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("unsupported_option");
+  }
+  expect(calls.length).toBe(0);
+  expect(debit(balances, token)).toBe(0);
+
+  const functionTool = {
+    type: "function",
+    function: { name: "lookup", parameters: { type: "object", properties: {} } },
+  };
+  expect((await handler(chatReq(token, { ...base, tools: [functionTool] }))).status).toBe(200);
+  expect(calls.length).toBe(1);
+});
+
 test("Tinfoil accepts the legacy max_tokens cap and x-api-key auth; an absent cap is rejected", async () => {
   const { fetchImpl, calls } = capturing(TF, { prompt_tokens: 10, completion_tokens: 5 });
   const token = "pr_tf_compat";

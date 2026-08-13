@@ -1,8 +1,7 @@
 // Live hold-soundness + counter checks against the REAL upstreams (operator-run; needs real keys; spends a
 // few cents). Validates the headline no-overdraft invariant on REAL prompts — the count-based pre-flight
 // hold must be >= the actual billed cost — across text / large / image / tools / cache-hit, for all three
-// providers (Tinfoil has no token-counter, so its hold is the byte bound — itself a proven upper bound,
-// reported as BYTE-FALLBACK). Also answers two open questions a frozen fixture can't:
+// providers. Also answers two open questions a frozen fixture can't:
 //   • does OpenAI's /v1/responses/input_tokens accept a Chat-Completions-shaped {messages,tools} body and
 //     return a sound count, or does the hold silently fall back to the (loose) byte bound? (per-shape: it
 //     reports "count ok" vs "byte fallback").
@@ -42,6 +41,9 @@ const anthropicHold: HoldEstimator | null = A
   : null;
 const openaiHold: HoldEstimator | null = O
   ? makeCountTokensHold({ countUrl: `${OB}/v1/responses/input_tokens`, authHeaders: { authorization: `Bearer ${O}` }, omit: OPENAI_COUNT_OMIT, timeoutMs: TIMEOUT })
+  : null;
+const tinfoilHold: HoldEstimator | null = T
+  ? makeCountTokensHold({ countUrl: `${TB}/v1/chat/completions/input_tokens`, authHeaders: { authorization: `Bearer ${T}` }, omit: new Set(), timeoutMs: TIMEOUT })
   : null;
 
 // A ~4k-token block (well over any provider's cache minimum) for the cache shape.
@@ -106,16 +108,15 @@ if (A && anthropicHold) {
     { name: "anthropic-text", ...an({ messages: [{ role: "user", content: "Reply with one short sentence." }] }) },
   );
 }
-if (T) {
-  // Tinfoil is OpenAI-chat-shaped but has NO count_tokens endpoint → the byte bound IS the hold (a proven
-  // upper bound; the run reports it as BYTE-FALLBACK, which is expected here, not a failure). extract reuses
-  // the OpenAI-chat parser. The reasoning shape stresses the output side — gpt-oss streams reasoning into the
-  // visible output, so completion_tokens (and the bill) include it; the maxTokens cap still bounds the hold.
+if (T && tinfoilHold) {
+  // Tinfoil is OpenAI-chat-shaped and its counter accepts that body directly. extract reuses the OpenAI-chat
+  // parser. The reasoning shape stresses the output side — gpt-oss streams reasoning into the visible output,
+  // so completion_tokens (and the bill) include it; the maxTokens cap still bounds the hold.
   const tf = (body: any, maxTokens = 64): Omit<Shape, "name"> => ({
     base: TB,
     path: "/v1/chat/completions",
     authHeaders: { authorization: `Bearer ${T}`, "content-type": "application/json" },
-    hold: byteBoundHold,
+    hold: tinfoilHold,
     extract: extractOpenAIChatUsage,
     model: "gpt-oss-120b",
     maxTokens,

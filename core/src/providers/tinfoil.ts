@@ -20,11 +20,15 @@ function tinfoilOutputCap(body: any): number | null {
 //   • best_of != 1  — vLLM-family backends generate best_of candidates internally; if Tinfoil bills generated
 //     (not returned) tokens, best_of>1 under-bills past the hold. Reject conservatively until the live backend
 //     is confirmed (see the step-6 verification). OpenAI removed best_of, so this is Tinfoil-specific.
+//   • hosted tools   — web search and code execution add separately billed work and server-side model turns
+//     that the input-token endpoint does not count. Function tools remain flat-token-safe and are allowed.
 // Audio/modality backstops aren't needed: the curated price list is text-chat only, so any audio/embedding id
 // is unpriced and ownsModel rejects it before this runs.
 function tinfoilPremiumReject(body: any): { status: number; error: string } | null {
   if (body?.n != null && body.n !== 1) return { status: 400, error: "unsupported_option" };
   if (body?.best_of != null && body.best_of !== 1) return { status: 400, error: "unsupported_option" };
+  if (body?.web_search_options != null || body?.code_execution_options != null)
+    return { status: 400, error: "unsupported_option" };
   return null;
 }
 
