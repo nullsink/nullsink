@@ -58,6 +58,17 @@ exec /usr/bin/id "$@"
   );
   for (const command of ["getent", "groupadd", "useradd", "usermod", "chown"])
     executable(join(fakeBin, command), "#!/bin/sh\nexit 0\n");
+  const sqlite3 = Bun.which("sqlite3");
+  if (!sqlite3) throw new Error("sqlite3 is required for migration tests");
+  executable(
+    join(fakeBin, "sqlite3"),
+    `#!/bin/sh
+if [ -n "\${FAKE_SQLITE_BACKUP_FAIL:-}" ] && printf '%s\\n' "$*" | grep -q '\\.backup '; then
+  exit 75
+fi
+exec ${sqlite3} "$@"
+`,
+  );
   executable(
     join(fakeBin, "install"),
     `#!/usr/bin/env bash
@@ -385,6 +396,42 @@ test("a failed financial gate publishes no marker and automatically restores the
   expect(result.exitCode).toBe(1);
   expect(result.stderr.toString()).toContain("partially scrubbed rows");
   expect(result.stderr.toString()).toContain("unchanged old topology was restored");
+  expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(false);
+  expect(existsSync(join(w.state, "nullsink-ledger", "balances.db"))).toBe(false);
+  expect(existsSync(join(w.systemdState, "nullsink-proxy.stopped"))).toBe(false);
+  expect(existsSync(join(w.systemdState, "nullsink-payments.stopped"))).toBe(false);
+  expect(existsSync(join(w.systemdState, "caddy.stopped"))).toBe(false);
+});
+
+test("missing or corrupt pending state fails closed and restores the old topology", () => {
+  for (const scenario of ["missing", "corrupt"] as const) {
+    const w = workspace();
+    const pendingPath = join(w.pendingState, "pending.db");
+    if (scenario === "missing") rmSync(pendingPath);
+    else writeFileSync(pendingPath, "not a sqlite database");
+
+    const result = run("--prepare", w.env);
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode, scenario).not.toBe(0);
+    expect(output).toContain(
+      scenario === "missing" ? "pending database is absent" : "file is not a database",
+    );
+    expect(output).toContain("unchanged old topology was restored");
+    expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(false);
+    expect(existsSync(join(w.state, "nullsink-ledger", "balances.db"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "nullsink-proxy.stopped"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "nullsink-payments.stopped"))).toBe(false);
+    expect(existsSync(join(w.systemdState, "caddy.stopped"))).toBe(false);
+  }
+});
+
+test("a ledger snapshot failure restores the unchanged old topology", () => {
+  const w = workspace();
+  const result = run("--prepare", { ...w.env, FAKE_SQLITE_BACKUP_FAIL: "1" });
+  const output = result.stdout.toString() + result.stderr.toString();
+
+  expect(result.exitCode).toBe(75);
+  expect(output).toContain("unchanged old topology was restored");
   expect(existsSync(join(w.etc, "nullsink-ledger-extraction.prepared"))).toBe(false);
   expect(existsSync(join(w.state, "nullsink-ledger", "balances.db"))).toBe(false);
   expect(existsSync(join(w.systemdState, "nullsink-proxy.stopped"))).toBe(false);
