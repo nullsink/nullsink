@@ -34,6 +34,8 @@
 //       streamReported     upstream-failed SSE billed provider-reported partial usage (count + microdollars)
 //       streamEstimated    upstream-failed SSE billed a visible-work estimate (count + microdollars)
 //       streamRefunded     upstream-failed SSE had no usage evidence and fully refunded
+//       streamTimeout      upstream-failed SSE reached the wall-clock cap after 2xx headers (count only);
+//                          orthogonal to the reported/estimated/refunded settlement evidence above
 //       bufferedInputFloor buffered HTTP received 2xx headers, then its body broke; caller got 502 and paid
 //                          the conservative input floor (count + microdollars)
 //   reject.*   — LOCAL shedding WE did, before/without an upstream call (our own limits, not the vendor):
@@ -91,12 +93,13 @@ export type BillKind = "refundedInFull" | "holdExceeded";
 export type GateKind = "auth" | "request" | "model" | "premium" | "funds";
 export type BalanceKind = "ok" | "unknown" | "throttled" | "error";
 export type CreditKind = "enqueued" | "acked" | "alreadyApplied" | "blocked";
-export type FailureKind = "streamReported" | "streamEstimated" | "streamRefunded" | "bufferedInputFloor";
+export type FailureKind = "streamReported" | "streamEstimated" | "streamRefunded" | "streamTimeout" | "bufferedInputFloor";
 type ChargedFailure = { count: number; micros: number };
 type FailureMetrics = {
   streamReported: ChargedFailure;
   streamEstimated: ChargedFailure;
   streamRefunded: number;
+  streamTimeout: number;
   bufferedInputFloor: ChargedFailure;
 };
 
@@ -110,6 +113,7 @@ const failure: FailureMetrics = {
   streamReported: { count: 0, micros: 0 },
   streamEstimated: { count: 0, micros: 0 },
   streamRefunded: 0,
+  streamTimeout: 0,
   bufferedInputFloor: { count: 0, micros: 0 },
 };
 let requests = 0; // metered requests forwarded upstream (post-gates)
@@ -156,8 +160,8 @@ export function recordCredit(kind: CreditKind, count = 1): void {
 // and microdollar exposure, split by reported vs estimated evidence. These are secondary dimensions and must
 // never be added into the primary request reconciliation formula.
 export function recordFailure(kind: FailureKind, micros = 0): void {
-  if (kind === "streamRefunded") {
-    failure.streamRefunded += 1;
+  if (kind === "streamRefunded" || kind === "streamTimeout") {
+    failure[kind] += 1;
     return;
   }
   failure[kind].count += 1;
@@ -234,6 +238,7 @@ export function snapshot(): MetricsSnapshot {
       streamReported: { ...failure.streamReported },
       streamEstimated: { ...failure.streamEstimated },
       streamRefunded: failure.streamRefunded,
+      streamTimeout: failure.streamTimeout,
       bufferedInputFloor: { ...failure.bufferedInputFloor },
     },
     requests, served, servedPartial, streamAborted,
@@ -275,6 +280,7 @@ export function formatMetricsLine(m: MetricsSnapshot, nowMs: number): { level: "
   if (m.streamAborted) routine.push(`stream:aborted=${m.streamAborted}`);
   // Detail-only accepted-failure telemetry. It lets us measure whether a more elaborate reconciliation
   // architecture is warranted without creating per-request state or changing the primary req identity.
+  if (m.failure.streamTimeout) routine.push(`failure:stream-timeout=${m.failure.streamTimeout}`);
   if (m.failure.streamReported.count) routine.push(
     `failure:stream-reported=${m.failure.streamReported.count}`,
     `failure:stream-reported-microusd=${m.failure.streamReported.micros}`,
@@ -331,6 +337,7 @@ export function reset(nowMs: number): void {
   failure.streamReported.count = failure.streamReported.micros = 0;
   failure.streamEstimated.count = failure.streamEstimated.micros = 0;
   failure.streamRefunded = 0;
+  failure.streamTimeout = 0;
   failure.bufferedInputFloor.count = failure.bufferedInputFloor.micros = 0;
   requests = 0;
   served = 0;

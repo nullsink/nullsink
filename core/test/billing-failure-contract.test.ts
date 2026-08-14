@@ -117,16 +117,29 @@ function cleanStream(chunks: string[]): Upstream {
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
 }
 
-function transportFailureAfter(chunks: string[], onCancel?: () => void): Upstream {
+function transportFailureAfter(chunks: string[], reason: unknown = new Error("provider transport broke"), onCancel?: () => void): Upstream {
   return async () => new Response(new ReadableStream<Uint8Array>({
     start(controller) { (controller as any)._index = 0; },
     pull(controller) {
       const index = (controller as any)._index++;
       if (index < chunks.length) controller.enqueue(enc.encode(chunks[index]!));
-      else controller.error(new Error("provider transport broke"));
+      else controller.error(reason);
     },
     cancel() { onCancel?.(); },
   }), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+async function streamRejection(promise: Promise<unknown>): Promise<unknown> {
+  let rejected = false;
+  let reason: unknown;
+  try {
+    await promise;
+  } catch (err) {
+    rejected = true;
+    reason = err;
+  }
+  expect(rejected).toBe(true);
+  return reason;
 }
 
 function openUntilCancelled(chunks: string[], onCancel: () => void): Upstream {
@@ -227,7 +240,8 @@ test("SSE contract · provider sends 200 then transport breaks before usage/outp
 
     const response = await handler(anthropicRequest(token, body));
     expect(response.status).toBe(200); // SSE headers were already relayed
-    await expect(response.text()).rejects.toThrow("provider transport broke");
+    const downstreamReason = await streamRejection(response.text());
+    expect(String(downstreamReason)).not.toContain("provider transport broke");
 
     expect(debit(balances, token)).toBe(0);
     expect(holdsCount(balances)).toBe(0);
@@ -256,13 +270,118 @@ test("SSE contract · Anthropic reports cumulative usage then transport breaks �
       model, max_tokens: 1000, stream: true, messages: [{ role: "user", content: "hello" }],
     }));
     expect(response.status).toBe(200);
-    await expect(response.text()).rejects.toThrow("provider transport broke");
+    const downstreamReason = await streamRejection(response.text());
+    expect(String(downstreamReason)).not.toContain("provider transport broke");
 
     const expected = contractCost(model, reported);
     expect(debit(balances, token)).toBe(expected);
     expect(holdsCount(balances)).toBe(0);
     expect(metrics.snapshot().failure.streamReported).toEqual({ count: 1, micros: expected });
     expect(reconciledOutcomeCount()).toBe(metrics.snapshot().requests);
+  } finally {
+    logSpy.mockRestore();
+  }
+});
+
+test("SSE observability · timeout after reported usage is concise, private, and secondary to the partial outcome", async () => {
+  const logSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const model = "claude-opus-4-8";
+    const reported = { input_tokens: 31, output_tokens: 17 };
+    const events = sseData([
+      { type: "message_start", message: { model, usage: { input_tokens: reported.input_tokens, output_tokens: 0 } } },
+      { type: "message_delta", usage: { output_tokens: reported.output_tokens } },
+    ]);
+    const rawReason = "private timeout detail";
+    const { handler, balances } = makeHandler(
+      transportFailureAfter([events], new DOMException(rawReason, "TimeoutError")),
+      { upstreamTimeoutMs: 600_000 },
+    );
+    const token = "pr_contract_timeout_reported";
+    fund(balances, token);
+
+    const response = await handler(anthropicRequest(token, {
+      model, max_tokens: 1000, stream: true, messages: [{ role: "user", content: "hello" }],
+    }));
+    expect(response.status).toBe(200);
+    const downstreamReason = await streamRejection(response.text());
+
+    const expected = contractCost(model, reported);
+    const snapshot = metrics.snapshot();
+    expect(debit(balances, token)).toBe(expected);
+    expect(holdsCount(balances)).toBe(0);
+    expect(snapshot.failure.streamReported).toEqual({ count: 1, micros: expected });
+    expect(snapshot.failure.streamTimeout).toBe(1);
+    expect(snapshot.upstream.timeout).toBe(0); // secondary annotation: the request is already stream:partial
+    expect(reconciledOutcomeCount()).toBe(snapshot.requests);
+    expect(String(downstreamReason)).not.toContain(rawReason);
+
+    const lines = logSpy.mock.calls.map((call) => String(call[0])).join("\n");
+    expect(lines).toContain("stream timed out after 600s (provider=anthropic path=/v1/messages) — billed reported partial");
+    expect(lines).not.toContain(rawReason);
+    expect(lines).not.toContain("INDEX_SIZE_ERR");
+  } finally {
+    logSpy.mockRestore();
+  }
+});
+
+test("SSE observability · timeout with visible OpenAI output identifies estimated billing", async () => {
+  const logSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const visible = "12345678";
+    const body = { model: "gpt-5", max_completion_tokens: 1000, stream: true, messages: [{ role: "user", content: "x".repeat(8000) }] };
+    const events = sseData([{ model: body.model, choices: [{ delta: { content: visible } }] }]);
+    const { handler, balances } = makeHandler(
+      transportFailureAfter([events], new DOMException("private timeout detail", "TimeoutError")),
+      { upstreamTimeoutMs: 600_000 },
+    );
+    const token = "pr_contract_timeout_estimated";
+    fund(balances, token);
+
+    const response = await handler(openAIRequest(token, body));
+    await streamRejection(response.text());
+
+    const estimatedInput = Math.ceil(Buffer.byteLength(JSON.stringify(body), "utf8") / 4);
+    const expected = contractCost(body.model, {
+      input_tokens: estimatedInput,
+      output_tokens: Math.ceil(visible.length / 4),
+    });
+    const snapshot = metrics.snapshot();
+    expect(debit(balances, token)).toBe(expected);
+    expect(snapshot.failure.streamEstimated).toEqual({ count: 1, micros: expected });
+    expect(snapshot.failure.streamTimeout).toBe(1);
+    expect(reconciledOutcomeCount()).toBe(snapshot.requests);
+    expect(logSpy.mock.calls.map((call) => String(call[0])).join("\n"))
+      .toContain("stream timed out after 600s (provider=openai path=/v1/chat/completions) — billed estimated partial");
+  } finally {
+    logSpy.mockRestore();
+  }
+});
+
+test("SSE observability · timeout without usage evidence is explicitly refunded", async () => {
+  const logSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const { handler, balances } = makeHandler(
+      transportFailureAfter([sseData([{ type: "ping" }])], new DOMException("private timeout detail", "TimeoutError")),
+      { upstreamTimeoutMs: 600_000 },
+    );
+    const token = "pr_contract_timeout_refunded";
+    const body = { model: "claude-opus-4-8", max_tokens: 1000, stream: true, messages: [{ role: "user", content: "hello" }] };
+    fund(balances, token);
+
+    const response = await handler(anthropicRequest(token, body));
+    await streamRejection(response.text());
+
+    const snapshot = metrics.snapshot();
+    expect(debit(balances, token)).toBe(0);
+    expect(snapshot.failure.streamRefunded).toBe(1);
+    expect(snapshot.failure.streamTimeout).toBe(1);
+    expect(reconciledOutcomeCount()).toBe(snapshot.requests);
+    expect(logSpy.mock.calls.map((call) => String(call[0])).join("\n"))
+      .toContain("stream timed out after 600s (provider=anthropic path=/v1/messages) — no usage evidence, refunded");
   } finally {
     logSpy.mockRestore();
   }
