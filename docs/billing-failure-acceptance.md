@@ -10,9 +10,10 @@ change; these externally observable outcomes must not change without an explicit
 | Buffered provider returns 2xx and a complete usage-bearing body | Complete response | Exact reported usage |
 | Buffered provider returns 2xx headers, then its body breaks | nullsink returns `502`; no partial provider body is forwarded | Conservative input-only charge |
 | Caller disconnects before nullsink has response headers/body to return | Caller receives no response | Downstream abort is not propagated; accepted upstream work continues and settles by its normal terminal outcome |
-| SSE provider returns 2xx, then fails before usage or visible output | Caller already has a `200` stream which then fails | Full refund |
-| Anthropic SSE reports cumulative usage, then fails | Caller already has a partial `200` stream | Latest provider-reported cumulative usage |
-| OpenAI SSE emits visible output, then fails before final usage | Caller already has a partial `200` stream | Estimated input plus visible output; never the output maximum |
+| SSE provider returns 2xx, then fails before usage or visible output | Partial `200`; no successful provider terminal marker | Full refund |
+| Anthropic SSE reports cumulative usage, then fails | Partial `200`; no successful provider terminal marker | Latest provider-reported cumulative usage |
+| OpenAI SSE emits visible output, then fails before final usage | Partial `200`; no successful provider terminal marker | Estimated input plus visible output; never the output maximum |
+| SSE transport reaches EOF without `message_stop`, `[DONE]`, `response.completed`, or `response.incomplete` | Partial `200` ending without the provider's native success marker | Provider-failure policy: reported or visible estimated partial, otherwise full refund |
 | Client cancels any OpenAI stream before final usage | Partial response; upstream generation is cancelled | Estimated input plus visible streamed output; metadata-only means input only |
 | Upstream failure is observed and the client subsequently cancels | Partial/failed response | Upstream-failure policy wins; never the reasoning output maximum |
 | Shutdown drains a live stream | Connection closes during restart | Reported usage, or estimated input plus visible output; otherwise full refund |
@@ -25,6 +26,7 @@ Every forwarded request must additionally satisfy all of these invariants:
 - A provider/operator secret is never returned to the caller.
 - Network chunk boundaries do not affect settlement.
 - Exact provider usage overrides an estimate.
+- Transport EOF alone never establishes successful provider completion.
 - No settlement charge may use the raw byte hold or configured output maximum; those are reservations only.
 - Provider-reported and estimated failure charges are measured separately by count and microdollars.
 

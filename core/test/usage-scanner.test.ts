@@ -3,7 +3,7 @@
 // through).
 import { test, expect } from "bun:test";
 import { streamUsageScanner } from "../src/cost/usage/anthropic";
-import { openaiResponsesScanner } from "../src/cost/usage/openai";
+import { openaiChatScanner, openaiResponsesScanner } from "../src/cost/usage/openai";
 
 const feed = (scan: { feed(c: string): void }, s: string) => scan.feed(s);
 
@@ -16,6 +16,23 @@ test("Anthropic scanner bills the message_start output_tokens when no delta foll
   expect(m).not.toBeNull();
   expect(m!.usage.output_tokens).toBe(5); // the `&& 0` mutant would make this 0
   expect(m!.usage.input_tokens).toBe(10);
+  expect(scan.completed()).toBe(false); // usage alone is not a successful Anthropic terminal state
+});
+
+test("Anthropic scanner completes only on message_stop", () => {
+  const scan = streamUsageScanner();
+  feed(scan, `event: ping\ndata: ${JSON.stringify({ type: "ping" })}\n\n`);
+  expect(scan.completed()).toBe(false);
+  feed(scan, `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+  expect(scan.completed()).toBe(true);
+});
+
+test("OpenAI Chat scanner completes only on the [DONE] sentinel", () => {
+  const scan = openaiChatScanner({ model: "gpt-5", inputTokens: 10 });
+  feed(scan, `data: ${JSON.stringify({ model: "gpt-5", choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`);
+  expect(scan.completed()).toBe(false); // even exact terminal usage does not replace the protocol sentinel
+  feed(scan, "data: [DONE]\n\n");
+  expect(scan.completed()).toBe(true);
 });
 
 // cost/usage/openai.ts:183 — the Responses disconnect path accumulates `contentChars` from
@@ -40,4 +57,17 @@ test("OpenAI Responses scanner bills exact usage on a clean close (terminal even
   const m = scan.result();
   expect(m!.usage.output_tokens).toBe(50); // exact, not ceil(4/4)=1
   expect(m!.model).toBe("gpt-4o-2024-08-06");
+  expect(scan.completed()).toBe(true);
+});
+
+test("OpenAI Responses treats response.incomplete as a successful terminal state, but response.failed as an error", () => {
+  const incomplete = openaiResponsesScanner({ model: "gpt-5", inputTokens: 10 });
+  feed(incomplete, `data: ${JSON.stringify({ type: "response.incomplete", response: { model: "gpt-5", usage: { input_tokens: 10, output_tokens: 5 } } })}\n\n`);
+  expect(incomplete.completed()).toBe(true);
+  expect(incomplete.errored()).toBe(false);
+
+  const failed = openaiResponsesScanner({ model: "gpt-5", inputTokens: 10 });
+  feed(failed, `data: ${JSON.stringify({ type: "response.failed", response: { model: "gpt-5", usage: null } })}\n\n`);
+  expect(failed.completed()).toBe(false);
+  expect(failed.errored()).toBe(true);
 });

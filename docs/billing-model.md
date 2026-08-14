@@ -176,9 +176,11 @@ cancellation does stop upstream generation and uses the partial-settlement polic
 
 ## Streaming and disconnects
 
-For SSE responses the bytes are relayed untouched while a scanner meters usage off the stream.
-Settlement runs once, on whichever happens first: a clean finish (bill exact usage), an upstream
-error, a client cancel, or a force-settle deadline for a client that opens a stream but never reads it.
+For SSE responses the bytes are relayed untouched while a scanner meters usage off the stream. A clean finish
+requires the provider's native success marker (`message_stop`, `[DONE]`, `response.completed`, or
+`response.incomplete`); transport EOF alone is treated as an upstream failure. Settlement runs once, on
+whichever happens first: a proven clean finish (bill exact usage), an upstream error or incomplete EOF, a
+client cancel, or a force-settle deadline for a client that opens a stream but never reads it.
 
 Settlement follows the strongest available evidence. An upstream failure after provider-reported usage
 (Anthropic sends cumulative usage throughout the stream) bills only that reported partial. OpenAI normally
@@ -197,7 +199,7 @@ into the maximum user bill. Graceful shutdown uses reported usage or visible-out
 it refunds in full. The settle deadline uses the same evidence when present and otherwise charges input only.
 
 Failure telemetry is aggregate and stateless: provider-reported stream charges, estimated stream charges,
-stream refunds, and buffered input-floor charges are counted separately. Every charged category also sums
+stream refunds, incomplete stream EOFs, and buffered input-floor charges are counted separately. Every charged category also sums
 microdollars, which measures actual user charges/exposure without pretending nullsink knows a provider's
 unreported final invoice.
 

@@ -75,6 +75,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
   let contentChars = 0; // accumulated streamed output text (content + reasoning/reasoning_content), for the disconnect estimate
   let sawAny = false; // any parseable event → generation started (bill the partial, not a full refund)
   let failed = false; // upstream signalled an error mid-stream (not a client disconnect)
+  let completed = false; // Chat Completions succeeds only after the native [DONE] sentinel
 
   return {
     feed(chunk: string): void {
@@ -85,7 +86,11 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
         buf = buf.slice(nl + 1);
         if (!line.startsWith("data:")) continue; // skip blank separators / comments
         const payload = line.slice(5).trim();
-        if (!payload || payload === "[DONE]") continue;
+        if (!payload) continue;
+        if (payload === "[DONE]") {
+          completed = true;
+          continue;
+        }
         let evt: any;
         try {
           evt = JSON.parse(payload);
@@ -148,6 +153,7 @@ export function openaiChatScanner(ctx: ScannerCtx): UsageScanner {
       };
     },
     errored: () => failed,
+    completed: () => completed,
   };
 }
 
@@ -179,6 +185,7 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
   let contentChars = 0;
   let sawAny = false;
   let failed = false; // a response.failed / error event (no usage) → upstream failure
+  let completed = false; // response.completed / response.incomplete are both successful terminal states
 
   return {
     feed(chunk: string): void {
@@ -200,6 +207,7 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
         // response.failed / a top-level error = upstream failure (no usable completion); response.incomplete
         // (hit the output cap) is NOT a failure — it carries usage and is handled by finalUsage below.
         if (evt.type === "response.failed" || evt.type === "error" || evt.error) failed = true;
+        if (evt.type === "response.completed" || evt.type === "response.incomplete") completed = true;
         if (typeof evt.response?.model === "string") model = evt.response.model;
         if (evt.response?.usage) finalUsage = mapOpenAIResponsesUsage(evt.response.usage);
         if (evt.type === "response.output_text.delta" && typeof evt.delta === "string") contentChars += evt.delta.length;
@@ -235,5 +243,6 @@ export function openaiResponsesScanner(ctx: ScannerCtx): UsageScanner {
       };
     },
     errored: () => failed,
+    completed: () => completed,
   };
 }

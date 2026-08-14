@@ -85,9 +85,10 @@ test("openai buffered: prompt_tokens is split into input + cached, reasoning sta
 
 // OpenAI SSE: bare `data: {json}` per chunk, then `data: [DONE]`. One chunk per client pull, so a test can
 // read N then cancel. onCancel fires when the client disconnect propagates upstream.
-function openaiStream(chunks: object[], onCancel?: () => void): Upstream {
+function openaiStream(chunks: object[], onCancel?: () => void, includeDone = true): Upstream {
   const enc = new TextEncoder();
-  const frames = [...chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`), "data: [DONE]\n\n"];
+  const frames = chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`);
+  if (includeDone) frames.push("data: [DONE]\n\n");
   return async () =>
     new Response(
       new ReadableStream<Uint8Array>({
@@ -126,6 +127,39 @@ test("openai streaming: a clean close bills the exact usage from the final inclu
   await res.text(); // drain → settle on clean close
   const expected: Usage = { input_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 500 };
   expect(debit(balances, token)).toBe(priceUsage("gpt-5", expected));
+});
+
+test("openai streaming: exact usage without [DONE] is an incomplete reported partial", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const usage = { prompt_tokens: 1000, completion_tokens: 500, prompt_tokens_details: { cached_tokens: 0 } };
+    const chunks = [
+      { model: "gpt-5", choices: [{ delta: { content: "partial" } }] },
+      { model: "gpt-5", choices: [], usage },
+    ];
+    const token = "pr_oai_incomplete";
+    const { handler, balances } = makeHandler(openaiStream(chunks, undefined, false));
+    fund(balances, token);
+
+    const res = await handler(chatReq(token, streamBody(1000)));
+    await res.text();
+
+    const expected = priceUsage("gpt-5", {
+      input_tokens: 1000,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 500,
+    });
+    const snapshot = metrics.snapshot();
+    expect(debit(balances, token)).toBe(expected);
+    expect([snapshot.served, snapshot.servedPartial, snapshot.streamAborted, snapshot.bill.refundedInFull])
+      .toEqual([0, 1, 0, 0]);
+    expect(snapshot.failure.streamIncomplete).toBe(1);
+    expect(snapshot.failure.streamReported).toEqual({ count: 1, micros: expected });
+  } finally {
+    errSpy.mockRestore();
+  }
 });
 
 test("openai streaming: a reasoning-model disconnect bills estimated input + visible output, never the reservation", async () => {

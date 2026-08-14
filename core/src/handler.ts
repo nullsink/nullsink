@@ -221,7 +221,7 @@ class LedgerSettlementError extends Error {
   }
 }
 
-type StreamTerminalCause = "complete" | "upstream_error" | "upstream_timeout" | "client_cancel" | "deadline" | "shutdown_drain";
+type StreamTerminalCause = "complete" | "upstream_error" | "upstream_timeout" | "upstream_incomplete" | "client_cancel" | "deadline" | "shutdown_drain";
 type StreamSettlementDecision =
   | { outcome: "served"; cost: number }
   | { outcome: "partial"; cost: number }
@@ -242,7 +242,7 @@ function decideStreamSettlement(input: {
   requestModel: string;
 }): StreamSettlementDecision {
   const { cause, metered, upstreamErrored, inputTokens, requestModel } = input;
-  const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || upstreamErrored;
+  const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || cause === "upstream_incomplete" || upstreamErrored;
   if (metered) {
     const cost = priceUsage(metered.model, metered.usage, requestModel);
     if (upstreamFailed) return { outcome: "upstream_partial", cost, evidence: metered.evidence };
@@ -530,7 +530,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 /* stream already closed/errored — nothing to terminate */
               }
             }
-            const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || scan.errored();
+            const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || cause === "upstream_incomplete" || scan.errored();
             const metered = scan.result(upstreamFailed || cause === "shutdown_drain" ? "evidenced_only" : undefined);
             settlementDecision = decideStreamSettlement({
               cause,
@@ -545,9 +545,11 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
           const terminalCause = settlementCause!;
           const failureLabel = terminalCause === "upstream_timeout"
             ? `stream timed out after ${UPSTREAM_TIMEOUT_MS / 1000}s`
-            : terminalCause === "upstream_error"
-              ? "stream transport interrupted"
-              : "stream ended with upstream error";
+            : terminalCause === "upstream_incomplete"
+              ? "stream closed before provider completion"
+              : terminalCause === "upstream_error"
+                ? "stream transport interrupted"
+                : "stream ended with upstream error";
           settlementAttempt = (async () => {
             let charged: number;
             switch (decision.outcome) {
@@ -564,6 +566,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 log.warn("upstream", `${failureLabel} (provider=${provider.id} path=${provider.upstreamPath}) — billed ${decision.evidence} partial`);
                 metrics.recordServedPartial();
                 if (terminalCause === "upstream_timeout") metrics.recordFailure("streamTimeout");
+                if (terminalCause === "upstream_incomplete") metrics.recordFailure("streamIncomplete");
                 metrics.recordFailure(
                   decision.evidence === "reported" ? "streamReported" : "streamEstimated",
                   charged,
@@ -577,6 +580,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 await billActual(0);
                 log.warn("upstream", `${failureLabel} (provider=${provider.id} path=${provider.upstreamPath}) — no usage evidence, refunded`);
                 if (terminalCause === "upstream_timeout") metrics.recordFailure("streamTimeout");
+                if (terminalCause === "upstream_incomplete") metrics.recordFailure("streamIncomplete");
                 metrics.recordFailure("streamRefunded");
                 metrics.recordStreamAborted();
                 break;
@@ -641,7 +645,11 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
             }
             if (chunk.done) {
               try {
-                await settle(requestedCause ?? "complete");
+                // A transport EOF is not proof that a provider finished successfully. In-band error frames have
+                // already been relayed and remain classified by scan.errored(); every other natural EOF must carry
+                // the provider's native success marker or it settles under the upstream-failure policy.
+                const naturalCause = scan.errored() || scan.completed() ? "complete" : "upstream_incomplete";
+                await settle(requestedCause ?? naturalCause);
                 controller.close(); // downstream completion means the charge is already definite
               } catch (err) {
                 controller.error(err);
