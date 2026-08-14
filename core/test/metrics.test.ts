@@ -23,6 +23,7 @@ test("record / observe / snapshot / reset track every counter and high-water mar
       streamReported: { count: 0, micros: 0 },
       streamEstimated: { count: 0, micros: 0 },
       streamRefunded: 0,
+      streamTimeout: 0,
       bufferedInputFloor: { count: 0, micros: 0 },
     },
     requests: 0,
@@ -67,6 +68,7 @@ test("record / observe / snapshot / reset track every counter and high-water mar
   metrics.recordFailure("streamReported", 120);
   metrics.recordFailure("streamEstimated", 80);
   metrics.recordFailure("streamRefunded");
+  metrics.recordFailure("streamTimeout");
   metrics.recordFailure("bufferedInputFloor", 45);
   metrics.recordRequest();
   metrics.recordRequest();
@@ -91,6 +93,7 @@ test("record / observe / snapshot / reset track every counter and high-water mar
       streamReported: { count: 1, micros: 120 },
       streamEstimated: { count: 1, micros: 80 },
       streamRefunded: 1,
+      streamTimeout: 1,
       bufferedInputFloor: { count: 1, micros: 45 },
     },
     requests: 2,
@@ -116,6 +119,7 @@ test("record / observe / snapshot / reset track every counter and high-water mar
       streamReported: { count: 0, micros: 0 },
       streamEstimated: { count: 0, micros: 0 },
       streamRefunded: 0,
+      streamTimeout: 0,
       bufferedInputFloor: { count: 0, micros: 0 },
     },
     requests: 0,
@@ -498,6 +502,7 @@ const EMPTY = {
     streamReported: { count: 0, micros: 0 },
     streamEstimated: { count: 0, micros: 0 },
     streamRefunded: 0,
+    streamTimeout: 0,
     bufferedInputFloor: { count: 0, micros: 0 },
   },
   requests: 0,
@@ -637,12 +642,13 @@ test("formatMetricsLine: accepted-failure detail is visible but does not create 
         streamReported: { count: 2, micros: 120 },
         streamEstimated: { count: 3, micros: 80 },
         streamRefunded: 1,
+        streamTimeout: 2,
         bufferedInputFloor: { count: 1, micros: 45 },
       },
     }, 60 * 60_000),
   ).toEqual({
     level: "info",
-    line: "served=7 req=10 stream:partial=2 stream:aborted=1 failure:stream-reported=2 failure:stream-reported-microusd=120 failure:stream-estimated=3 failure:stream-estimated-microusd=80 failure:stream-refunded=1 failure:http-input-floor=1 failure:http-input-floor-microusd=45 (last 60m)",
+    line: "served=7 req=10 stream:partial=2 stream:aborted=1 failure:stream-timeout=2 failure:stream-reported=2 failure:stream-reported-microusd=120 failure:stream-estimated=3 failure:stream-estimated-microusd=80 failure:stream-refunded=1 failure:http-input-floor=1 failure:http-input-floor-microusd=45 (last 60m)",
   });
 });
 

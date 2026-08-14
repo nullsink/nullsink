@@ -21,6 +21,11 @@ import type { TokenBucket } from "./ratelimit";
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object";
 
+// Timeout failures may be DOMExceptions (and can cross runtime/realm boundaries), so classify by the stable
+// Web-platform name rather than `instanceof Error`. Some fetch implementations reject a body read with a
+// generic AbortError even though the originating signal retains the more precise TimeoutError reason.
+const isTimeoutError = (value: unknown): boolean => isRecord(value) && value.name === "TimeoutError";
+
 // Does an upstream error body indicate a billing/credit/quota failure (OUR account, not the user's
 // request)? Match the provider's STRUCTURED error fields (type/code, and a tight message phrase), not the
 // whole body: a generic 400 often echoes the user's own prompt, which could contain "billing"/"quota" and
@@ -216,7 +221,7 @@ class LedgerSettlementError extends Error {
   }
 }
 
-type StreamTerminalCause = "complete" | "upstream_error" | "client_cancel" | "deadline" | "shutdown_drain";
+type StreamTerminalCause = "complete" | "upstream_error" | "upstream_timeout" | "client_cancel" | "deadline" | "shutdown_drain";
 type StreamSettlementDecision =
   | { outcome: "served"; cost: number }
   | { outcome: "partial"; cost: number }
@@ -237,7 +242,7 @@ function decideStreamSettlement(input: {
   requestModel: string;
 }): StreamSettlementDecision {
   const { cause, metered, upstreamErrored, inputTokens, requestModel } = input;
-  const upstreamFailed = cause === "upstream_error" || upstreamErrored;
+  const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || upstreamErrored;
   if (metered) {
     const cost = priceUsage(metered.model, metered.usage, requestModel);
     if (upstreamFailed) return { outcome: "upstream_partial", cost, evidence: metered.evidence };
@@ -463,18 +468,20 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
     // Past this point the hold is debited — every buffered exit path awaits billActual; the streaming
     // path defers refund to settle() on the response stream's done/error/cancel callback (see below).
     let bufferedReadFailedAfterOk = false;
+    let upstreamSignal: AbortSignal | undefined;
     try {
       const headers = buildUpstreamHeaders(provider, req);
       // Inject the cap only when the client omitted one (clientCap == null) — i.e. the default supplied it.
       const sendBody = provider.prepareBody(effectiveRaw, body, streaming, clientCap == null ? maxTokens : undefined);
 
       metrics.recordRequest(); // a metered request we're forwarding upstream (post-gates); served counts the 2xx below
+      upstreamSignal = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
       const upstream = await upstreamFetch(provider.baseUrl + provider.upstreamPath + url.search, {
         method: "POST",
         headers,
         body: sendBody,
         redirect: "manual",
-        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        signal: upstreamSignal,
       });
 
       // Billing rides THIS response's stream lifecycle — settle() runs on clean end, upstream error, or
@@ -503,11 +510,13 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
         // `inflight` until the ledger confirms completion; a rejected attempt clears only the attempt (not
         // the chosen billing decision or registry entry), allowing shutdown to retry without double-counting.
         let settlementDecision: StreamSettlementDecision | undefined;
+        let settlementCause: StreamTerminalCause | undefined;
         let settlementAttempt: Promise<void> | undefined;
         const settle = (reason: StreamTerminalCause | "drain" = "complete"): Promise<void> => {
           if (settlementAttempt) return settlementAttempt;
           const cause = reason === "drain" ? "shutdown_drain" : reason;
           if (!settlementDecision) {
+            settlementCause = cause;
             cancelDeadline?.(); // the first terminal cause owns settlement and clears the deadline
             if (reason === "drain") {
               // Billing settlement alone does not stop the fetch body's blocked read. Mark + cancel before
@@ -521,7 +530,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 /* stream already closed/errored — nothing to terminate */
               }
             }
-            const upstreamFailed = cause === "upstream_error" || scan.errored();
+            const upstreamFailed = cause === "upstream_error" || cause === "upstream_timeout" || scan.errored();
             const metered = scan.result(upstreamFailed || cause === "shutdown_drain" ? "evidenced_only" : undefined);
             settlementDecision = decideStreamSettlement({
               cause,
@@ -533,6 +542,12 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
           }
 
           const decision = settlementDecision!;
+          const terminalCause = settlementCause!;
+          const failureLabel = terminalCause === "upstream_timeout"
+            ? `stream timed out after ${UPSTREAM_TIMEOUT_MS / 1000}s`
+            : terminalCause === "upstream_error"
+              ? "stream transport interrupted"
+              : "stream ended with upstream error";
           settlementAttempt = (async () => {
             let charged: number;
             switch (decision.outcome) {
@@ -546,8 +561,9 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 break;
               case "upstream_partial":
                 charged = await billActual(decision.cost);
-                log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — billed metered partial`);
+                log.warn("upstream", `${failureLabel} (provider=${provider.id} path=${provider.upstreamPath}) — billed ${decision.evidence} partial`);
                 metrics.recordServedPartial();
+                if (terminalCause === "upstream_timeout") metrics.recordFailure("streamTimeout");
                 metrics.recordFailure(
                   decision.evidence === "reported" ? "streamReported" : "streamEstimated",
                   charged,
@@ -559,7 +575,8 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
                 break;
               case "upstream_aborted":
                 await billActual(0);
-                log.warn("upstream", `stream aborted mid-flight (${provider.upstreamPath}) — no usage evidence, refunded`);
+                log.warn("upstream", `${failureLabel} (provider=${provider.id} path=${provider.upstreamPath}) — no usage evidence, refunded`);
+                if (terminalCause === "upstream_timeout") metrics.recordFailure("streamTimeout");
                 metrics.recordFailure("streamRefunded");
                 metrics.recordStreamAborted();
                 break;
@@ -595,7 +612,7 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
           // promise in `inflight`, and shutdown will join/retry it if the ledger attempt rejects.
           settle("deadline").catch((err) => log.error("bill", `deadline settlement failed: ${log.errMsg(err)}`));
           try {
-            streamController?.error(new Error("stream_settle_deadline"));
+            streamController?.error();
           } catch {
             /* stream already closed/errored — nothing to terminate */
           }
@@ -613,8 +630,13 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
             } catch (err) {
               // reader.cancel() may reject a pending read; when we initiated that cancel, preserve its already-
               // marked client/deadline cause. With no local termination pending, this is a genuine transport error.
-              await settle(requestedCause ?? "upstream_error");
-              controller.error(err);
+              const upstreamCause = requestedCause ?? (
+                isTimeoutError(err) || isTimeoutError(upstreamSignal?.reason) ? "upstream_timeout" : "upstream_error"
+              );
+              await settle(upstreamCause);
+              // The raw DOMException is an upstream implementation detail; passing it into Bun's HTTP response
+              // renderer produces a huge inherited-constants dump in journald. Settlement logs the stable cause.
+              controller.error();
               return;
             }
             if (chunk.done) {
@@ -681,13 +703,15 @@ export function buildProxyRoutes(d: ProxyHandlerDeps): (req: Request, url: URL) 
       // This catch also surrounds awaited ledger calls. If one failed, preserve that settlement's immutable
       // payload and surface the failure; never route it through an upstream-error refund using a new payload.
       if (err instanceof LedgerSettlementError) throw err;
+      // Snapshot the transport cause before awaiting settlement: a slow ledger must not let the independent
+      // wall-clock signal expire later and relabel an earlier connection/read failure as a timeout.
+      const timedOut = isTimeoutError(err) || isTimeoutError(upstreamSignal?.reason);
       if (bufferedReadFailedAfterOk) {
         const inputFloor = acceptedInputFloor();
         metrics.recordFailure("bufferedInputFloor", await billActual(inputFloor));
       } else {
         await billActual(0); // no accepted buffered work to substantiate — refund in full
       }
-      const timedOut = err instanceof Error && err.name === "TimeoutError";
       metrics.recordUpstream(timedOut ? "timeout" : "unreachable"); // transport-failure trend (distinct from a returned non-2xx)
       // Client-visible and either refunded or input-floor billed → WARN, not ERROR.
       log.warn(

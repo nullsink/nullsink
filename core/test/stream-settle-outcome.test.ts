@@ -108,7 +108,7 @@ test("mid-stream upstream error → WARN (aborted), NO refunded-in-full page", a
   expect(metrics.snapshot().bill.refundedInFull).toBe(0); // aborted, not a leak
   expect([metrics.snapshot().streamAborted, metrics.snapshot().served]).toEqual([1, 0]); // stream:aborted, NOT served
   const line = warnText(errSpy);
-  expect(line).toContain("stream aborted mid-flight"); // WARN emitted
+  expect(line).toContain("stream transport interrupted"); // stable cause, never the raw transport exception
   expect(line).not.toContain("without parseable usage"); // NOT the page
   errSpy.mockRestore();
 });
@@ -144,7 +144,7 @@ test("in-band upstream error after message_start → bills reported partial, not
       0,
       1,
     ]);
-    expect(warnText(errSpy)).toContain("billed metered partial");
+    expect(warnText(errSpy)).toContain("stream ended with upstream error (provider=anthropic path=/v1/messages) — billed reported partial");
   } finally {
     errSpy.mockRestore();
   }
@@ -176,7 +176,7 @@ test("transport error after message_start → bills reported partial, not a clea
       0,
       1,
     ]);
-    expect(warnText(errSpy)).toContain("billed metered partial");
+    expect(warnText(errSpy)).toContain("stream transport interrupted (provider=anthropic path=/v1/messages) — billed reported partial");
   } finally {
     errSpy.mockRestore();
   }
@@ -210,7 +210,7 @@ test("client cancel after a post-message_start error → upstream failure bills 
       outcome.served,
       outcome.servedPartial,
     ]).toEqual([before - partial, 0, 0, 1]);
-    expect(warnText(errSpy)).toContain("billed metered partial");
+    expect(warnText(errSpy)).toContain("stream ended with upstream error (provider=anthropic path=/v1/messages) — billed reported partial");
   } finally {
     errSpy.mockRestore();
   }
