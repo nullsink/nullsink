@@ -27,7 +27,6 @@ redeploys, pinned dependency upgrades, backups, alerts, troubleshooting). This f
 | `upgrade-component.sh` | Narrow day-two app-box upgrade for `monero-wallet` or `tinfoil`. Downloads and verifies before downtime, restarts only the target, health-gates activation, and automatically restores retained previous binaries on failure. |
 | `lib.sh` | Shared library `source`d by bootstrap, app deploy, and component upgrade paths, so pins and asset verification cannot drift. |
 | `migrate-service-isolation.sh` | One-time, quiet-window migration from the legacy shared uid/env/state. `--prepare` is reversible; `--finalize` root-locks the retained rollback copy after recovery proof. |
-| `migrate-ledger-service.sh` | One-time, fail-closed extraction of the proxy-owned balance ledger. `--prepare` stops admission and snapshots exact state; any pre-activation deploy failure restores the old topology; activation requires both sockets and all three units; `--finalize` removes the frozen old copy after recovery proof. |
 | `install-nsk.sh` | Installs the optional read-only live balances/financials CLI. |
 | `node-box/` | Source for the separately packaged dedicated Bitcoin node day-two bundle. It is excluded from app release archives. Fresh provisioning moves to Ansible (issue #162). |
 
@@ -106,14 +105,9 @@ After the isolated services pass health and access checks, create a new encrypte
 offline dry-run restore. Only then run `migrate-service-isolation.sh --finalize`; this retains the legacy
 copy but makes it root-only. Finalization is never automatic.
 
-The ledger extraction uses the same verified-bundle rule. Run `migrate-ledger-service.sh --prepare` from the
-new release bundle. It stops Caddy first, drains/stops proxy and payments, snapshots `balances.db` with an
-integrity and logical-fingerprint check, and leaves admission closed. Any failure before traffic activation
-automatically restores the old topology. Then run that bundle's `deploy.sh <tag>`: systemd starts ledger first,
-the proxy completes a replay-safe `startSession` barrier before binding HTTP, and Caddy returns only after both
-sockets plus both HTTP health probes pass. Before traffic activation, a failed health gate restores the old
-two-service topology. After a new encrypted backup passes an offline restore drill, `--finalize` removes the
-frozen proxy-owned DB and rollback bundle.
+Ledger extraction completed in v1.14.0. Newer deploy bundles support only the finalized three-service topology
+and refuse before downloading anything when its marker, binaries, or databases are incomplete. An older box
+must use the verified v1.14.0 bundle to finish that one-time transition first.
 
 ## Backup and reporting boundary
 

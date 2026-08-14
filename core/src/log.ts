@@ -11,7 +11,7 @@
 //      warn/error → stderr, info → stdout.
 //
 // Categories are a small, stable, greppable set: [boot] [http] [buy] [bill] [upstream] [poll] [wallet]
-// [credit] [shutdown] [metrics]. Watch
+// [credit] [ledger] [shutdown] [metrics]. Watch
 // `[bill] … refunded in full` — the ONLY signal we served real usage and billed nothing for it (no
 // per-request record to reconcile against), so it's logged at ERROR with an unmistakable shape. Alert on
 // that line specifically.

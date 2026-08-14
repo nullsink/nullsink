@@ -45,8 +45,7 @@ sync_caddy() {  # validate a staged edge config before atomically replacing the 
     rm -f -- "$candidate"
     return 1
   fi
-  # The one-time ledger cutover deliberately keeps Caddy stopped until all three new units pass health.
-  # Install its validated config now, but only reload an already-active edge.
+  # Install the validated config now, then reload an already-active edge.
   if systemctl is-active --quiet caddy 2>/dev/null; then systemctl reload caddy; fi
 }
 # Everything the box derives from the repo except timers. The timers stay suspended until the refreshed
@@ -54,46 +53,10 @@ sync_caddy() {  # validate a staged edge config before atomically replacing the 
 apply_repo_config() { install_units; enable_app_units; sync_caddy; }
 record() { printf '%s  %s%s\n' "$1" "$(date -u +%FT%TZ)" "${2:-}" > "$APP_DIR/REVISION"; }
 
-CUTOVER_ROLLBACK_ARMED=0
-CUTOVER_PREV_WEB=""
-CUTOVER_PREV_NSK=""
-CUTOVER_MIGRATION=""
-
-rollback_initial_cutover() {
-  [ "$CUTOVER_ROLLBACK_ARMED" -eq 1 ] || return 0
-  [ -z "$CUTOVER_PREV_WEB" ] \
-    || ln -sfn "$CUTOVER_PREV_WEB" "$WEB_BASE/current-web" \
-    || return 1
-  [ -z "$CUTOVER_PREV_NSK" ] \
-    || ln -sfn "$CUTOVER_PREV_NSK" /usr/local/lib/nullsink/current-nsk \
-    || return 1
-  if [ -x "$CUTOVER_MIGRATION" ] && "$CUTOVER_MIGRATION" --rollback; then
-    CUTOVER_ROLLBACK_ARMED=0
-    if health_ok_legacy_app; then
-      record "$REF" "  (ROLLED BACK before ledger activation)"
-      echo "!! pre-traffic cutover rolled back; old two-service topology is healthy" >&2
-      return 0
-    fi
-    record "$REF" "  (PRE-TRAFFIC ROLLBACK UNHEALTHY)"
-    echo "!! old topology rollback is unhealthy — inspect $PROXY_UNIT + $PAYMENTS_UNIT" >&2
-    return 1
-  fi
-  echo "!! automatic pre-traffic rollback failed — run $CUTOVER_MIGRATION --rollback" >&2
-  return 1
-}
-
 # shellcheck disable=SC2329 # invoked indirectly by `trap ... EXIT` during a suspended deploy
 restore_deploy_on_exit() {
   local status=$?
   trap - EXIT
-  if [ "$status" -ne 0 ] && [ "$CUTOVER_ROLLBACK_ARMED" -eq 1 ]; then
-    if [ -f /etc/nullsink-ledger-extraction.activated ]; then
-      record "$REF" "  (LEDGER ACTIVATED; DEPLOY INCOMPLETE — inspect Caddy and logs)"
-      echo "!! ledger activation crossed the public-admission boundary; refusing an unsafe automatic rollback" >&2
-    else
-      rollback_initial_cutover || true
-    fi
-  fi
   restore_control_timers || true
   exit "$status"
 }
@@ -113,7 +76,7 @@ warn_changed_daemons() {
 }
 
 deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, health-gated
-  local prev_ledger prev_proxy prev_pay prev_nsk new_ledger new_proxy new_pay prev_web new_web initial_cutover=0
+  local prev_ledger prev_proxy prev_pay prev_nsk new_ledger new_proxy new_pay prev_web new_web
   prev_ledger="$(readlink /usr/local/lib/nullsink/current-ledger 2>/dev/null || true)"
   prev_proxy="$(readlink /usr/local/lib/nullsink/current-proxy 2>/dev/null || true)"       # for rollback
   prev_pay="$(readlink /usr/local/lib/nullsink/current-payments 2>/dev/null || true)"
@@ -126,20 +89,18 @@ deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, h
     echo "!! Then rerun this exact deploy command. The old services remain live on the legacy layout." >&2
     exit 1
   fi
-  if [ ! -f /etc/nullsink-ledger-extraction.prepared ]; then
-    echo "!! ledger extraction is not prepared; no release artifact, unit, or service was changed" >&2
-    echo "!! Verify this release's deploy bundle, run migrate-ledger-service.sh --prepare from it," >&2
-    echo "!! then run that same verified bundle's deploy.sh $REF (not the older live deploy script)." >&2
+  # This deploy tree is the post-migration release floor. Refuse before downloading anything unless the
+  # one-time ledger extraction was finalized and the complete steady-state topology is present.
+  if [ ! -f /etc/nullsink-ledger-extraction.finalized ] \
+    || [ -z "$prev_ledger" ] || [ -z "$prev_proxy" ] || [ -z "$prev_pay" ] \
+    || [ ! -x /usr/local/lib/nullsink/current-ledger ] \
+    || [ ! -x /usr/local/lib/nullsink/current-proxy ] \
+    || [ ! -x /usr/local/lib/nullsink/current-payments ] \
+    || [ ! -f /var/lib/nullsink-ledger/balances.db ] \
+    || [ ! -f /var/lib/nullsink-payments/pending.db ]; then
+    echo "!! the finalized three-service topology is incomplete; no release artifact, unit, or service was changed" >&2
+    echo "!! complete and finalize the v1.14.0 ledger extraction before installing a newer release" >&2
     exit 1
-  fi
-  [ -f /etc/nullsink-ledger-extraction.activated ] || initial_cutover=1
-  if [ "$initial_cutover" -eq 1 ]; then
-    CUTOVER_ROLLBACK_ARMED=1
-    CUTOVER_PREV_WEB="$prev_web"
-    CUTOVER_PREV_NSK="$prev_nsk"
-    CUTOVER_MIGRATION="$(dirname "$0")/migrate-ledger-service.sh"
-    [ -x "$CUTOVER_MIGRATION" ] || { echo "!! verified ledger migration script is missing" >&2; exit 1; }
-    "$CUTOVER_MIGRATION" --validate
   fi
   trap restore_deploy_on_exit EXIT
   suspend_control_timers                  # drain root one-shots before any release activation begins
@@ -160,18 +121,9 @@ deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, h
   warn_changed_daemons                   # flag (don't bounce) an enabled rail daemon whose unit changed — before the overwrite below
   apply_repo_config                      # refresh units + edge from the now-current deploy/; timers remain stopped
   restart_isolation_sidecars             # one-time uid transition only; finalized boxes retain the no-bounce policy
-  if [ "$initial_cutover" -eq 1 ]; then
-    # Close the download/configuration window: the prepared DB and stopped financial state must still match the
-    # manifest at the last possible point before any new service can open the ledger or mutate pending.db.
-    "$CUTOVER_MIGRATION" --validate
-  fi
   restart_app                            # one ordered ledger/proxy/payments transaction
 
   if health_ok_app; then
-    if [ "$initial_cutover" -eq 1 ]; then
-      "$APP_DIR/deploy/migrate-ledger-service.sh" --activate
-      CUTOVER_ROLLBACK_ARMED=0
-    fi
     enable_timers                        # only the healthy, fully aligned release may resume the root one-shots
     trap - EXIT
     record "$REF" "  (ledger $new_ledger, proxy $new_proxy, payments $new_pay, UI $new_web)"
@@ -179,12 +131,9 @@ deploy_binary() {  # binary mode: fetch+verify+swap all service binaries + UI, h
     exit 0
   fi
 
-  # Roll every service and the UI together. During the first cutover Caddy is still stopped, so failure can
-  # restore the frozen two-service topology before any public request reaches the new ledger.
+  # Roll every service and the UI together.
   echo "!! ledger readiness and/or app /healthz failed within ${HEALTH_TIMEOUT}s — rolling back" >&2
-  if [ "$initial_cutover" -eq 1 ] && [ -n "$prev_proxy" ] && [ -n "$prev_pay" ]; then
-    rollback_initial_cutover || true
-  elif [ -n "$prev_ledger" ] && [ -n "$prev_proxy" ] && [ -n "$prev_pay" ]; then
+  if [ -n "$prev_ledger" ] && [ -n "$prev_proxy" ] && [ -n "$prev_pay" ]; then
     ln -sfn "$prev_ledger" /usr/local/lib/nullsink/current-ledger
     ln -sfn "$prev_proxy" /usr/local/lib/nullsink/current-proxy
     ln -sfn "$prev_pay" /usr/local/lib/nullsink/current-payments

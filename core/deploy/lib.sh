@@ -229,13 +229,8 @@ install_nsk() {  # $1=tag — install the optional read-only operator CLI
 wrapper="$tmp/nsk"
   cat > "$wrapper" <<'EOF'
 #!/bin/sh
-if [ -f /etc/nullsink-ledger-extraction.activated ]; then
-  balances=/var/lib/nullsink-ledger/balances.db
-else
-  balances=/var/lib/nullsink-proxy/balances.db
-fi
 exec env \
-  BALANCES_DB_PATH="$balances" \
+  BALANCES_DB_PATH=/var/lib/nullsink-ledger/balances.db \
   PENDING_DB_PATH=/var/lib/nullsink-payments/pending.db \
   /usr/local/lib/nullsink/current-nsk "$@"
 EOF
@@ -321,6 +316,26 @@ proxy_port()    { local p; p="$(env_val_from "$PROXY_ENV_FILE" PORT)"; echo "${p
 payments_port() { local p; p="$(env_val_from "$PAYMENTS_ENV_FILE" PAYMENTS_PORT)"; echo "${p:-8081}"; }
 
 prepare_service_isolation() { "$APP_DIR/deploy/migrate-service-isolation.sh" --prepare; }
+prepare_ledger_topology() {
+  local group user
+  for group in nullsink-ledger-read nullsink-ledger-proxy; do
+    getent group "$group" >/dev/null 2>&1 || groupadd --system "$group"
+  done
+  if ! id nullsink-ledger >/dev/null 2>&1; then
+    useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin \
+      --gid nullsink-ledger-read nullsink-ledger
+  fi
+  usermod -g nullsink-ledger-read nullsink-ledger
+  usermod -a -G nullsink-ledger-proxy nullsink-proxy
+  for user in nullsink nullsink-backup; do
+    usermod -a -G nullsink-ledger-read "$user"
+  done
+  install -d -o nullsink-ledger -g nullsink-ledger-read -m 0750 /var/lib/nullsink-ledger
+  if [ ! -f /etc/nullsink-ledger-extraction.finalized ]; then
+    install -o root -g root -m 0600 /dev/null /etc/nullsink-ledger-extraction.finalized
+    printf '%s\n' 'finalized=1' > /etc/nullsink-ledger-extraction.finalized
+  fi
+}
 activate_isolation_sidecars() {
   [ -f /etc/nullsink-service-isolation.finalized ] && return 0
   if [ -d /var/lib/nullsink-wallet ]; then
@@ -358,8 +373,6 @@ health_ok() {  # $1=port — poll /healthz until it answers 200, up to HEALTH_TI
   done
   return 1
 }
-
-health_ok_legacy_app() { health_ok "$(proxy_port)" && health_ok "$(payments_port)"; }
 
 health_ok_app() {  # Ledger readiness plus both public-facing service health endpoints.
   systemctl is-active --quiet "$LEDGER_UNIT" \

@@ -34,7 +34,7 @@ afterEach(removeDb);
 function runNsk(args: string[], extraEnv: Record<string, string> = {}) {
   return Bun.spawnSync({
     cmd: [process.execPath, CLI, ...args],
-    env: { ...process.env, DB_PATH: DB, ...extraEnv },
+    env: { ...process.env, BALANCES_DB_PATH: DB, ...extraEnv },
     stdout: "pipe",
     stderr: "pipe",
   });

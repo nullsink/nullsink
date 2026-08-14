@@ -24,7 +24,8 @@ test("the live database exception is limited to the two read-only views", () => 
   const report = readFileSync(`${CORE}/cli/report-financials.ts`, "utf8");
 
   expect(liveDb).toContain('new Database(path, { readonly: true, strict: true })');
-  expect(liveDb).toContain("process.env.BALANCES_DB_PATH ?? process.env.DB_PATH");
+  expect(liveDb).toContain('process.env.BALANCES_DB_PATH ?? "/var/lib/nullsink-ledger/balances.db"');
+  expect(liveDb).not.toContain("process.env.DB_PATH");
   expect(liveDb).not.toMatch(/\b(?:INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|REPLACE)\b/i);
   expect(report).not.toMatch(/ledger\/(?:db|orders|sqlite)|bun:sqlite|process\.env\.(?:BALANCES_DB_PATH|DB_PATH|PENDING_DB_PATH)/);
 });

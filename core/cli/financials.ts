@@ -1,5 +1,4 @@
-// Read-only live financial view: payment-side sales plus ledger-side outstanding liability. This is a
-// deliberate transitional cross-domain reader; a focused follow-up replaces it with service-owned reads.
+// Deliberate read-only operator view across pending.db + balances.db. No service principal receives both.
 import { formatCoin, formatUsd, summarizeRevenue } from "../src/ledger/financials";
 import { optVal, parseFormat } from "./format";
 import { readFinancials } from "./live-db";

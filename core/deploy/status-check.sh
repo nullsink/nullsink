@@ -12,8 +12,9 @@
 #   2. Host: disk/inode headroom for the billing DBs, that the SQLite WAL sidecars are still owned by the
 #      service user (a root CLI/backup write leaves root-owned sidecars that silently break billing writes),
 #      a per-DB integrity pragma (catches silent corruption that breaks billing), and backup freshness.
-#   3. Recent app journals, one per network-facing trust domain. Proxy: upstream BILLING errors (our prepaid account ran dry ->
-#      everyone 503s) and billing anomalies. Payments: rate-source failures (/buy down), a blind settlement
+#   3. Recent app journals, one per trust domain. Ledger: unexpected request-handler failures. Proxy: upstream
+#      BILLING errors (our prepaid account ran dry -> everyone 503s) and billing anomalies. Payments:
+#      rate-source failures (/buy down), a blind settlement
 #      poller, and a STALLED CREDIT OUTBOX — paid credits that are not reaching the balance ledger, the one
 #      failure the readiness/socket checks structurally cannot see. Greps the operator's own journal; emits only a
 #      flag, never content.
@@ -209,7 +210,15 @@ else
   echo "skip backup freshness ($BACKUP_DIR absent — backups not configured here)"
 fi
 
-# --- 3a. recent PROXY journal: our-account-dry + billing anomalies (symptom greps; emit only a flag) ---
+# --- 3a. recent LEDGER journal: a handler exception is replay-safe, but still a correctness anomaly. ---
+if systemctl is-active --quiet "$LEDGER_UNIT" 2>/dev/null; then
+  jlog="$(journalctl -u "$LEDGER_UNIT" --since "$LOG_WINDOW" --no-pager 2>/dev/null)"
+  if grep -q '\[ledger\] request handler failed' <<<"$jlog"; then
+    warn "ledger request handler failed in the last ${LOG_WINDOW% ago} — inspect $LEDGER_UNIT; callers retry ambiguous mutations"
+  else ok "ledger handlers healthy (${LOG_WINDOW% ago})"; fi
+fi
+
+# --- 3b. recent PROXY journal: our-account-dry + billing anomalies (symptom greps; emit only a flag) ---
 if systemctl is-active --quiet "$PROXY_UNIT" 2>/dev/null; then
   jlog="$(journalctl -u "$PROXY_UNIT" --since "$LOG_WINDOW" --no-pager 2>/dev/null)"
   if grep -qiE 'credit balance is too low|insufficient_quota|purchase credits' <<<"$jlog"; then
@@ -225,7 +234,7 @@ if systemctl is-active --quiet "$PROXY_UNIT" 2>/dev/null; then
   else ok "no billing anomalies (${LOG_WINDOW% ago})"; fi
 fi
 
-# --- 3b. recent PAYMENTS journal: /buy down, deposit detection down, and credits not crossing to the ledger.
+# --- 3c. recent PAYMENTS journal: /buy down, deposit detection down, and credits not crossing to the ledger.
 #     These live in the payments unit's journal — grepping the proxy's would silently always pass. ---
 if systemctl is-active --quiet "$PAYMENTS_UNIT" 2>/dev/null; then
   jlog="$(journalctl -u "$PAYMENTS_UNIT" --since "$LOG_WINDOW" --no-pager 2>/dev/null)"
