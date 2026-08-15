@@ -4,7 +4,7 @@
 // 502ing or paid credits stuck in pending.db. Keep this deliberately static: it checks the committed
 // production contract without needing Caddy or systemd installed in the test runner.
 import { test, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const deploy = (name: string) => fileURLToPath(new URL(`../deploy/${name}`, import.meta.url));
@@ -24,7 +24,6 @@ const setup = readFileSync(deploy("setup.sh"), "utf8");
 const deployScript = readFileSync(deploy("deploy.sh"), "utf8");
 const deployLib = readFileSync(deploy("lib.sh"), "utf8");
 const migration = readFileSync(deploy("migrate-service-isolation.sh"), "utf8");
-const ledgerMigration = readFileSync(deploy("migrate-ledger-service.sh"), "utf8");
 const labelExport = readFileSync(deploy("backup-bitcoin-labels.sh"), "utf8");
 const alert = readFileSync(deploy("alert.sh"), "utf8");
 const backup = readFileSync(deploy("backup.sh"), "utf8");
@@ -77,6 +76,7 @@ test("the proxy proves a fresh ledger session before opening its HTTP listener",
   expect(proxy).not.toContain("serveCreditSocket");
   expect(ledger).toContain("serveLedgerSocket({ path: LEDGER_SOCK, balances })");
   expect(ledger).toContain("serveCreditSocket({ path: CREDIT_SOCK, balances })");
+  expect(statusCheck).toContain("\\[ledger\\] request handler failed");
 });
 
 test("the ledger publishes two ACL-separated capabilities and callers receive only their socket", () => {
@@ -147,16 +147,16 @@ test("the deployed principal, environment, state, and read-group matrix is least
   expect(migration).toContain('chown "root:$ROOT_GROUP" "$role_env"');
   expect(migration).toContain('chmod 0600 "$role_env"');
   expect(migration).not.toContain("nullsink-wallet");
-  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_PROXY_GROUP" "$PROXY_USER"');
-  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_READ_GROUP" "$OPERATOR_USER"');
-  expect(ledgerMigration).toContain('usermod -a -G "$LEDGER_READ_GROUP" "$BACKUP_USER"');
-  expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_READ_GROUP" "\$(?:PROXY|PAYMENTS)_USER"/);
-  expect(ledgerMigration).not.toMatch(/usermod -a -G "\$LEDGER_PROXY_GROUP" "\$(?:PAYMENTS|BACKUP)_USER"/);
+  expect(deployLib).toContain("prepare_ledger_topology()");
+  expect(deployLib).toContain("usermod -a -G nullsink-ledger-proxy nullsink-proxy");
+  expect(deployLib).toContain('usermod -a -G nullsink-ledger-read "$user"');
+  expect(deployLib).toContain("/etc/nullsink-ledger-extraction.finalized");
+  expect(deployLib).not.toMatch(/usermod -a -G nullsink-ledger-read nullsink-(?:proxy|payments)/);
+  expect(deployLib).not.toMatch(/usermod -a -G nullsink-ledger-proxy nullsink-(?:payments|backup)/);
   expect(deployLib).toContain("activate_isolation_sidecars");
   expect(deployLib).toContain('caddy.service.d/nullsink-drain.conf');
-  expect(deployLib).toContain("/etc/nullsink-ledger-extraction.activated");
-  expect(deployLib).toContain("balances=/var/lib/nullsink-proxy/balances.db");
-  expect(deployLib).toContain("balances=/var/lib/nullsink-ledger/balances.db");
+  expect(deployLib).toContain("BALANCES_DB_PATH=/var/lib/nullsink-ledger/balances.db");
+  expect(deployLib).not.toContain("balances=/var/lib/nullsink-proxy/balances.db");
   expect(deployLib).toContain("chown root:root /etc/monero-wallet-rpc.env");
   const restartSidecars = deployLib.slice(
     deployLib.indexOf("restart_isolation_sidecars()"),
@@ -258,18 +258,18 @@ test("control-plane storage paths are isolated while retaining an explicit legac
   }
 });
 
-test("the first isolated deploy refuses before any release mutation until explicit preparation", () => {
+test("redeploy requires the finalized three-service release floor before any mutation", () => {
   const binary = deployScript.indexOf('install_binary "$REF"');
   const suspend = deployScript.indexOf("suspend_control_timers");
   const tree = deployScript.indexOf('install_deploy_tree "$REF" "$APP_DIR"');
   const marker = deployScript.indexOf("if [ ! -f /etc/nullsink-service-isolation.prepared ]");
-  const ledgerMarker = deployScript.indexOf("if [ ! -f /etc/nullsink-ledger-extraction.prepared ]");
+  const finalizedLedger = deployScript.indexOf("if [ ! -f /etc/nullsink-ledger-extraction.finalized ]");
   const apply = deployScript.indexOf("apply_repo_config                      #");
   const restart = deployScript.indexOf("restart_app", apply);
   const timers = deployScript.indexOf("enable_timers", restart);
   expect(marker).toBeGreaterThan(-1);
-  expect(ledgerMarker).toBeGreaterThan(marker);
-  expect(suspend).toBeGreaterThan(ledgerMarker);
+  expect(finalizedLedger).toBeGreaterThan(marker);
+  expect(suspend).toBeGreaterThan(finalizedLedger);
   expect(suspend).toBeGreaterThan(marker);
   expect(binary).toBeGreaterThan(suspend);
   expect(tree).toBeGreaterThan(-1);
@@ -281,20 +281,19 @@ test("the first isolated deploy refuses before any release mutation until explic
     "no release artifact, unit, or service was changed",
   );
   expect(deployScript.slice(marker, suspend)).not.toContain("prepare_service_isolation");
-  expect(deployScript.indexOf("CUTOVER_ROLLBACK_ARMED=1")).toBeLessThan(binary);
   expect(deployScript.indexOf("trap restore_deploy_on_exit EXIT")).toBeLessThan(binary);
-  const validations = [...deployScript.matchAll(/"\$CUTOVER_MIGRATION" --validate/g)].map(
-    (match) => match.index,
+  expect(deployScript).not.toContain("migrate-ledger-service");
+  expect(deployScript).not.toContain("CUTOVER_MIGRATION");
+  expect(deployScript).not.toContain("rollback_initial_cutover");
+  expect(existsSync(deploy("migrate-ledger-service.sh"))).toBe(false);
+  expect(deployScript.slice(finalizedLedger, suspend)).toContain(
+    "[ ! -x /usr/local/lib/nullsink/current-ledger ]",
   );
-  expect(validations).toHaveLength(2);
-  expect(validations[0]).toBeLessThan(binary);
-  expect(validations[1]).toBeGreaterThan(apply);
-  expect(validations[1]).toBeLessThan(restart);
-  expect(deployScript).toContain("rollback_initial_cutover");
-  expect(deployScript).toContain("refusing an unsafe automatic rollback");
   expect(deployScript.slice(apply, restart)).not.toContain("enable_timers");
   expect(setup).toContain("Existing billing state requires an explicit, quiet-window migration");
-  expect(setup).toContain("Existing balances require an explicit, quiet-window ledger extraction");
+  expect(setup).toContain("v1.14.0 is the permanent migration bridge");
+  expect(setup).toContain("prepare_ledger_topology");
+  expect(setup).not.toContain("migrate-ledger-service");
   expect(readFileSync(deploy("README.md"), "utf8")).toContain(
     "not** the old `/opt/nullsink/deploy/deploy.sh`",
   );

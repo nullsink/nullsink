@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,13 +68,21 @@ test("a lost startSession response retries the same session and preserves recove
     } },
   });
 
-  expect(await client(f.socket).startSession()).toEqual({
-    outcome: "current",
-    recoveredHolds: 1,
-    recoveredMicros: 400,
-  });
-  expect(failed).toBe(true);
-  expect(f.ledger.getBalance(HASH)).toBe(1_000);
+  const errorLog = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    expect(await client(f.socket).startSession()).toEqual({
+      outcome: "current",
+      recoveredHolds: 1,
+      recoveredMicros: 400,
+    });
+    expect(failed).toBe(true);
+    expect(f.ledger.getBalance(HASH)).toBe(1_000);
+    expect(errorLog.mock.calls.some(([line]) =>
+      String(line).includes("[ledger] request handler failed")
+    )).toBe(true);
+  } finally {
+    errorLog.mockRestore();
+  }
 });
 
 test("a lost open response retries the identical mutation and debits once", async () => {

@@ -1,6 +1,7 @@
 // Ledger-side proxy socket. The server owns all session and hold semantics; the proxy can request only a
 // balance read, conditional hold, or bounded settlement. No generic RPC surface and no arbitrary SQL escape.
 import { existsSync, statSync, unlinkSync } from "node:fs";
+import * as log from "../log";
 import type { BalanceStore } from "./db";
 import {
   LEDGER_BALANCE_PATH,
@@ -120,7 +121,10 @@ export function serveLedgerSocket(opts: {
       unix: opts.path,
       maxRequestBodySize: LEDGER_MAX_BODY_BYTES,
       fetch: createLedgerHandler(opts.balances, opts.now, opts.hooks),
-      error: () => jsonError("ledger_error", 500),
+      error: () => {
+        log.error("ledger", "request handler failed");
+        return jsonError("ledger_error", 500);
+      },
     });
     return { stop: () => void server.stop(true) };
   } finally {
