@@ -34,6 +34,9 @@ a systemd daemon on `127.0.0.1:3301`, alongside the rail daemons. The app points
 3. It **fails closed**: if attestation fails it exits before binding `:3301`, so the app's
    Tinfoil requests get connection-refused rather than an unverified forward. OpenAI and
    Anthropic are unaffected — only the Tinfoil path depends on the proxy.
+4. The loopback-only `/verification-document` endpoint exposes the active verification result,
+   including the accepted release digest and measurements, verifier identity, proxy version, and
+   verification time. It changes when the active upstream is re-verified and is never routed by Caddy.
 
 The core binary stays zero-dep: the proxy is an ops component like the wallet daemons, not an
 in-process library in the security-critical hot path. The Tinfoil API key stays app-side in
@@ -49,7 +52,8 @@ present, defaulting `TINFOIL_BASE_URL` to it; `tinfoil-proxy.service` is the har
 no `IPAddress*` filter (it needs clearnet egress to the enclave + GitHub + Sigstore, like
 `nullsink-proxy.service`), and `deploy.sh` is unchanged — it refreshes the unit on redeploy but never
 restarts the sidecar. Fresh boxes install it through `setup.sh`; existing boxes activate a refreshed pin
-explicitly with `upgrade-component.sh tinfoil`.
+explicitly with `upgrade-component.sh tinfoil`. The live-box rollout and verification commands are in
+[`core/deploy/README.md`](../core/deploy/README.md#rolling-a-refreshed-tinfoil-proxy-pin-to-live-boxes).
 
 ## Residual gaps
 

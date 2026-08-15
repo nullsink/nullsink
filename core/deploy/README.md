@@ -75,6 +75,34 @@ under `/usr/local/lib/nullsink/component-rollbacks/`, restarts only its target s
 automatically if the target does not recover. Concurrent upgrade attempts are rejected. App bootstrap remains
 in `setup.sh` until the Ansible replacement is proven; the node bundle deliberately has no bootstrap script.
 
+### Rolling a refreshed Tinfoil proxy pin to live boxes
+
+A merged pin changes release contents; it does not mutate a running box. First deploy a nullsink release that
+contains the refreshed pin. That updates the versioned deploy tree while deliberately leaving the live sidecar
+alone:
+
+```sh
+sudo /opt/nullsink/deploy/deploy.sh <nullsink-release-tag>
+```
+
+Then roll Tinfoil-enabled app boxes one at a time. Do not run this on the dedicated node box or backup collector:
+
+```sh
+sudo /opt/nullsink/deploy/upgrade-component.sh tinfoil
+
+# Verify the active binary against the pin carried by the deployed release.
+sudo bash -c '. /opt/nullsink/deploy/lib.sh; printf "%s  %s\n" "$TINFOIL_PROXY_SHA256_X64" /usr/local/bin/tinfoil-proxy | sha256sum -c -'
+
+# Confirm the service is active and inspect the attestation document emitted by the active proxy.
+sudo systemctl is-active tinfoil-proxy.service
+curl -fsS http://127.0.0.1:3301/verification-document
+```
+
+Confirm `runtime.software.version` in the JSON matches the deployed pin before proceeding to the next box. The
+upgrade command stages and verifies the download before downtime, retains the prior binary, and automatically
+restores it if the service or its health probe fails. If a box rolls back, stop the fleet rollout and inspect
+`journalctl -u tinfoil-proxy.service` there before retrying.
+
 **The app-box layout is deliberately flat.** `install_units` uses an explicit app-unit allowlist. Keep app
 units/scripts directly under `deploy/`; other host roles belong in isolated bundles. `node-box/` is packaged
 as `nullsink-node-box-<tag>.tar.gz` and excluded from `deploy-<tag>.tar.gz`, so an app release physically
