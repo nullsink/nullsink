@@ -182,6 +182,64 @@ test("transport error after message_start → bills reported partial, not a clea
   }
 });
 
+test("EOF without message_stop after reported usage → billed partial, never a clean serve", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const events = [
+      { type: "message_start", message: { model: "claude-opus-4-8", usage: { input_tokens: 5, output_tokens: 0 } } },
+      { type: "message_delta", usage: { output_tokens: 3 } },
+      // no message_stop: transport EOF must not promote the partial response to a clean serve
+    ];
+    const { handler, balances } = makeHandler(streamOf(events));
+    const hash = hashToken("pr_incomplete_after_start");
+    balances.credit(hash, 10_000_000_000);
+    const before = balances.getBalance(hash)!;
+
+    const res = await handler(streamReq("pr_incomplete_after_start"));
+    await res.text();
+
+    const outcome = metrics.snapshot();
+    const partial = priceUsage("claude-opus-4-8", { input_tokens: 5, output_tokens: 3 });
+    expect(balances.getBalance(hash)).toBe(before - partial);
+    expect([outcome.served, outcome.servedPartial, outcome.streamAborted, outcome.bill.refundedInFull])
+      .toEqual([0, 1, 0, 0]);
+    expect(outcome.failure.streamIncomplete).toBe(1);
+    expect(outcome.failure.streamReported).toEqual({ count: 1, micros: partial });
+    expect(warnText(errSpy)).toContain(
+      "stream closed before provider completion (provider=anthropic path=/v1/messages) — billed reported partial",
+    );
+  } finally {
+    errSpy.mockRestore();
+  }
+});
+
+test("EOF without a success marker or usage evidence → refunded stream abort", async () => {
+  const errSpy = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    metrics.reset(0);
+    const { handler, balances } = makeHandler(streamOf([{ type: "ping" }]));
+    const hash = hashToken("pr_incomplete_no_evidence");
+    balances.credit(hash, 10_000_000_000);
+    const before = balances.getBalance(hash)!;
+
+    const res = await handler(streamReq("pr_incomplete_no_evidence"));
+    await res.text();
+
+    const outcome = metrics.snapshot();
+    expect(balances.getBalance(hash)).toBe(before);
+    expect([outcome.served, outcome.servedPartial, outcome.streamAborted, outcome.bill.refundedInFull])
+      .toEqual([0, 0, 1, 0]);
+    expect(outcome.failure.streamIncomplete).toBe(1);
+    expect(outcome.failure.streamRefunded).toBe(1);
+    expect(warnText(errSpy)).toContain(
+      "stream closed before provider completion (provider=anthropic path=/v1/messages) — no usage evidence, refunded",
+    );
+  } finally {
+    errSpy.mockRestore();
+  }
+});
+
 test("client cancel after a post-message_start error → upstream failure bills only reported partial", async () => {
   const errSpy = spyOn(console, "error").mockImplementation(() => {});
   try {

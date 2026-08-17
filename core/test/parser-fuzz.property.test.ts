@@ -113,6 +113,7 @@ test("streaming usage scanners never throw and never yield a non-finite / negati
         expect(() => { m = scan.result(); }).not.toThrow();
         billIsSane(m);
         expect(() => scan.errored()).not.toThrow();
+        expect(() => scan.completed()).not.toThrow();
       }
     }),
     { numRuns: 1000 },

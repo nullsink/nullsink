@@ -33,6 +33,7 @@ export function streamUsageScanner(): UsageScanner {
   // saw an `error` event → upstream failed. Any provider-reported usage already observed remains billable;
   // the handler classifies it as a partial rather than a clean serve.
   let errored = false;
+  let completed = false; // only message_stop proves protocol success; transport EOF alone is ambiguous
 
   return {
     // Feed a decoded chunk. Buffers a partial trailing line across chunk boundaries.
@@ -52,6 +53,7 @@ export function streamUsageScanner(): UsageScanner {
           continue; // ignore an unparseable frame rather than abort billing
         }
         if (evt?.type === "error") errored = true; // upstream error event (e.g. overloaded) → partial/refund at settle
+        if (evt?.type === "message_stop") completed = true;
         if (evt?.type === "message_start" && evt.message?.usage) {
           if (typeof evt.message.model === "string") model = evt.message.model;
           const u = evt.message.usage;
@@ -87,5 +89,6 @@ export function streamUsageScanner(): UsageScanner {
       return model && usage ? { model, usage, evidence: "reported" } : null;
     },
     errored: () => errored,
+    completed: () => completed,
   };
 }
